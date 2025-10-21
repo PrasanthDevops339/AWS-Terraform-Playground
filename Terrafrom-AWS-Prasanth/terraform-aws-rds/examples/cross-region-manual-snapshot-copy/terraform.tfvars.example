@@ -1,0 +1,37 @@
+# Example terraform.tfvars file for cross-region manual snapshot copy
+# Copy this file to terraform.tfvars and update with your values
+
+# Required Variables
+account_id = "123456789012"  # Your AWS Account ID
+
+# Optional Variables (uncomment and modify as needed)
+# name                        = "oracle-cross-region"
+# primary_region             = "us-east-2"
+# secondary_region           = "us-east-1"
+# engine_version             = "19.0.0.0.ru-2023-01.rur-2023-01.r1"
+# instance_class             = "db.t3.micro"
+# allocated_storage          = 20
+# max_allocated_storage      = 100
+# backup_retention_period    = 1
+# backup_window              = "03:00-04:00"
+# maintenance_window         = "sun:04:00-sun:05:00"
+# deletion_protection        = false
+# skip_final_snapshot        = true
+# hourly_snapshots_count     = 3  # Number of manual snapshots to create
+
+# Database Configuration
+# db_name  = "ORCL"
+# username = "admin"
+# password = "change-me-please-123!"  # Use AWS Secrets Manager in production
+
+# Option Group Configuration (for Oracle custom options)
+# option_group_name    = null  # Will create custom option group with STATSPACK and Timezone
+# parameter_group_name = null  # Will create custom parameter group
+
+# Tags
+# tags = {
+#   Owner       = "terraform-aws-rds"
+#   Environment = "dev"
+#   Project     = "cross-region-manual-backup-example"
+#   Team        = "platform-engineering"
+# }

@@ -1,0 +1,43 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "rds:DescribeDBInstances",
+        "rds:DescribeDBSnapshots",
+        "rds:DescribeDBParameterGroups",
+        "rds:DescribeDBOptionGroups",
+        "rds:CreateDBSnapshot",
+        "rds:CopyDBSnapshot",
+        "rds:DeleteDBSnapshot",
+        "rds:AddTagsToResource",
+        "rds:ListTagsForResource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "kms:Decrypt",
+        "kms:GenerateDataKey*",
+        "kms:CreateGrant",
+        "kms:DescribeKey",
+        "kms:ReEncrypt*"
+      ],
+      "Resource": [
+        "${PRIMARY_KMS_KEY_ARN}",
+        "${SECONDARY_KMS_KEY_ARN}"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": "arn:aws:logs:*:*:*"
+    }
+  ]
+}
