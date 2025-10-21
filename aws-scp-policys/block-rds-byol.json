@@ -1,0 +1,45 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyRDSBYOLInstances",
+      "Effect": "Deny",
+      "Action": [
+        "rds:CreateDBInstance",
+        "rds:CreateDBInstanceReadReplica",
+        "rds:RestoreDBInstanceFromDBSnapshot",
+        "rds:RestoreDBInstanceFromS3",
+        "rds:RestoreDBInstanceToPointInTime"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "rds:DatabaseEngine": [
+            "oracle-ee",
+            "oracle-se2",
+            "oracle-se1",
+            "oracle-se",
+            "sqlserver-ee",
+            "sqlserver-se",
+            "sqlserver-ex",
+            "sqlserver-web"
+          ],
+          "rds:LicenseModel": "bring-your-own-license"
+        }
+      }
+    },
+    {
+      "Sid": "DenyRDSModifyToByol",
+      "Effect": "Deny",
+      "Action": [
+        "rds:ModifyDBInstance"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "rds:LicenseModel": "bring-your-own-license"
+        }
+      }
+    }
+  ]
+}
