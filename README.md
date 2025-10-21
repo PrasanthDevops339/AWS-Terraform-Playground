@@ -37,6 +37,11 @@ AWS-Terraform-Playground/
 ├── 🔐 aws-scp-policys/                   # AWS Service Control Policies
 │   ├── 📄 README.md                      # SCP documentation
 │   └── 📝 block-rds-byol.json           # BYOL license blocking policy
+├── 🧹 aws-cleanup-scripts/               # AWS resource cleanup utilities
+│   ├── 📄 README.md                      # Cleanup scripts documentation
+│   ├── 🐍 aws_resource_cleanup.py       # ECR/AMI cleanup script
+│   ├── 📋 requirements.txt               # Python dependencies
+│   └── 📝 example_usage.sh              # Usage examples
 └── ⚙️ Terrafrom-AWS-Prasanth/            # Terraform modules
     ├── 🐳 terraform-aws-ecs-fargate/     # ECS Fargate module
     ├── ⚡ terraform-aws-lambda/          # Lambda function module
@@ -92,6 +97,23 @@ Organizational governance policies for AWS accounts.
 - 🚫 Block RDS BYOL licensing
 - 🔒 Enforce security standards
 - 💰 Cost control measures
+
+### 🧹 AWS Cleanup Scripts
+Utility scripts for managing and cleaning up AWS resources.
+
+**Key Features:**
+- 📋 List ECR images with metadata (tags, push dates, sizes)
+- 🖼️ List AMIs with detailed information (creation dates, state)
+- 🗑️ Delete old AMIs while retaining recent ones
+- ⚠️ Dry-run mode for safe testing
+- 🔒 Confirmation prompts for destructive operations
+
+**Use Case Example:**
+If you have 400 AMIs and want to keep only the 5 most recent:
+```bash
+python aws_resource_cleanup.py --aws-account-id 123456789012 --action delete-ami --keep 5
+```
+This will delete 395 old AMIs while preserving the 5 newest ones.
 
 ## 🎯 Architecture Patterns
 
@@ -163,6 +185,7 @@ terraform apply
 
 - 📋 **[INDEX.md](INDEX.md)** - Detailed navigation and component guide
 - 🔐 **[SCP Policies](aws-scp-policys/README.md)** - Service Control Policy documentation
+- 🧹 **[Cleanup Scripts](aws-cleanup-scripts/README.md)** - ECR and AMI cleanup utilities
 - 🐳 **[ECS Fargate](Terrafrom-AWS-Prasanth/terraform-aws-ecs-fargate/README.md)** - Container orchestration
 - ⚡ **[Lambda](Terrafrom-AWS-Prasanth/terraform-aws-lambda/README.md)** - Serverless functions
 - 🗄️ **[RDS](Terrafrom-AWS-Prasanth/terraform-aws-rds/)** - Database solutions
