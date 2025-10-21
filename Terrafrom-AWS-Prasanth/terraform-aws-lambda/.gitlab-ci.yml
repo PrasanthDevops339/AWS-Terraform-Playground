@@ -1,0 +1,8 @@
+stages: [validate, plan]
+terraform:validate:
+  stage: validate
+  image: hashicorp/terraform:1.9
+  script:
+    - terraform -version
+    - terraform init -backend=false
+    - terraform validate

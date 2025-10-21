@@ -1,0 +1,81 @@
+[
+  {
+    "sid": "EnableIAMUserPermissions",
+    "effect": "Allow",
+    "principals": [
+      {
+        "type": "AWS",
+        "identifiers": [
+          "arn:aws:iam::${ACCOUNT_ID}:role/${ACCOUNT_ALIAS}-platform-administrator-role"
+        ]
+      }
+    ],
+    "actions": [
+      "kms:Decrypt",
+      "kms:GenerateDataKey*",
+      "kms:CreateGrant",
+      "kms:DescribeKey",
+      "kms:ReEncrypt*",
+      "kms:RetireGrant",
+      "kms:GetKeyPolicy",
+      "kms:PutKeyPolicy"
+    ],
+    "resources": ["*"]
+  },
+  {
+    "sid": "AllowRDSService",
+    "effect": "Allow",
+    "principals": [
+      {
+        "type": "Service",
+        "identifiers": ["rds.amazonaws.com"]
+      }
+    ],
+    "actions": [
+      "kms:Decrypt",
+      "kms:GenerateDataKey*",
+      "kms:CreateGrant",
+      "kms:DescribeKey",
+      "kms:RetireGrant"
+    ],
+    "resources": ["*"],
+    "conditions": [
+      {
+        "test": "StringEquals",
+        "variable": "kms:ViaService",
+        "values": ["rds.${SECONDARY_REGION}.amazonaws.com"]
+      }
+    ]
+  },
+  {
+    "sid": "AllowCrossRegionBackup",
+    "effect": "Allow",
+    "principals": [
+      {
+        "type": "AWS",
+        "identifiers": [
+          "${LAMBDA_EXECUTION_ROLE_ARN}"
+        ]
+      }
+    ],
+    "actions": [
+      "kms:Decrypt",
+      "kms:GenerateDataKey*",
+      "kms:CreateGrant",
+      "kms:DescribeKey",
+      "kms:ReEncrypt*",
+      "kms:RetireGrant"
+    ],
+    "resources": ["*"],
+    "conditions": [
+      {
+        "test": "StringEquals",
+        "variable": "kms:ViaService",
+        "values": [
+          "rds.${PRIMARY_REGION}.amazonaws.com",
+          "rds.${SECONDARY_REGION}.amazonaws.com"
+        ]
+      }
+    ]
+  }
+]

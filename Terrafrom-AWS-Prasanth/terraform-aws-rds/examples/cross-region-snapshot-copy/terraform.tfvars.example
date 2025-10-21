@@ -1,0 +1,67 @@
+################################################################################
+# Terraform Variables Example - Cross-Region Automated Backup Replication
+################################################################################
+# Copy this file to terraform.tfvars and update with your specific values
+
+################################################################################
+# Required Variables
+################################################################################
+account_id = "123456789012"  # Your AWS Account ID
+
+################################################################################
+# Regional Configuration
+################################################################################
+# Uncomment and modify as needed
+# name                        = "oracle-cross-region"
+# environment                 = "dev"            # dev, staging, production
+# primary_region             = "us-east-2"       # Primary RDS region
+# secondary_region           = "us-east-1"       # Backup replication region
+
+################################################################################
+# RDS Instance Configuration
+################################################################################
+# engine_version             = "19.0.0.0.ru-2023-01.rur-2023-01.r1"
+# instance_class             = "db.t3.micro"      # Consider db.t3.small+ for production
+# allocated_storage          = 20                 # GB - minimum for Oracle EE
+# max_allocated_storage      = 100                # GB - autoscaling maximum
+
+################################################################################
+# Backup and Maintenance Configuration
+################################################################################
+# backup_retention_period    = 7                  # Days (1-35 for automated backups)
+# backup_window              = "03:00-04:00"      # UTC - choose low-traffic period
+# maintenance_window         = "sun:04:00-sun:05:00"  # UTC
+
+################################################################################
+# Database Configuration
+################################################################################
+# db_name  = "ORCL"
+# username = "admin"
+# password = "change-me-please-123!"  # IMPORTANT: Use AWS Secrets Manager in production
+
+################################################################################
+# Security and Protection Settings
+################################################################################
+# deletion_protection        = true               # Recommended for production
+# skip_final_snapshot        = false              # Recommended for production
+# performance_insights_enabled = true             # Enhanced monitoring
+
+################################################################################
+# Networking (Optional - uses tagged VPC/subnets by default)
+################################################################################
+# vpc_name = "your-vpc-name"        # If different from default
+# subnet_group_name = "your-subnet-group"  # If different from default
+
+################################################################################
+# Resource Tagging
+################################################################################
+# tags = {
+#   Owner           = "platform-team"
+#   Environment     = "dev"
+#   Project         = "oracle-cross-region-backup"
+#   Team            = "database-engineering"
+#   CostCenter      = "engineering"
+#   Backup          = "automated"
+#   Compliance      = "required"
+#   # Add your organization-specific tags
+# }
