@@ -9,22 +9,28 @@
         "rds:CreateDBInstanceReadReplica",
         "rds:RestoreDBInstanceFromDBSnapshot",
         "rds:RestoreDBInstanceFromS3",
-        "rds:RestoreDBInstanceToPointInTime"
+        "rds:RestoreDBInstanceToPointInTime",
+        "rds:CreateDBCluster",
+        "rds:RestoreDBClusterFromSnapshot",
+        "rds:RestoreDBClusterToPointInTime"
       ],
       "Resource": "*",
       "Condition": {
         "StringEquals": {
           "rds:DatabaseEngine": [
             "oracle-ee",
+            "oracle-ee-cdb",
             "oracle-se2",
+            "oracle-se2-cdb",
             "oracle-se1",
             "oracle-se",
             "sqlserver-ee",
             "sqlserver-se",
             "sqlserver-ex",
-            "sqlserver-web"
-          ],
-          "rds:LicenseModel": "bring-your-own-license"
+            "sqlserver-web",
+            "db2-ae",
+            "db2-se"
+          ]
         }
       }
     },
@@ -32,14 +38,29 @@
       "Sid": "DenyRDSModifyToByol",
       "Effect": "Deny",
       "Action": [
-        "rds:ModifyDBInstance"
+        "rds:ModifyDBInstance",
+        "rds:ModifyDBCluster"
       ],
       "Resource": "*",
       "Condition": {
         "StringEquals": {
-          "rds:LicenseModel": "bring-your-own-license"
+          "rds:DatabaseEngine": [
+            "oracle-ee",
+            "oracle-ee-cdb",
+            "oracle-se2",
+            "oracle-se2-cdb",
+            "oracle-se1",
+            "oracle-se",
+            "sqlserver-ee",
+            "sqlserver-se",
+            "sqlserver-ex",
+            "sqlserver-web",
+            "db2-ae",
+            "db2-se"
+          ]
         }
       }
     }
   ]
 }
+

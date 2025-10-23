@@ -1,0 +1,8 @@
+# AWS Resource Cleanup Script Requirements
+# Install with: pip install -r requirements.txt
+
+# AWS SDK for Python
+boto3>=1.26.0
+
+# AWS CLI (optional but recommended)
+# Install separately: pip install awscli
