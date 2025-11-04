@@ -1,0 +1,13 @@
+# ECR Image ARNs for Deletion
+# 
+# This file contains ECR image ARNs (one per line) to be deleted.
+# Lines starting with '#' are treated as comments and will be ignored.
+# Empty lines are also ignored.
+#
+# ARN Format:
+# arn:aws:ecr:<region>:<account-id>:repository/<repo-name>/sha256:<digest>
+#
+# Example ARNs (replace with your actual ARNs):
+# arn:aws:ecr:us-east-2:905418167957:repository/myrepo/sha256:abcd1234567890123456789012345678901234567890123456789012345678
+# arn:aws:ecr:us-west-2:905418167957:repository/app-repo/sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+# arn:aws:ecr:us-east-1:905418167957:repository/test-repo/sha256:fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321

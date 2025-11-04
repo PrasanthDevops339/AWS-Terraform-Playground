@@ -4,11 +4,27 @@ This directory contains scripts for managing and cleaning up AWS resources, spec
 
 ## 📋 Overview
 
-The `aws_resource_cleanup.py` script provides the following functionality:
+This directory provides the following scripts:
 
-1. **List ECR Images**: Get detailed information about all ECR images including repository name, tags, push dates, and sizes
-2. **List AMIs**: Get comprehensive details about all AMIs owned by your AWS account including creation dates, state, and metadata
-3. **Delete Old AMIs**: Safely delete old AMIs while retaining a specified number of the most recent ones
+### 1. `aws_resource_cleanup.py`
+Comprehensive resource management for ECR and AMI resources:
+- **List ECR Images**: Get detailed information about all ECR images including repository name, tags, push dates, and sizes
+- **List AMIs**: Get comprehensive details about all AMIs owned by your AWS account including creation dates, state, and metadata
+- **Delete Old AMIs**: Safely delete old AMIs while retaining a specified number of the most recent ones
+
+### 2. `delete_ecr_images.py` (Python)
+Delete ECR images from a list of ARNs:
+- **Delete by ARN**: Delete specific ECR images using their ARNs
+- **Multi-region support**: Automatically detects and handles images across different regions
+- **Dry-run mode**: Preview deletions before performing them
+- **Profile support**: Use AWS CLI profiles for authentication
+
+### 3. `delete_ecr_images.sh` (Shell)
+Shell script version of ECR image deletion:
+- **Bash-based**: Lightweight alternative using AWS CLI
+- **Same functionality**: Delete ECR images by ARN with dry-run support
+- **Color-coded output**: Enhanced readability with colored status messages
+- **Cross-platform**: Works on Linux, macOS, and WSL
 
 ## 🚀 Quick Start
 
@@ -121,9 +137,9 @@ python aws_resource_cleanup.py \
 
 ## 🔒 Required IAM Permissions
 
-The IAM user or role running this script needs the following permissions:
+The IAM user or role running these scripts needs the following permissions:
 
-### For ECR Operations
+### For ECR Operations (Listing - aws_resource_cleanup.py)
 ```json
 {
   "Version": "2012-10-17",
@@ -135,6 +151,42 @@ The IAM user or role running this script needs the following permissions:
         "ecr:DescribeImages"
       ],
       "Resource": "*"
+    }
+  ]
+}
+```
+
+### For ECR Image Deletion (delete_ecr_images.py/sh)
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecr:BatchDeleteImage",
+        "ecr:DescribeImages",
+        "ecr:ListImages"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+**Note**: For production use, it's recommended to restrict the `Resource` field to specific repository ARNs:
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecr:BatchDeleteImage",
+        "ecr:DescribeImages",
+        "ecr:ListImages"
+      ],
+      "Resource": "arn:aws:ecr:*:123456789012:repository/*"
     }
   ]
 }
@@ -239,14 +291,158 @@ AMIs TO KEEP (most recent):
 - **Irreversible**: Once an AMI is deregistered, it cannot be recovered
 - **Region-specific**: AMIs are region-specific. Run the script in each region where you have AMIs
 
-### About ECR Images
-- The current script **lists** ECR images only (read-only operation)
-- To delete ECR images, you can extend the script or use AWS CLI:
-  ```bash
-  aws ecr batch-delete-image \
-    --repository-name my-repo \
-    --image-ids imageTag=tag1 imageTag=tag2
-  ```
+### About ECR Images (aws_resource_cleanup.py)
+- The `aws_resource_cleanup.py` script **lists** ECR images only (read-only operation)
+- To delete ECR images by ARN, use the `delete_ecr_images.py` or `delete_ecr_images.sh` scripts (see below)
+
+---
+
+## 🗑️ Delete ECR Images by ARN
+
+The `delete_ecr_images.py` (Python) and `delete_ecr_images.sh` (Shell) scripts allow you to delete specific ECR images using their ARNs from a file.
+
+### When to Use This
+
+Use these scripts when you:
+- Have a list of specific ECR image ARNs you want to delete
+- Need to clean up ECR images across multiple regions
+- Want to delete images from different repositories in a single operation
+- Have images identified by their full ARN (e.g., from AWS Cost Explorer or compliance reports)
+
+### Setup
+
+1. **Create an input file** with ECR image ARNs (one per line):
+   ```bash
+   # Copy the example file
+   cp images.txt.example images.txt
+   
+   # Edit with your ARNs
+   nano images.txt
+   ```
+
+2. **ARN Format**:
+   ```
+   arn:aws:ecr:<region>:<account-id>:repository/<repo-name>/sha256:<digest>
+   ```
+   
+   Example:
+   ```
+   arn:aws:ecr:us-east-2:905418167957:repository/myrepo/sha256:abcd1234567890
+   ```
+
+### Usage - Python Script
+
+#### Dry Run (Recommended First)
+Preview what would be deleted without actually deleting:
+```bash
+python3 delete_ecr_images.py --file images.txt --profile myprofile --dry-run
+```
+
+#### Actual Deletion
+Perform the actual deletion:
+```bash
+python3 delete_ecr_images.py --file images.txt --profile myprofile
+```
+
+#### Using Default Profile
+```bash
+python3 delete_ecr_images.py --file images.txt --profile default
+```
+
+### Usage - Shell Script
+
+#### Dry Run (Recommended First)
+```bash
+./delete_ecr_images.sh --file images.txt --profile myprofile --dry-run
+```
+
+#### Actual Deletion
+```bash
+./delete_ecr_images.sh --file images.txt --profile myprofile
+```
+
+#### Help
+```bash
+./delete_ecr_images.sh --help
+```
+
+### Command Line Options (ECR Deletion Scripts)
+
+| Option | Required | Description |
+|--------|----------|-------------|
+| `--file` | Yes | Path to file containing ECR image ARNs (one per line) |
+| `--profile` | Yes | AWS CLI profile name to use for authentication |
+| `--dry-run` | No | Preview deletions without performing them (recommended) |
+| `--help` | No | Show help message (shell script only) |
+
+### Input File Format
+
+The input file should contain one ARN per line:
+
+```text
+# This is a comment - lines starting with # are ignored
+arn:aws:ecr:us-east-2:905418167957:repository/myrepo/sha256:abc123...
+arn:aws:ecr:us-west-2:905418167957:repository/app-repo/sha256:def456...
+
+# Empty lines are also ignored
+arn:aws:ecr:us-east-1:123456789012:repository/test-repo/sha256:789abc...
+```
+
+### Features
+
+#### Python Script (`delete_ecr_images.py`)
+- ✅ Comprehensive error handling and logging
+- ✅ Detailed progress reporting with timestamps
+- ✅ AWS credential validation before processing
+- ✅ Support for comments and empty lines in input file
+- ✅ Automatic region detection from ARNs
+- ✅ Colored output for better readability
+- ✅ Summary report with success/failure counts
+- ✅ Type hints and docstrings for maintainability
+
+#### Shell Script (`delete_ecr_images.sh`)
+- ✅ Lightweight, no Python dependencies required
+- ✅ Color-coded output for status messages
+- ✅ Built-in AWS CLI and profile validation
+- ✅ Bash completion-friendly
+- ✅ Comprehensive error handling
+- ✅ Detailed help documentation
+- ✅ Progress tracking and summary
+
+### Example Workflow
+
+1. **Identify images to delete** (e.g., from AWS Console or cost reports)
+
+2. **Create input file** with ARNs:
+   ```bash
+   cat > images.txt << 'EOF'
+   arn:aws:ecr:us-east-2:123456789012:repository/old-app/sha256:abc123...
+   arn:aws:ecr:us-east-2:123456789012:repository/old-app/sha256:def456...
+   EOF
+   ```
+
+3. **Run dry-run** to preview:
+   ```bash
+   python3 delete_ecr_images.py --file images.txt --profile myprofile --dry-run
+   ```
+
+4. **Review output** and verify the images to be deleted
+
+5. **Perform actual deletion**:
+   ```bash
+   python3 delete_ecr_images.py --file images.txt --profile myprofile
+   ```
+
+### Safety Features
+
+1. **Dry Run Mode**: Always test with `--dry-run` first to preview deletions
+2. **Profile Validation**: Verifies AWS profile exists and has valid credentials
+3. **ARN Validation**: Validates ARN format before attempting deletion
+4. **Detailed Logging**: Shows exactly what is being deleted and any errors
+5. **Error Resilience**: Continues processing even if individual deletions fail
+6. **Summary Report**: Provides counts of successful and failed deletions
+
+---
 
 ## 🔧 Troubleshooting
 
