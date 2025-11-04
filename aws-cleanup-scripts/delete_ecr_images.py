@@ -56,7 +56,7 @@ def parse_arn(arn: str) -> Tuple[str, str, str]:
         ValueError: If ARN format is invalid
     
     Example:
-        >>> parse_arn("arn:aws:ecr:us-east-2:905418167957:repository/myrepo/sha256:abcd1234")
+        >>> parse_arn("arn:aws:ecr:us-east-2:111122223333:repository/myrepo/sha256:abcd1234")
         ('us-east-2', 'myrepo', 'sha256:abcd1234')
     """
     # Pattern to match ECR image ARN format
@@ -202,7 +202,7 @@ ARN Format:
   arn:aws:ecr:<region>:<account-id>:repository/<repo-name>/sha256:<digest>
   
   Example:
-  arn:aws:ecr:us-east-2:905418167957:repository/myrepo/sha256:abcd1234567890
+  arn:aws:ecr:us-east-2:111122223333:repository/myrepo/sha256:abcd1234567890
 
 Notes:
   - Lines starting with '#' in the input file are treated as comments

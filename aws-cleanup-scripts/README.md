@@ -55,7 +55,7 @@ List all ECR images with their metadata:
 
 ```bash
 python aws_resource_cleanup.py \
-  --aws-account-id 123456789012 \
+  --aws-account-id 111122223333 \
   --action list-ecr
 ```
 
@@ -72,7 +72,7 @@ List all AMIs owned by your AWS account:
 
 ```bash
 python aws_resource_cleanup.py \
-  --aws-account-id 123456789012 \
+  --aws-account-id 111122223333 \
   --action list-ami
 ```
 
@@ -91,7 +91,7 @@ python aws_resource_cleanup.py \
 
 ```bash
 python aws_resource_cleanup.py \
-  --aws-account-id 123456789012 \
+  --aws-account-id 111122223333 \
   --action delete-ami \
   --keep 5 \
   --dry-run
@@ -109,7 +109,7 @@ This command will:
 
 ```bash
 python aws_resource_cleanup.py \
-  --aws-account-id 123456789012 \
+  --aws-account-id 111122223333 \
   --action delete-ami \
   --keep 5
 ```
@@ -130,7 +130,7 @@ By default, the script uses your configured AWS region. To use a different regio
 
 ```bash
 python aws_resource_cleanup.py \
-  --aws-account-id 123456789012 \
+  --aws-account-id 111122223333 \
   --region us-west-2 \
   --action list-ami
 ```
@@ -186,7 +186,7 @@ The IAM user or role running these scripts needs the following permissions:
         "ecr:DescribeImages",
         "ecr:ListImages"
       ],
-      "Resource": "arn:aws:ecr:*:123456789012:repository/*"
+      "Resource": "arn:aws:ecr:*:111122223333:repository/*"
     }
   ]
 }
@@ -218,7 +218,7 @@ ECR IMAGES REPORT
 ================================================================================
 
 📦 Repository: my-app
-   URI: 123456789012.dkr.ecr.us-east-1.amazonaws.com/my-app
+   URI: 111122223333.dkr.ecr.us-east-1.amazonaws.com/my-app
    Total Images: 10
    1. Tags: v1.2.3, latest
       Pushed: 2024-10-20 15:30:00
@@ -327,7 +327,7 @@ Use these scripts when you:
    
    Example:
    ```
-   arn:aws:ecr:us-east-2:905418167957:repository/myrepo/sha256:abcd1234567890
+   arn:aws:ecr:us-east-2:111122223333:repository/myrepo/sha256:abcd1234567890
    ```
 
 ### Usage - Python Script
@@ -381,11 +381,11 @@ The input file should contain one ARN per line:
 
 ```text
 # This is a comment - lines starting with # are ignored
-arn:aws:ecr:us-east-2:905418167957:repository/myrepo/sha256:abc123...
-arn:aws:ecr:us-west-2:905418167957:repository/app-repo/sha256:def456...
+arn:aws:ecr:us-east-2:111122223333:repository/myrepo/sha256:abc123...
+arn:aws:ecr:us-west-2:111122223333:repository/app-repo/sha256:def456...
 
 # Empty lines are also ignored
-arn:aws:ecr:us-east-1:123456789012:repository/test-repo/sha256:789abc...
+arn:aws:ecr:us-east-1:111122223333:repository/test-repo/sha256:789abc...
 ```
 
 ### Features
@@ -416,8 +416,8 @@ arn:aws:ecr:us-east-1:123456789012:repository/test-repo/sha256:789abc...
 2. **Create input file** with ARNs:
    ```bash
    cat > images.txt << 'EOF'
-   arn:aws:ecr:us-east-2:123456789012:repository/old-app/sha256:abc123...
-   arn:aws:ecr:us-east-2:123456789012:repository/old-app/sha256:def456...
+   arn:aws:ecr:us-east-2:111122223333:repository/old-app/sha256:abc123...
+   arn:aws:ecr:us-east-2:111122223333:repository/old-app/sha256:def456...
    EOF
    ```
 
@@ -483,7 +483,7 @@ You can schedule this script to run automatically using:
 ### Linux/Mac (cron)
 ```bash
 # Run cleanup every Sunday at 2 AM, keeping 5 most recent AMIs
-0 2 * * 0 /usr/bin/python3 /path/to/aws_resource_cleanup.py --aws-account-id 123456789012 --action delete-ami --keep 5
+0 2 * * 0 /usr/bin/python3 /path/to/aws_resource_cleanup.py --aws-account-id 111122223333 --action delete-ami --keep 5
 ```
 
 ### AWS Lambda

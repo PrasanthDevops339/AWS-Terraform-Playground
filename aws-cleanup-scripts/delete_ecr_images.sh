@@ -103,7 +103,7 @@ ARN Format:
   arn:aws:ecr:<region>:<account-id>:repository/<repo-name>/sha256:<digest>
 
   Example:
-  arn:aws:ecr:us-east-2:905418167957:repository/myrepo/sha256:abcd1234567890
+  arn:aws:ecr:us-east-2:111122223333:repository/myrepo/sha256:abcd1234567890
 
 Notes:
   - Lines starting with '#' are treated as comments and ignored
