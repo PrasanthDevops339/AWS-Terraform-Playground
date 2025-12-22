@@ -1,0 +1,20 @@
+# Example terraform.tfvars for Blue/Green Deployment
+# Copy this file to terraform.tfvars and modify the values
+
+aws_region     = "us-west-2"
+project_name   = "webapp-bg"
+environment    = "production"
+vpc_id         = "vpc-12345678"  # Replace with your VPC ID
+container_image = "nginx:latest"
+app_version    = "1.0.0"
+desired_count  = 2
+min_capacity   = 1
+max_capacity   = 10
+
+tags = {
+  Environment    = "production"
+  DeploymentType = "blue-green"
+  ManagedBy      = "terraform"
+  Owner          = "devops-team"
+  Project        = "webapp-bg"
+}

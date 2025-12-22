@@ -1,0 +1,61 @@
+# Example terraform.tfvars for Service Connect with TLS
+# Copy this file to terraform.tfvars and modify the values
+
+aws_region                = "us-west-2"
+project_name             = "secure-microservices"
+environment              = "production"
+vpc_id                   = "vpc-12345678"  # Replace with your VPC ID
+service_connect_namespace = "secure.local"
+
+# Certificate Authority Configuration
+ca_common_name         = "Service Connect CA"
+ca_country            = "US"
+ca_state              = "Washington"
+ca_locality           = "Seattle"
+ca_organization       = "My Company"
+ca_organizational_unit = "IT Department"
+ca_deletion_days      = 7
+
+# API Service Configuration
+api_image         = "nginx:alpine"
+api_version       = "1.0.0"
+api_cpu          = 512
+api_memory       = 1024
+api_port         = 8443
+api_desired_count = 2
+api_min_capacity = 1
+api_max_capacity = 10
+
+# Client Service Configuration
+client_image         = "alpine:latest"
+client_version       = "1.0.0"
+client_cpu          = 256
+client_memory       = 512
+client_port         = 80
+client_desired_count = 1
+client_min_capacity = 1
+client_max_capacity = 5
+
+# Database Configuration
+db_image    = "postgres:13-alpine"
+db_cpu     = 512
+db_memory  = 1024
+db_port    = 5432
+db_name    = "appdb"
+db_user    = "appuser"
+db_password = "SecurePassword123!"  # Change this!
+
+# TLS Configuration
+tls_idle_timeout    = 60
+tls_request_timeout = 30
+
+# Logging
+log_retention_days = 14
+
+tags = {
+  Environment = "production"
+  Security    = "tls-enabled"
+  ManagedBy   = "terraform"
+  Owner       = "devops-team"
+  Project     = "secure-microservices"
+}
