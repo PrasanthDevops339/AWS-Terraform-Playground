@@ -101,4 +101,81 @@ variable "vpc_id" {
   type        = string
 }
 
+##############################
+# Service Connect variables
+##############################
+variable "enable_service_connect" {
+  description = "Whether to enable service connect for the cluster"
+  type        = bool
+  default     = false
+}
+
+variable "service_connect_configuration" {
+  description = "Service connect configuration for the cluster"
+  type = object({
+    enabled   = optional(bool, false)
+    namespace = optional(string, null)
+    log_configuration = optional(object({
+      log_driver = optional(string, "awslogs")
+      options    = optional(map(string), {})
+      secret_options = optional(list(object({
+        name       = string
+        value_from = string
+      })), [])
+    }), null)
+  })
+  default = {
+    enabled = false
+  }
+}
+
+##############################
+# Deployment Strategy variables
+##############################
+variable "deployment_configuration" {
+  description = "Default deployment configuration for services"
+  type = object({
+    deployment_circuit_breaker = optional(object({
+      enable   = optional(bool, false)
+      rollback = optional(bool, false)
+    }), null)
+    maximum_percent         = optional(number, 200)
+    minimum_healthy_percent = optional(number, 100)
+    alarms = optional(object({
+      enable   = optional(bool, false)
+      rollback = optional(bool, false)
+      alarm_names = optional(list(string), [])
+    }), null)
+  })
+  default = {
+    maximum_percent         = 200
+    minimum_healthy_percent = 100
+  }
+}
+
+##############################
+# Capacity Provider variables
+##############################
+variable "capacity_providers" {
+  description = "List of capacity providers to associate with the cluster"
+  type        = list(string)
+  default     = ["FARGATE", "FARGATE_SPOT"]
+}
+
+variable "default_capacity_provider_strategy" {
+  description = "Default capacity provider strategy for the cluster"
+  type = list(object({
+    capacity_provider = string
+    weight           = optional(number, 1)
+    base             = optional(number, 0)
+  }))
+  default = [
+    {
+      capacity_provider = "FARGATE"
+      weight           = 1
+      base             = 0
+    }
+  ]
+}
+
 // Removed TG creation support: protocol/health_check are no longer used here.

@@ -26,6 +26,14 @@ resource "aws_ecs_cluster" "main" {
     }
   }
 
+  # Service Connect configuration
+  dynamic "service_connect_defaults" {
+    for_each = var.service_connect_configuration.enabled ? [var.service_connect_configuration] : []
+    content {
+      namespace = service_connect_defaults.value.namespace
+    }
+  }
+
   dynamic "setting" {
     for_each = flatten([var.cluster_settings])
     content {
@@ -35,4 +43,21 @@ resource "aws_ecs_cluster" "main" {
   }
 
   tags = merge(var.tags, { "Name" = "${local.account_alias}-${var.cluster_name}" })
+}
+
+# ECS Cluster Capacity Providers
+resource "aws_ecs_cluster_capacity_providers" "main" {
+  count        = var.create_cluster ? 1 : 0
+  cluster_name = aws_ecs_cluster.main[0].name
+
+  capacity_providers = var.capacity_providers
+
+  dynamic "default_capacity_provider_strategy" {
+    for_each = var.default_capacity_provider_strategy
+    content {
+      base              = default_capacity_provider_strategy.value.base
+      weight            = default_capacity_provider_strategy.value.weight
+      capacity_provider = default_capacity_provider_strategy.value.capacity_provider
+    }
+  }
 }

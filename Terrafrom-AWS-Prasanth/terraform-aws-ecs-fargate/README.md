@@ -1,11 +1,22 @@
 # terraform-aws-ecs-fargate
 
-Opinionated ECS on Fargate module that attaches services to ALB/NLB Target Groups created outside this module (e.g., by your ALB module). As of this version, this module no longer creates Target Groups.
+Comprehensive ECS Fargate module with support for multiple services, service connect with TLS, and all ECS deployment strategies. This module can deploy multiple services to the same cluster and provides advanced networking and deployment capabilities.
 
-## Breaking change: TGs must be supplied
+## Features
 
-- This module no longer creates Target Groups. Provide `target_group_arn` values for each entry in `var.target_groups` from your external ALB module.
-- Validation: If `load_balanced = true`, every entry in `target_groups` must include a non-empty `target_group_arn`. This fails fast during `terraform validate` to avoid confusing errors at apply time.
+- ✅ **Multiple Services**: Deploy multiple services to the same ECS cluster
+- ✅ **Service Connect**: Native service-to-service communication with optional TLS encryption
+- ✅ **All Deployment Strategies**: Rolling updates, Blue/Green (CodeDeploy), and External deployment controllers
+- ✅ **Auto Scaling**: CPU, Memory, and Step scaling policies per service
+- ✅ **Load Balancer Integration**: Support for ALB/NLB target groups
+- ✅ **Advanced Networking**: VPC, security groups, service discovery
+- ✅ **Comprehensive Monitoring**: CloudWatch integration and deployment alarms
+
+## Breaking Changes from Previous Version
+
+- Target Groups must be created externally (e.g., by ALB module)
+- Each `target_groups` entry must include `target_group_arn` when `load_balanced = true`
+- New service connect and deployment strategy configurations
 
 ## Variable: `target_groups`
 
