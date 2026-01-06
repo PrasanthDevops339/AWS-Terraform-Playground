@@ -1,0 +1,33 @@
+# Example terraform.tfvars
+# Copy this file to terraform.tfvars and update with your values
+
+# Required: Your AWS Organization Root ID
+org_root_id = "r-xxxx"  # Get this from: aws organizations list-roots --query 'Roots[0].Id'
+
+# Optional: Customize AMI publishers
+ops_publisher_account = "123456738923"
+
+vendor_publisher_accounts = [
+  "111122223333",  # InfoBlox
+  "444455556666"   # Terraform Enterprise
+]
+
+# Optional: Time-bound exceptions
+exception_accounts = {
+  "777788889999" = "2026-02-28"  # Migration exception
+  "222233334444" = "2026-03-15"  # ML POC exception
+}
+
+# Start with audit mode, then switch to enabled
+enforcement_mode = "audit_mode"
+
+# Optional: Custom exception request URL
+exception_request_url = "https://jira.company.com"
+
+# Optional: Tags
+tags = {
+  ManagedBy   = "Terraform"
+  Feature     = "AMI-Governance"
+  Environment = "production"
+  Owner       = "cloud-platform-team"
+}
