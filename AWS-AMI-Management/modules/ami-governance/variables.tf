@@ -1,48 +1,58 @@
 # ============================================================================
-# INPUT VARIABLES
+# MODULE INPUT VARIABLES
 # ============================================================================
-# Variables define the configurable inputs for this Terraform module
-# Users customize these values via terraform.tfvars file
+# Variables for the AMI governance module
+# These are passed from the environment-specific configurations
 
-# AWS Region (optional, mainly for provider configuration)
-variable "aws_region" {
-  description = "AWS region"    # Human-readable description
-  type        = string          # Data type validation
-  default     = "us-east-1"     # Default value if not provided
+# Environment identifier (dev/prd)
+variable "environment" {
+  description = "Environment name (dev, prd)" # Environment designation
+  type        = string                        # String type
+
+  # Validation to ensure only valid environments
+  validation {
+    condition     = contains(["dev", "prd"], var.environment)
+    error_message = "Valid values for environment are 'dev' or 'prd'"
+  }
 }
 
-# Organization Root ID (REQUIRED - no default)
-variable "org_root_id" {
-  description = "AWS Organization Root ID to attach policies to" # Must start with 'r-'
-  type        = string                                            # String type
-  # No default = required input
+# Policy Names
+variable "declarative_policy_name" {
+  description = "Name for the declarative EC2 policy" # Human-readable policy name
+  type        = string                                # String type
+  default     = "ami-governance-declarative-policy"   # Default name
+}
+
+variable "scp_policy_name" {
+  description = "Name for the SCP policy"      # Human-readable SCP name
+  type        = string                         # String type
+  default     = "scp-ami-guardrail"            # Default name
+}
+
+# Target IDs for policy attachments
+variable "target_ids" {
+  description = "List of target IDs (Root/OU/Account) to attach policies to" # Where policies apply
+  type        = list(string)                                                 # List of IDs
 }
 
 # Ops Golden AMI Publisher Account
 variable "ops_publisher_account" {
   description = "Ops Golden AMI Publisher Account ID" # Central AMI pipeline account
   type        = string                                 # 12-digit AWS account ID
-  default     = "123456738923"                         # Default ops account
 }
 
 # Approved Vendor AMI Publisher Accounts
 variable "vendor_publisher_accounts" {
   description = "List of vendor AMI publisher account IDs" # Third-party approved vendors
   type        = list(string)                                # List of strings (account IDs)
-  default = [
-    "111122223333", # InfoBlox - DNS/DHCP appliances
-    "444455556666"  # Terraform Enterprise - private TFE AMIs
-  ]
+  default     = []                                          # Empty list by default
 }
 
 # Temporary Exception Accounts (with expiry dates)
 variable "exception_accounts" {
   description = "Map of exception account IDs to expiry dates (YYYY-MM-DD)" # Time-bound exceptions
   type        = map(string)                                                 # Map: account_id => expiry_date
-  default = {
-    "777788889999" = "2026-02-28" # Migration exception - expires end of Feb 2026
-    "222233334444" = "2026-03-15" # ML POC exception - expires mid-March 2026
-  }
+  default     = {}                                                          # Empty map by default
 }
 
 # Enforcement Mode (audit vs. blocking)
@@ -69,9 +79,5 @@ variable "exception_request_url" {
 variable "tags" {
   description = "Tags to apply to all resources" # Common tags for organization
   type        = map(string)                      # Key-value pairs
-  default = {
-    ManagedBy   = "Terraform"      # Indicates infrastructure is code-managed
-    Feature     = "AMI-Governance" # Feature/capability grouping
-    Environment = "production"     # Environment designation
-  }
+  default     = {}                               # Empty map by default - environment provides tags
 }

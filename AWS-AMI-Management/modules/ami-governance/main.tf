@@ -1,4 +1,10 @@
 # ============================================================================
+# AMI GOVERNANCE MODULE
+# ============================================================================
+# Reusable Terraform module for AWS Organizations AMI governance policies
+# Creates both declarative policy and SCP with automatic exception management
+
+# ============================================================================
 # LOCAL VARIABLES
 # ============================================================================
 # Local values calculate the active exceptions and build the complete allowlist
@@ -49,9 +55,9 @@ locals {
 # This policy controls which AMI publishers can be used to launch EC2 instances
 
 resource "aws_organizations_policy" "declarative_ec2" {
-  name        = "ami-governance-declarative-policy" # Policy name shown in AWS console
+  name        = var.declarative_policy_name                # Policy name shown in AWS console
   description = "AMI Governance - Restrict EC2 launches to approved AMI publishers"
-  type        = "DECLARATIVE_POLICY_EC2" # Native declarative policy type (not SCP)
+  type        = "DECLARATIVE_POLICY_EC2"                   # Native declarative policy type (not SCP)
 
   # Convert HCL map to JSON policy document
   # jsonencode() ensures proper JSON formatting
@@ -91,21 +97,24 @@ resource "aws_organizations_policy" "declarative_ec2" {
   tags = merge(
     var.tags,                                          # Base tags from variables (ManagedBy, Feature, etc.)
     {
-      Name       = "ami-governance-declarative-policy" # Override Name tag
-      PolicyType = "DECLARATIVE_POLICY_EC2"            # Tag indicating policy type
+      Name        = var.declarative_policy_name        # Override Name tag
+      PolicyType  = "DECLARATIVE_POLICY_EC2"           # Tag indicating policy type
+      Environment = var.environment                    # Environment tag (dev/prd)
     }
   )
 }
 
 # ============================================================================
-# POLICY ATTACHMENT - DECLARATIVE POLICY
+# POLICY ATTACHMENTS - DECLARATIVE POLICY
 # ============================================================================
-# Attach the declarative policy to Organization Root
-# This makes the policy effective across all accounts in the organization
+# Attach the declarative policy to specified target IDs (Root/OUs/Accounts)
+# for_each creates one attachment per target ID
 
 resource "aws_organizations_policy_attachment" "declarative_ec2" {
+  for_each = toset(var.target_ids) # Convert list to set for for_each iteration
+
   policy_id = aws_organizations_policy.declarative_ec2.id # Reference to policy created above
-  target_id = var.org_root_id                             # Organization Root ID (r-xxxx)
+  target_id = each.value                                   # OU/Root/Account ID from target_ids list
 }
 
 # ============================================================================
@@ -116,7 +125,7 @@ resource "aws_organizations_policy_attachment" "declarative_ec2" {
 # SCP evaluates at IAM level, blocking actions regardless of identity
 
 resource "aws_organizations_policy" "scp" {
-  name        = "scp-ami-guardrail"                                        # SCP name in AWS console
+  name        = var.scp_policy_name                                        # SCP name in AWS console
   description = "AMI Governance SCP - Deny non-approved AMIs and AMI creation" # Describes SCP purpose
   type        = "SERVICE_CONTROL_POLICY"                                   # Traditional SCP type
 
@@ -176,20 +185,24 @@ resource "aws_organizations_policy" "scp" {
   tags = merge(
     var.tags,                                 # Base tags from variables
     {
-      Name       = "scp-ami-guardrail"        # SCP-specific name tag
-      PolicyType = "SERVICE_CONTROL_POLICY"   # Tag indicating this is an SCP
+      Name        = var.scp_policy_name       # SCP-specific name tag
+      PolicyType  = "SERVICE_CONTROL_POLICY"  # Tag indicating this is an SCP
+      Environment = var.environment           # Environment tag (dev/prd)
     }
   )
 }
 
 # ============================================================================
-# POLICY ATTACHMENT - SCP
+# POLICY ATTACHMENTS - SCP
 # ============================================================================
-# Attach the SCP to Organization Root for organization-wide enforcement
+# Attach the SCP to specified target IDs for enforcement
+# for_each creates one attachment per target ID
 
 resource "aws_organizations_policy_attachment" "scp" {
+  for_each = toset(var.target_ids) # Convert list to set for for_each iteration
+
   policy_id = aws_organizations_policy.scp.id # Reference to SCP created above
-  target_id = var.org_root_id                 # Organization Root ID (r-xxxx)
+  target_id = each.value                       # OU/Root/Account ID from target_ids list
 }
 
 # ============================================================================
@@ -219,7 +232,7 @@ resource "null_resource" "check_expired_exceptions" {
         echo '${jsonencode(local.expired_exceptions)}' | jq -r 'to_entries[] | "  • Account: \(.key) expired on \(.value)"'
         echo "" # Empty line
         # Instruct user to remove expired exceptions
-        echo "Please remove expired exceptions from variables.tf"
+        echo "Please remove expired exceptions from terraform.tfvars"
         # Exit with error code 1 to fail the Terraform apply
         exit 1
       fi

@@ -1,5 +1,5 @@
 # ============================================================================
-# OUTPUTS
+# MODULE OUTPUTS
 # ============================================================================
 # Outputs expose important information after Terraform apply
 # Use these values for documentation, automation, or references in other modules
@@ -59,5 +59,6 @@ output "policy_summary" {
     active_exceptions       = length(local.active_exceptions)   # Count of active exceptions
     expired_exceptions      = length(local.expired_exceptions)  # Count of expired exceptions (should be 0)
     enforcement_mode        = var.enforcement_mode              # Current mode (audit or enabled)
+    target_ids              = var.target_ids                    # Where policies are attached
   }
 }
