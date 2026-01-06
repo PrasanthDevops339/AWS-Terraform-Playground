@@ -1,0 +1,56 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyEC2LaunchWithNonApprovedAMIs",
+      "Effect": "Deny",
+      "Action": [
+        "ec2:RunInstances",
+        "ec2:CreateFleet",
+        "ec2:RequestSpotInstances",
+        "ec2:RunScheduledInstances"
+      ],
+      "Resource": "arn:aws:ec2:*::image/*",
+      "Condition": {
+        "StringNotEquals": {
+          "ec2:Owner": [
+            "111122223333",
+            "123456738923",
+            "222233334444",
+            "444455556666",
+            "777788889999"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "DenyAMICreationAndSideload",
+      "Effect": "Deny",
+      "Action": [
+        "ec2:CreateImage",
+        "ec2:CopyImage",
+        "ec2:RegisterImage",
+        "ec2:ImportImage"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringNotEquals": {
+          "aws:PrincipalOrgID": "o-REPLACE-WITH-YOUR-ORG-ID"
+        }
+      }
+    },
+    {
+      "Sid": "DenyPublicAMISharing",
+      "Effect": "Deny",
+      "Action": [
+        "ec2:ModifyImageAttribute"
+      ],
+      "Resource": "arn:aws:ec2:*::image/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:Add/group": "all"
+        }
+      }
+    }
+  ]
+}
