@@ -1,0 +1,29 @@
+# Deprecated policy blocks
+#
+# This file is intentionally NOT used by Terraform.
+# It is a holding area for older module blocks that were removed from active deployment.
+#
+# Keeping the historical config here makes audits and rollbacks easier.
+
+module "protect-functional-roles" {
+  source = "../../modules/organizations"
+
+  policy_name = "Protect Functional Roles"
+  file_date   = "2025-03-26"
+}
+
+module "scp-enforce-ec2-investmentid" {
+  source = "../../modules/organizations"
+
+  policy_name  = "SCP_Enforce_EC2_InvestmentId"
+  file_date    = "2025-03-26"
+  description  = "Service Control Policy to deny EC2 instances without InvestmentId"
+}
+
+module "scp-enforce-ec2-application" {
+  source = "../../modules/organizations"
+
+  policy_name  = "SCP_Enforce_EC2_Application"
+  file_date    = "2025-03-26"
+  description  = "Service Control Policy to deny EC2 instances without Application"
+}

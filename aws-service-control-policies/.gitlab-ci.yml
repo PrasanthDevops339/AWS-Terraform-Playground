@@ -1,0 +1,11 @@
+# GitLab CI pipeline placeholder
+# Mirrors the base repo structure from the screenshots.
+
+stages:
+  - lint
+
+lint:
+  stage: lint
+  image: alpine:3.19
+  script:
+    - echo "placeholder pipeline"
