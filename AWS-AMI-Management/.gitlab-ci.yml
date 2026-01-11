@@ -1,189 +1,121 @@
-# AMI Governance Pipeline
-# 
-# This pipeline validates AMI publisher configuration and generated policies.
-# Runs on every commit and scheduled daily to catch expired exceptions.
-
-stages:
-  - validate
-  - generate
-  - verify
+# ============================================================================
+# GITLAB CI/CD PIPELINE - AMI GOVERNANCE
+# ============================================================================
+# Automated pipeline for AMI governance policy deployment
+# Validates, plans, and applies Terraform changes
 
 variables:
-  PYTHON_VERSION: "3.9"
+  TF_VERSION: "1.6.0"                    # Terraform version to use
+  TF_ROOT: "${CI_PROJECT_DIR}/environments/prd"  # Working directory
+  AWS_REGION: "us-east-1"                # Default AWS region
 
-# Run validation on every push
-validate:config:
+# Pipeline stages
+stages:
+  - validate    # Syntax and configuration validation
+  - plan        # Terraform plan (dry-run)
+  - apply       # Terraform apply (deployment)
+
+# ============================================================================
+# STAGE 1: VALIDATION
+# ============================================================================
+# Validate Terraform configuration syntax and formatting
+
+validate:
   stage: validate
-  image: python:${PYTHON_VERSION}-slim
-  before_script:
-    - pip install --quiet --no-cache-dir python-dateutil
+  image:
+    name: hashicorp/terraform:${TF_VERSION}  # Official Terraform Docker image
+    entrypoint: [""]                         # Override entrypoint
   script:
-    - echo "Validating AMI publisher configuration..."
-    - |
-      if [ ! -f "config/ami_publishers.json" ]; then
-        echo "ERROR: config/ami_publishers.json not found"
-        exit 1
-      fi
-    - python -m json.tool config/ami_publishers.json > /dev/null
-    - echo "✓ Configuration JSON is valid"
-    - python scripts/validate_policies.py
+    - cd ${TF_ROOT}
+    - terraform --version                     # Show Terraform version
+    - terraform init -backend=false           # Initialize without backend (validation only)
+    - terraform validate                      # Validate configuration
+    - terraform fmt -check -recursive         # Check formatting
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "push"'
-    - if: '$CI_PIPELINE_SOURCE == "schedule"'
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'  # Run on MRs
+    - if: '$CI_COMMIT_BRANCH == "main"'                   # Run on main branch
+    - if: '$CI_COMMIT_BRANCH =~ /^feature\/.*/'           # Run on feature branches
+  tags:
+    - docker
 
-# Generate policies in audit mode
-generate:policies:audit:
-  stage: generate
-  image: python:${PYTHON_VERSION}-slim
-  before_script:
-    - pip install --quiet --no-cache-dir python-dateutil
+# ============================================================================
+# STAGE 2: PLAN
+# ============================================================================
+# Generate Terraform execution plan for review
+
+plan:
+  stage: plan
+  image:
+    name: hashicorp/terraform:${TF_VERSION}
+    entrypoint: [""]
   script:
-    - echo "Generating policies in audit mode..."
-    - python scripts/generate_policies.py --mode audit_mode
-    - ls -lh dist/
+    - cd ${TF_ROOT}
+    - terraform --version
+    - terraform init                          # Initialize Terraform
+    - terraform plan -out=tfplan              # Generate plan file
+    - terraform show -no-color tfplan > plan.txt  # Save plan output
   artifacts:
+    name: "terraform-plan-${CI_COMMIT_REF_SLUG}"
     paths:
-      - dist/declarative-policy-ec2.json
-      - dist/scp-ami-guardrail.json
-    expire_in: 30 days
+      - ${TF_ROOT}/tfplan                     # Save plan file
+      - ${TF_ROOT}/plan.txt                   # Save human-readable plan
+    expire_in: 1 week                         # Keep for 1 week
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "push"'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH =~ /^feature\/.*/'
+  tags:
+    - docker
 
-# Generate policies in enforcement mode (manual only)
-generate:policies:enforce:
-  stage: generate
-  image: python:${PYTHON_VERSION}-slim
-  before_script:
-    - pip install --quiet --no-cache-dir python-dateutil
+# ============================================================================
+# STAGE 3: APPLY (PRODUCTION)
+# ============================================================================
+# Apply Terraform changes to production environment
+# Requires manual approval for safety
+
+apply:prd:
+  stage: apply
+  image:
+    name: hashicorp/terraform:${TF_VERSION}
+    entrypoint: [""]
   script:
-    - echo "⚠️  Generating policies in ENFORCEMENT mode..."
-    - python scripts/generate_policies.py --mode enabled
-    - ls -lh dist/
-  artifacts:
-    paths:
-      - dist/declarative-policy-ec2.json
-      - dist/scp-ami-guardrail.json
-    expire_in: 30 days
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"'
-      when: manual
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-      when: manual
-  allow_failure: false
-
-# Verify generated policies
-verify:policies:
-  stage: verify
-  image: python:${PYTHON_VERSION}-slim
+    - cd ${TF_ROOT}
+    - terraform --version
+    - terraform init                          # Initialize Terraform
+    - terraform apply -auto-approve           # Apply changes
   dependencies:
-    - generate:policies:audit
-  before_script:
-    - pip install --quiet --no-cache-dir python-dateutil
-  script:
-    - echo "Verifying generated policies..."
-    - python scripts/validate_policies.py
-    - |
-      echo ""
-      echo "==================================================================="
-      echo "GENERATED POLICY SUMMARY"
-      echo "==================================================================="
-      python -c "
-      import json
-      with open('dist/declarative-policy-ec2.json', 'r') as f:
-          dp = json.load(f)
-      with open('dist/scp-ami-guardrail.json', 'r') as f:
-          scp = json.load(f)
-      
-      allowlist = dp['content']['ec2']['ec2_attributes']['allowed_images_settings']['image_criteria']['criteria_1']['allowed_image_providers']
-      mode = dp['content']['ec2']['ec2_attributes']['allowed_images_settings']['state']
-      
-      print(f'Enforcement Mode: {mode}')
-      print(f'Approved AMI Publisher Accounts: {len(allowlist)}')
-      print(f'Accounts: {', '.join(allowlist)}')
-      print('===================================================================')
-      "
+    - plan                                    # Depends on plan stage
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "push"'
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'       # Only on main branch
+      when: manual                            # Require manual trigger
+  environment:
+    name: production                          # GitLab environment tracking
+    action: start
+  tags:
+    - docker
 
-# Daily scheduled check for expired exceptions
-scheduled:expiry-check:
-  stage: validate
-  image: python:${PYTHON_VERSION}-slim
-  before_script:
-    - pip install --quiet --no-cache-dir python-dateutil
-  script:
-    - echo "Running scheduled exception expiry check..."
-    - |
-      python -c "
-      import json
-      from datetime import date, timedelta
-      
-      with open('config/ami_publishers.json', 'r') as f:
-          config = json.load(f)
-      
-      today = date.today().isoformat()
-      warning_date = (date.today() + timedelta(days=14)).isoformat()
-      
-      expired = []
-      expiring_soon = []
-      
-      for exc in config['exception_accounts']:
-          expires = exc.get('expires_on')
-          account = exc.get('account_id')
-          reason = exc.get('reason', 'N/A')
-          
-          if not expires:
-              print(f'⚠️  Exception {account} missing expires_on field!')
-              continue
-          
-          if expires < today:
-              expired.append(f'{account} (expired {expires}) - {reason}')
-          elif expires <= warning_date:
-              expiring_soon.append(f'{account} (expires {expires}) - {reason}')
-      
-      if expired:
-          print('\n❌ EXPIRED EXCEPTIONS FOUND:')
-          for item in expired:
-              print(f'  • {item}')
-          print('\nAction required: Remove expired exceptions from config/ami_publishers.json')
-          exit(1)
-      
-      if expiring_soon:
-          print('\n⚠️  EXCEPTIONS EXPIRING SOON (within 14 days):')
-          for item in expiring_soon:
-              print(f'  • {item}')
-          print('\nAction recommended: Review and extend or remove these exceptions')
-      else:
-          print('✅ No expired or expiring exceptions found')
-      "
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule"'
-  allow_failure: false
+# ============================================================================
+# OPTIONAL: DESTROY (EMERGENCY USE ONLY)
+# ============================================================================
+# Destroy Terraform-managed resources
+# Requires manual trigger and confirmation
 
-# Merge request validation
-merge_request:
-  stage: validate
-  image: python:${PYTHON_VERSION}-slim
-  before_script:
-    - pip install --quiet --no-cache-dir python-dateutil
+destroy:prd:
+  stage: apply
+  image:
+    name: hashicorp/terraform:${TF_VERSION}
+    entrypoint: [""]
   script:
-    - echo "Validating merge request changes..."
-    - |
-      if git diff --name-only origin/main...HEAD | grep -q "config/ami_publishers.json"; then
-        echo "✓ Configuration change detected"
-        echo ""
-        echo "==================================================================="
-        echo "CONFIGURATION CHANGES"
-        echo "==================================================================="
-        git diff origin/main...HEAD config/ami_publishers.json || true
-        echo "==================================================================="
-      fi
-    - python scripts/validate_policies.py
-    - python scripts/generate_policies.py --mode audit_mode
-    - echo ""
-    - echo "✅ Merge request validation passed"
+    - cd ${TF_ROOT}
+    - terraform --version
+    - terraform init
+    - terraform destroy -auto-approve         # Destroy resources
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual                            # Manual trigger only
+      allow_failure: false                    # Must succeed
+  environment:
+    name: production
+    action: stop                              # Stop environment
+  tags:
+    - docker
