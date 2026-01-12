@@ -1,0 +1,118 @@
+{
+  "_comment": "============================================================================",
+  "_comment_title": "EC2 DECLARATIVE POLICY - AMI Governance",
+  "_comment_version": "2026-01-11",
+  "_comment_description": "This Declarative Policy enforces AMI governance at the EC2 service level. It provides native AWS enforcement of allowed AMI sources and blocks public AMI sharing.",
+  "_comment_separator": "============================================================================",
+
+  "_accounts_reference": {
+    "_comment": "=== ACCOUNT REFERENCE TABLE WITH ARNS ===",
+    "operations_account": {
+      "account_id": "123456738923",
+      "account_name": "Operations AMI Publisher",
+      "account_arn": "arn:aws:organizations::123456738923:account/o-xxxxxxxxxx/123456738923",
+      "description": "Central operations team AMI publishing account",
+      "ami_access": "OPEN - Anyone in org can use",
+      "arn_pattern": "arn:aws:iam::123456738923:*"
+    },
+    "vendor_infoblox": {
+      "account_id": "111122223333",
+      "account_name": "InfoBlox Vendor",
+      "account_arn": "arn:aws:organizations::111122223333:account/o-xxxxxxxxxx/111122223333",
+      "description": "InfoBlox vendor AMI account",
+      "ami_access": "OPEN - Anyone in org can use",
+      "arn_pattern": "arn:aws:iam::111122223333:*"
+    },
+    "vendor_general": {
+      "account_id": "222233334444",
+      "account_name": "General Vendor",
+      "account_arn": "arn:aws:organizations::222233334444:account/o-xxxxxxxxxx/222233334444",
+      "description": "General vendor AMI account",
+      "ami_access": "OPEN - Anyone in org can use",
+      "arn_pattern": "arn:aws:iam::222233334444:*"
+    },
+    "exception_tfe": {
+      "account_id": "444455556666",
+      "account_name": "Terraform Enterprise",
+      "account_arn": "arn:aws:organizations::444455556666:account/o-xxxxxxxxxx/444455556666",
+      "description": "TFE exception account - Restricted via SCP to specific roles",
+      "ami_access": "RESTRICTED - Only Admin/Developer/TFE roles (enforced by SCP)",
+      "arn_pattern": "arn:aws:iam::444455556666:*",
+      "allowed_principal_arns": [
+        "arn:aws:iam::444455556666:role/Admin*",
+        "arn:aws:iam::444455556666:role/Developer*",
+        "arn:aws:iam::444455556666:role/TerraformEnterprise*"
+      ]
+    },
+    "exception_migration": {
+      "account_id": "777788889999",
+      "account_name": "Migration Exception",
+      "account_arn": "arn:aws:organizations::777788889999:account/o-xxxxxxxxxx/777788889999",
+      "description": "Migration exception account - Restricted via SCP to specific roles",
+      "ami_access": "RESTRICTED - Only Admin/Developer/Migration roles (enforced by SCP)",
+      "arn_pattern": "arn:aws:iam::777788889999:*",
+      "allowed_principal_arns": [
+        "arn:aws:iam::777788889999:role/Admin*",
+        "arn:aws:iam::777788889999:role/Developer*",
+        "arn:aws:iam::777788889999:role/MigrationRole*"
+      ]
+    }
+  },
+
+  "_policy_explanation": {
+    "_comment": "=== POLICY STRUCTURE EXPLANATION ===",
+    "image_block_public_access": {
+      "_description": "Prevents AMIs from being shared publicly",
+      "_state_options": ["block_new_sharing", "unblocked"],
+      "_current_state": "block_new_sharing",
+      "_impact": "No AMIs can be shared with 'all' (public)"
+    },
+    "allowed_images_settings": {
+      "_description": "Controls which AMI sources are allowed for EC2 instances",
+      "_state_options": ["enabled", "audit_mode", "disabled"],
+      "_current_state": "audit_mode",
+      "_audit_mode_behavior": "Logs violations to CloudTrail but does not block - use for testing",
+      "_enabled_behavior": "Actively blocks non-compliant AMI usage",
+      "_image_criteria": "List of allowed AMI provider account IDs"
+    }
+  },
+
+  "ec2": {
+    "@@operators_allowed_for_child_policies": ["@@none"],
+    "ec2_attributes": {
+      "image_block_public_access": {
+        "_comment": "=== BLOCK PUBLIC AMI SHARING ===",
+        "_description": "Prevents any AMI in accounts under this policy from being shared publicly",
+        "@@operators_allowed_for_child_policies": ["@@none"],
+        "state": "block_new_sharing"
+      },
+      "allowed_images_settings": {
+        "_comment": "=== ALLOWED AMI SOURCES ===",
+        "_description": "Only AMIs from these approved accounts can be used to launch EC2 instances",
+        "_note": "Principal-based restrictions for exception accounts (444455556666, 777788889999) are enforced by companion SCP",
+        "@@operators_allowed_for_child_policies": ["@@none"],
+        "state": "audit_mode",
+        "image_criteria": {
+          "criteria_1": {
+            "_comment": "Approved AMI provider accounts",
+            "allowed_image_providers": [
+              "111122223333",
+              "123456738923",
+              "222233334444",
+              "444455556666",
+              "777788889999"
+            ],
+            "_account_details": {
+              "111122223333": "InfoBlox Vendor - Open access",
+              "123456738923": "Operations AMI Publisher - Open access",
+              "222233334444": "General Vendor - Open access",
+              "444455556666": "TFE Exception - Restricted to specific roles via SCP",
+              "777788889999": "Migration Exception - Restricted to specific roles via SCP"
+            }
+          }
+        },
+        "exception_message": "AMI not approved for use in this organization. Only images from approved publisher accounts are permitted. To request an exception, submit a ticket at: https://jira.company.com/browse/CLOUD with business justification, duration needed (max 90 days), and security approval."
+      }
+    }
+  }
+}

@@ -1,7 +1,62 @@
 {
+  "_comment": "============================================================================",
+  "_comment_title": "AMI GOVERNANCE SCP - Principal-Based Restrictions",
+  "_comment_version": "2026-01-11",
+  "_comment_description": "This SCP enforces AMI governance across the organization with dual-layer protection: 1) Block non-approved AMI sources, 2) Restrict exception AMIs to authorized principals only",
+  "_comment_separator": "============================================================================",
+
+  "_accounts_reference": {
+    "_comment": "=== ACCOUNT REFERENCE TABLE ===",
+    "operations_account": {
+      "account_id": "123456738923",
+      "account_name": "Operations AMI Publisher",
+      "description": "Central operations team AMI publishing account - AMIs usable by anyone in org",
+      "arn_pattern": "arn:aws:iam::123456738923:*"
+    },
+    "vendor_infoblox": {
+      "account_id": "111122223333",
+      "account_name": "InfoBlox Vendor",
+      "description": "InfoBlox vendor AMI account - AMIs usable by anyone in org",
+      "arn_pattern": "arn:aws:iam::111122223333:*"
+    },
+    "vendor_general": {
+      "account_id": "222233334444",
+      "account_name": "General Vendor",
+      "description": "General vendor AMI account - AMIs usable by anyone in org",
+      "arn_pattern": "arn:aws:iam::222233334444:*"
+    },
+    "exception_tfe": {
+      "account_id": "444455556666",
+      "account_name": "Terraform Enterprise",
+      "description": "TFE exception account - AMIs restricted to Admin/Developer/TFE roles ONLY",
+      "arn_pattern": "arn:aws:iam::444455556666:*",
+      "allowed_principals": [
+        "arn:aws:iam::444455556666:role/Admin*",
+        "arn:aws:iam::444455556666:role/Developer*",
+        "arn:aws:iam::444455556666:role/TerraformEnterprise*"
+      ]
+    },
+    "exception_migration": {
+      "account_id": "777788889999",
+      "account_name": "Migration Exception",
+      "description": "Migration exception account - AMIs restricted to Admin/Developer/Migration roles ONLY",
+      "arn_pattern": "arn:aws:iam::777788889999:*",
+      "allowed_principals": [
+        "arn:aws:iam::777788889999:role/Admin*",
+        "arn:aws:iam::777788889999:role/Developer*",
+        "arn:aws:iam::777788889999:role/MigrationRole*"
+      ]
+    }
+  },
+
   "Version": "2012-10-17",
   "Statement": [
     {
+      "_comment": "=== STATEMENT 1: BLOCK NON-APPROVED AMI SOURCES ===",
+      "_description": "Denies EC2 launch operations using AMIs from any owner NOT in the approved list. This is the primary guardrail that ensures only approved AMI publishers can be used.",
+      "_impact": "DENY if AMI owner is NOT in [123456738923, 111122223333, 222233334444, 444455556666, 777788889999]",
+      "_who_can_use": "Anyone in org can launch instances using AMIs from approved owners",
+      
       "Sid": "DenyEC2LaunchWithNonApprovedAMIs",
       "Effect": "Deny",
       "Action": [
@@ -24,6 +79,17 @@
       }
     },
     {
+      "_comment": "=== STATEMENT 2: RESTRICT TFE EXCEPTION AMI USAGE ===",
+      "_description": "Denies usage of TFE exception AMIs (owner: 444455556666) unless the principal is an authorized role. This ensures TFE AMIs are only used by approved personnel in the TFE account.",
+      "_account_id": "444455556666",
+      "_account_name": "Terraform Enterprise Exception Account",
+      "_impact": "DENY if AMI owner is 444455556666 AND principal is NOT Admin*/Developer*/TerraformEnterprise* role",
+      "_allowed_arns": [
+        "arn:aws:iam::444455556666:role/Admin*",
+        "arn:aws:iam::444455556666:role/Developer*",
+        "arn:aws:iam::444455556666:role/TerraformEnterprise*"
+      ],
+      
       "Sid": "DenyExceptionAMIUsageByUnauthorizedPrincipals",
       "Effect": "Deny",
       "Action": [
@@ -47,6 +113,17 @@
       }
     },
     {
+      "_comment": "=== STATEMENT 3: RESTRICT MIGRATION EXCEPTION AMI USAGE ===",
+      "_description": "Denies usage of Migration exception AMIs (owner: 777788889999) unless the principal is an authorized role. This ensures migration AMIs are only used by approved personnel.",
+      "_account_id": "777788889999",
+      "_account_name": "Migration Exception Account",
+      "_impact": "DENY if AMI owner is 777788889999 AND principal is NOT Admin*/Developer*/MigrationRole* role",
+      "_allowed_arns": [
+        "arn:aws:iam::777788889999:role/Admin*",
+        "arn:aws:iam::777788889999:role/Developer*",
+        "arn:aws:iam::777788889999:role/MigrationRole*"
+      ],
+      
       "Sid": "DenyMigrationExceptionAMIUsageByUnauthorizedPrincipals",
       "Effect": "Deny",
       "Action": [
@@ -70,6 +147,11 @@
       }
     },
     {
+      "_comment": "=== STATEMENT 4: PREVENT AMI SIDELOADING ===",
+      "_description": "Denies all AMI creation, copying, registration, and import operations. This prevents users from bypassing the approved AMI governance by creating their own AMIs.",
+      "_impact": "DENY CreateImage, CopyImage, RegisterImage, ImportImage for ALL principals",
+      "_exception": "Operations account should be excluded via separate attachment or OU structure",
+      
       "Sid": "DenyAMICreationAndSideload",
       "Effect": "Deny",
       "Action": [
@@ -81,6 +163,11 @@
       "Resource": "*"
     },
     {
+      "_comment": "=== STATEMENT 5: PREVENT PUBLIC AMI SHARING ===",
+      "_description": "Denies modification of AMI attributes to make them publicly accessible. This prevents accidental or intentional exposure of AMIs to the public.",
+      "_impact": "DENY ModifyImageAttribute when attempting to add 'all' (public) group",
+      "_condition_key": "ec2:Add/group = 'all' indicates public sharing attempt",
+      
       "Sid": "DenyPublicAMISharing",
       "Effect": "Deny",
       "Action": [

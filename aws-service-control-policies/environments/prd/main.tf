@@ -85,12 +85,13 @@ module "scp-ami-guardrail" {
 }
 
 # EC2 Declarative Policy - Enforces AMI settings at the EC2 service level
+# Works with companion SCP for principal-based restrictions on exception accounts
 module "declarative-policy-ec2" {
   source = "../../modules/organizations"
 
   policy_name = "declarative-policy-ec2"
-  file_date   = "2026-01-06"
-  description = "EC2 Declarative Policy for AMI governance: allowed images and block public access"
+  file_date   = "2026-01-11"
+  description = "EC2 Declarative Policy for AMI governance: allowed images, block public access, with detailed account/ARN documentation"
   type        = "DECLARATIVE_POLICY_EC2"
 
   # Deploy to workloads and sandbox OUs
