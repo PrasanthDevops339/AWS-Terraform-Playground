@@ -67,12 +67,13 @@ module "imds-v2-policy" {
 # ============================================================================
 
 # AMI Guardrail SCP - Prevents non-approved AMI usage, sideloading, public sharing
+# Principal-based restrictions: Exception AMIs only usable by Admin/Developer roles
 module "scp-ami-guardrail" {
   source = "../../modules/organizations"
 
   policy_name = "scp-ami-guardrail"
-  file_date   = "2026-01-06"
-  description = "SCP to enforce AMI governance: block non-approved AMIs, prevent sideloading, deny public sharing"
+  file_date   = "2026-01-11"
+  description = "SCP to enforce AMI governance: block non-approved AMIs, principal-based exception restrictions, prevent sideloading, deny public sharing"
   type        = "SERVICE_CONTROL_POLICY"
 
   # Deploy to workloads and sandbox OUs

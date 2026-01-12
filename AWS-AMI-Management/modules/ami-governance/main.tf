@@ -104,9 +104,9 @@ resource "aws_organizations_policy" "declarative_ec2" {
   )
 }
 
-# ============================================================================
+# ==========================================================================
 # POLICY ATTACHMENTS - DECLARATIVE POLICY
-# ============================================================================
+# ==========================================================================
 # Attach the declarative policy to specified target IDs (Root/OUs/Accounts)
 # for_each creates one attachment per target ID
 
@@ -117,9 +117,9 @@ resource "aws_organizations_policy_attachment" "declarative_ec2" {
   target_id = each.value                                   # OU/Root/Account ID from target_ids list
 }
 
-# ============================================================================
+# ==========================================================================
 # SERVICE CONTROL POLICY (SCP)
-# ============================================================================
+# ==========================================================================
 # Traditional SCP acts as an IAM permission boundary - second layer of defense
 # Even if declarative policy is bypassed, SCP blocks the API calls
 # SCP evaluates at IAM level, blocking actions regardless of identity
@@ -192,9 +192,9 @@ resource "aws_organizations_policy" "scp" {
   )
 }
 
-# ============================================================================
+# ==========================================================================
 # POLICY ATTACHMENTS - SCP
-# ============================================================================
+# ==========================================================================
 # Attach the SCP to specified target IDs for enforcement
 # for_each creates one attachment per target ID
 
@@ -205,9 +205,9 @@ resource "aws_organizations_policy_attachment" "scp" {
   target_id = each.value                       # OU/Root/Account ID from target_ids list
 }
 
-# ============================================================================
+# ==========================================================================
 # VALIDATION - EXPIRED EXCEPTIONS CHECK
-# ============================================================================
+# ==========================================================================
 # Fail the Terraform apply if any expired exceptions are found
 # This forces cleanup of expired exceptions before deployment proceeds
 # Uses null_resource with local-exec to run shell validation
