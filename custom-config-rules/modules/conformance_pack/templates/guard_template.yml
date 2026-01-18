@@ -1,0 +1,17 @@
+${block_name}:
+  Type: AWS::Config::ConfigRule
+  Properties:
+    ConfigRuleName: ${config_rule_name}
+    Description: ${description}
+    Scope:
+      ComplianceResourceTypes:
+        ${resource_types_scope}
+    Source:
+      Owner: CUSTOM_POLICY
+      SourceDetails:
+        - EventSource: aws.config
+          MessageType: ConfigurationItemChangeNotification
+      CustomPolicyDetails:
+        PolicyRuntime: ${policy_runtime}
+        PolicyText: |
+          ${policy_text}

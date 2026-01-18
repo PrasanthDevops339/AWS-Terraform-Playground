@@ -1,0 +1,3 @@
+rule sqsIsEncrypted when resourceType == "AWS::SQS::Queue" {
+    configuration.SqsManagedSseEnabled == "true" <<SQS's must be encrypted>>
+}

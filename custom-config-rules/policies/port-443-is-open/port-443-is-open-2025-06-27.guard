@@ -1,0 +1,9 @@
+rule port443IsOpen
+when resourceType == "AWS::EC2::SecurityGroup"
+{
+    let my_rules = this.configuration.ipPermissionsEgress[
+        some ipv4Ranges[*].cidrIp == "0.0.0.0/0"
+        fromPort == 443
+    ]
+    %my_rules !empty
+}

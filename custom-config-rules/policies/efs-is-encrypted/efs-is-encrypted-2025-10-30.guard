@@ -1,0 +1,3 @@
+rule efsIsEncrypted when resourceType == "AWS::EFS::FileSystem" {
+    configuration.Encrypted == true <<EFS's must be encrypted>>
+}
