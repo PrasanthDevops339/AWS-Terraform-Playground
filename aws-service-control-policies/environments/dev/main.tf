@@ -114,37 +114,39 @@ module "dev-workload-rcp-scp-test" {
 }
 
 # ============================================================================
-# AMI GOVERNANCE POLICIES
+# AMI GOVERNANCE POLICIES - Prasa Operations
+# ============================================================================
+# Approved AMI Publishers:
+#   - 565656565656 (prasains-operations-dev-use2)
+#   - 666363636363 (prasains-operations-prd-use2)
 # ============================================================================
 
 # AMI Guardrail SCP - Prevents non-approved AMI usage, sideloading, public sharing
-# Principal-based restrictions: Exception AMIs only usable by Admin/Developer roles
+# Only AMIs from Prasa Operations accounts are permitted
 module "scp-ami-guardrail" {
   source = "../../modules/organizations"
 
   policy_name = "scp-ami-guardrail"
-  file_date   = "2026-01-11"
-  description = "SCP to enforce AMI governance: block non-approved AMIs, principal-based exception restrictions, prevent sideloading, deny public sharing"
+  file_date   = "2026-01-18"
+  description = "SCP to enforce Prasa AMI governance: only prasa-* AMIs from Operations accounts (565656565656, 666363636363), prevent sideloading, deny public sharing"
   type        = "SERVICE_CONTROL_POLICY"
 
   # Deploy to workloads OU - adjust target as needed
   target_ids = [var.workloads]
 
   # Exception expiry feature (disabled by default)
-  # When enabled, accounts in exception_accounts map will be automatically
-  # removed from exceptions after their expiry date
   enable_exception_expiry = false
   exception_accounts      = {}
 }
 
 # EC2 Declarative Policy - Enforces AMI settings at the EC2 service level
-# Works with companion SCP for principal-based restrictions on exception accounts
+# Prasa Operations accounts only: prasains-operations-dev-use2, prasains-operations-prd-use2
 module "declarative-policy-ec2" {
   source = "../../modules/organizations"
 
   policy_name = "declarative-policy-ec2"
-  file_date   = "2026-01-11"
-  description = "EC2 Declarative Policy for AMI governance: allowed images, block public access, with detailed account/ARN documentation"
+  file_date   = "2026-01-18"
+  description = "EC2 Declarative Policy for Prasa AMI governance: only prasa-* AMIs from Operations accounts permitted"
   type        = "DECLARATIVE_POLICY_EC2"
 
   # Deploy to workloads OU - adjust target as needed

@@ -1,0 +1,145 @@
+{
+  "_comment": "============================================================================",
+  "_comment_title": "EC2 DECLARATIVE POLICY - Prasa Operations AMI Governance",
+  "_comment_version": "2026-01-18",
+  "_comment_description": "This Declarative Policy enforces AMI governance at the EC2 service level. Only AMIs from Prasa Operations accounts are permitted.",
+  "_comment_separator": "============================================================================",
+
+  "_accounts_reference": {
+    "_comment": "=== PRASA OPERATIONS ACCOUNT REFERENCE TABLE ===",
+    "prasa_operations_dev": {
+      "account_id": "565656565656",
+      "account_alias": "prasains-operations-dev-use2",
+      "account_arn": "arn:aws:iam::565656565656:root",
+      "description": "Prasa Operations DEV - AMI publishing account (US-East-2)",
+      "environment": "dev",
+      "region": "us-east-2"
+    },
+    "prasa_operations_prd": {
+      "account_id": "666363636363",
+      "account_alias": "prasains-operations-prd-use2",
+      "account_arn": "arn:aws:iam::666363636363:root",
+      "description": "Prasa Operations PRD - AMI publishing account (US-East-2)",
+      "environment": "prd",
+      "region": "us-east-2"
+    }
+  },
+
+  "_ami_catalog": {
+    "_comment": "=== APPROVED AMI CATALOG ===",
+    
+    "marketplace_customized": {
+      "_category": "1) Marketplace but Customized (MarkLogic AWS Marketplace)",
+      "_description": "MarkLogic AMIs customized for Prasa environment",
+      "amis": [
+        {
+          "name_pattern": "prasa-opsdir-mlal2-*",
+          "alias": "prasa-OPSDIR-MLAL2-CF",
+          "base": "MarkLogic",
+          "os": "Amazon Linux 2"
+        },
+        {
+          "name_pattern": "prasa-mlal2-*",
+          "alias": "prasa-MLAL2-CF",
+          "base": "MarkLogic",
+          "os": "Amazon Linux 2"
+        }
+      ]
+    },
+    
+    "prasa_customized": {
+      "_category": "2) Prasa Customized (AWS Base Images)",
+      "_description": "AWS base images customized by Prasa Operations team",
+      "amis": [
+        {
+          "name_pattern": "prasa-rhel8-*",
+          "alias": "prasa-rhel8-cf",
+          "os": "Red Hat Enterprise Linux 8"
+        },
+        {
+          "name_pattern": "prasa-rhel9-*",
+          "alias": "prasa-rhel9-cf",
+          "os": "Red Hat Enterprise Linux 9"
+        },
+        {
+          "name_pattern": "prasa-win16-*",
+          "alias": "prasa-win16-cf",
+          "os": "Windows Server 2016"
+        },
+        {
+          "name_pattern": "prasa-win19-*",
+          "alias": "prasa-win19-cf",
+          "os": "Windows Server 2019"
+        },
+        {
+          "name_pattern": "prasa-win22-*",
+          "alias": "prasa-win22-cf",
+          "os": "Windows Server 2022"
+        },
+        {
+          "name_pattern": "prasa-al2023-*",
+          "alias": "prasa-al2023-cf",
+          "os": "Amazon Linux 2023"
+        },
+        {
+          "name_pattern": "prasa-al2-2024-*",
+          "alias": "prasa-al2-2024-cf",
+          "os": "Amazon Linux 2 (2024)"
+        }
+      ]
+    }
+  },
+
+  "_policy_explanation": {
+    "_comment": "=== POLICY STRUCTURE EXPLANATION ===",
+    "image_block_public_access": {
+      "_description": "Prevents AMIs from being shared publicly",
+      "_state_options": ["block_new_sharing", "unblocked"],
+      "_current_state": "block_new_sharing",
+      "_impact": "No AMIs can be shared with 'all' (public)"
+    },
+    "allowed_images_settings": {
+      "_description": "Controls which AMI sources are allowed for EC2 instances",
+      "_state_options": ["enabled", "audit_mode", "disabled"],
+      "_current_state": "audit_mode",
+      "_audit_mode_behavior": "Logs violations to CloudTrail but does not block - use for testing",
+      "_enabled_behavior": "Actively blocks non-compliant AMI usage"
+    }
+  },
+
+  "ec2": {
+    "@@operators_allowed_for_child_policies": ["@@none"],
+    "ec2_attributes": {
+      "image_block_public_access": {
+        "_comment": "=== BLOCK PUBLIC AMI SHARING ===",
+        "_description": "Prevents any AMI in accounts under this policy from being shared publicly",
+        "@@operators_allowed_for_child_policies": ["@@none"],
+        "state": "block_new_sharing"
+      },
+      "allowed_images_settings": {
+        "_comment": "=== ALLOWED AMI SOURCES - PRASA OPERATIONS ONLY ===",
+        "_description": "Only AMIs from Prasa Operations accounts can be used to launch EC2 instances",
+        "_approved_accounts": {
+          "565656565656": "prasains-operations-dev-use2 (DEV)",
+          "666363636363": "prasains-operations-prd-use2 (PRD)"
+        },
+        "@@operators_allowed_for_child_policies": ["@@none"],
+        "state": "audit_mode",
+        "image_criteria": {
+          "criteria_1": {
+            "_comment": "Prasa Operations AMI publisher accounts",
+            "allowed_image_providers": [
+              "565656565656",
+              "666363636363"
+            ],
+            "_account_details": {
+              "565656565656": "prasains-operations-dev-use2 - Prasa Operations DEV",
+              "666363636363": "prasains-operations-prd-use2 - Prasa Operations PRD"
+            }
+          }
+        },
+        "exception_message": "AMI not approved for use in this organization. Only images from Prasa Operations accounts (prasains-operations-dev-use2, prasains-operations-prd-use2) are permitted. Approved AMI patterns: prasa-rhel8-*, prasa-rhel9-*, prasa-win16-*, prasa-win19-*, prasa-win22-*, prasa-al2023-*, prasa-al2-2024-*, prasa-mlal2-*, prasa-opsdir-mlal2-*. To request an exception, submit a ticket at: https://jira.company.com/browse/CLOUD"
+      }
+    }
+  }
+}

@@ -1,8 +1,8 @@
-# 🛡️ AMI Governance Policy Documentation
+# 🛡️ Prasa AMI Governance Policy Documentation
 
-> **Version:** 2026-01-11  
+> **Version:** 2026-01-18  
 > **Policy Type:** Dual-Layer Enforcement (SCP + Declarative Policy)  
-> **Managed By:** Cloud Security Team  
+> **Managed By:** Prasa Cloud Security Team  
 
 ---
 
@@ -10,34 +10,32 @@
 
 - [Overview](#overview)
 - [Architecture](#architecture)
-- [Account Reference Matrix](#account-reference-matrix)
-- [Principal Access Matrix](#principal-access-matrix)
+- [Prasa Operations Accounts](#prasa-operations-accounts)
+- [Approved AMI Catalog](#approved-ami-catalog)
 - [Policy Components](#policy-components)
 - [SCP Statement Details](#scp-statement-details)
 - [Declarative Policy Details](#declarative-policy-details)
 - [Enforcement Flow](#enforcement-flow)
-- [Exception Process](#exception-process)
 - [Troubleshooting](#troubleshooting)
 
 ---
 
 ## 🎯 Overview
 
-This AMI Governance solution provides **enterprise-grade control** over Amazon Machine Image (AMI) usage across your AWS Organization. It implements a **dual-layer enforcement model** that combines:
+This AMI Governance solution provides **enterprise-grade control** over Amazon Machine Image (AMI) usage across the Prasa AWS Organization. It implements a **dual-layer enforcement model** that combines:
 
 1. **EC2 Declarative Policy** - Native AWS service-level enforcement
-2. **Service Control Policy (SCP)** - IAM boundary with principal-based restrictions
+2. **Service Control Policy (SCP)** - IAM boundary enforcement
 
 ### Key Features
 
 | Feature | Description |
 |---------|-------------|
-| ✅ **Approved Publishers Only** | Only designated AWS accounts can provide AMIs |
-| ✅ **Principal-Based Restrictions** | Exception AMIs restricted to specific IAM roles |
+| ✅ **Prasa Operations Only** | Only AMIs from Prasa Operations accounts are permitted |
 | ✅ **Sideloading Prevention** | Blocks unauthorized AMI creation/import |
 | ✅ **Public Sharing Block** | Prevents AMIs from being made public |
 | ✅ **Audit Mode Support** | Test policies before full enforcement |
-| ✅ **Exception Expiry Ready** | Built-in support for time-bound exceptions |
+| ✅ **Standardized Naming** | Consistent `prasa-*` naming convention |
 
 ---
 
@@ -45,7 +43,8 @@ This AMI Governance solution provides **enterprise-grade control** over Amazon M
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                          AWS ORGANIZATION                                    │
+│                        PRASA AWS ORGANIZATION                                │
+│                                                                              │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
 │  │                     POLICY ENFORCEMENT LAYERS                        │    │
 │  │  ┌─────────────────────────┐   ┌─────────────────────────────────┐  │    │
@@ -53,86 +52,107 @@ This AMI Governance solution provides **enterprise-grade control** over Amazon M
 │  │  │   (EC2 Service Level)   │   │    (IAM Boundary)               │  │    │
 │  │  │                         │   │                                  │  │    │
 │  │  │  • Allowed AMI Sources  │   │  • Block Non-Approved AMIs      │  │    │
-│  │  │  • Block Public Sharing │   │  • Principal-Based Restrictions │  │    │
-│  │  │  • Audit Mode Support   │   │  • Sideloading Prevention       │  │    │
-│  │  │                         │   │  • Public Sharing Block         │  │    │
+│  │  │  • Block Public Sharing │   │  • Sideloading Prevention       │  │    │
+│  │  │  • Audit Mode Support   │   │  • Public Sharing Block         │  │    │
 │  │  └─────────────────────────┘   └─────────────────────────────────┘  │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │
 │                                                                              │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                      AMI PUBLISHER ACCOUNTS                          │    │
-│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐    │    │
-│  │  │ Operations  │ │  InfoBlox   │ │   General   │ │    TFE      │    │    │
-│  │  │123456738923 │ │111122223333 │ │222233334444 │ │444455556666 │    │    │
-│  │  │   OPEN      │ │   OPEN      │ │   OPEN      │ │ RESTRICTED  │    │    │
-│  │  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘    │    │
-│  │                                                   ┌─────────────┐    │    │
-│  │                                                   │  Migration  │    │    │
-│  │                                                   │777788889999 │    │    │
-│  │                                                   │ RESTRICTED  │    │    │
-│  │                                                   └─────────────┘    │    │
+│  │                   PRASA OPERATIONS AMI PUBLISHERS                    │    │
+│  │                                                                       │    │
+│  │  ┌─────────────────────────────┐   ┌─────────────────────────────┐   │    │
+│  │  │  prasains-operations-dev    │   │  prasains-operations-prd    │   │    │
+│  │  │        565656565656         │   │        666363636363         │   │    │
+│  │  │         (DEV)               │   │         (PRD)               │   │    │
+│  │  │       us-east-2             │   │       us-east-2             │   │    │
+│  │  └─────────────────────────────┘   └─────────────────────────────┘   │    │
+│  │                                                                       │    │
+│  │  ┌─────────────────────────────────────────────────────────────────┐ │    │
+│  │  │                    APPROVED AMI TYPES                           │ │    │
+│  │  │  • prasa-rhel8-*    • prasa-win16-*    • prasa-al2023-*        │ │    │
+│  │  │  • prasa-rhel9-*    • prasa-win19-*    • prasa-al2-2024-*      │ │    │
+│  │  │  • prasa-mlal2-*    • prasa-win22-*    • prasa-opsdir-mlal2-*  │ │    │
+│  │  └─────────────────────────────────────────────────────────────────┘ │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 📊 Account Reference Matrix
+## 🏢 Prasa Operations Accounts
 
-### Approved AMI Publisher Accounts
+### AMI Publisher Accounts
 
-| Account ID | Account Name | ARN Pattern | Access Level | Description |
-|:----------:|:-------------|:------------|:------------:|:------------|
-| `123456738923` | **Operations AMI Publisher** | `arn:aws:iam::123456738923:*` | 🟢 **OPEN** | Central operations team AMI publishing account |
-| `111122223333` | **InfoBlox Vendor** | `arn:aws:iam::111122223333:*` | 🟢 **OPEN** | InfoBlox vendor AMI account |
-| `222233334444` | **General Vendor** | `arn:aws:iam::222233334444:*` | 🟢 **OPEN** | General vendor AMI account |
-| `444455556666` | **Terraform Enterprise** | `arn:aws:iam::444455556666:*` | 🟡 **RESTRICTED** | TFE exception - specific roles only |
-| `777788889999` | **Migration Exception** | `arn:aws:iam::777788889999:*` | 🟡 **RESTRICTED** | Migration exception - specific roles only |
+| Account ID | Account Alias | Region | Environment | Description |
+|:----------:|:--------------|:------:|:-----------:|:------------|
+| `565656565656` | **prasains-operations-dev-use2** | us-east-2 | 🟡 DEV | Prasa Operations DEV - AMI publishing account |
+| `666363636363` | **prasains-operations-prd-use2** | us-east-2 | 🟢 PRD | Prasa Operations PRD - AMI publishing account |
 
-### Access Level Legend
+### Account ARN Reference
 
-| Symbol | Level | Description |
-|:------:|:------|:------------|
-| 🟢 | **OPEN** | Anyone in the organization can use AMIs from this account |
-| 🟡 | **RESTRICTED** | Only specific IAM principals can use AMIs from this account |
-| 🔴 | **BLOCKED** | All other AMI sources are blocked |
+| Account | ARN |
+|:--------|:----|
+| Prasa Operations DEV | `arn:aws:iam::565656565656:root` |
+| Prasa Operations PRD | `arn:aws:iam::666363636363:root` |
 
 ---
 
-## 👥 Principal Access Matrix
+## 📦 Approved AMI Catalog
 
-### Who Can Use Which AMIs?
+### 1️⃣ Marketplace Customized (MarkLogic)
 
-| AMI Source Account | Account ID | Any Role | Admin* Role | Developer* Role | TFE* Role | Migration* Role |
-|:-------------------|:----------:|:--------:|:-----------:|:---------------:|:---------:|:---------------:|
-| **Operations** | `123456738923` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **InfoBlox Vendor** | `111122223333` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **General Vendor** | `222233334444` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **TFE Exception** | `444455556666` | ❌ | ✅ | ✅ | ✅ | ❌ |
-| **Migration Exception** | `777788889999` | ❌ | ✅ | ✅ | ❌ | ✅ |
-| **All Other Sources** | `*` | ❌ | ❌ | ❌ | ❌ | ❌ |
+AMIs based on AWS Marketplace MarkLogic, customized for Prasa environment.
 
-### Detailed Principal ARN Permissions
+| AMI Name Pattern | AMI Alias | Base Image | OS |
+|:-----------------|:----------|:-----------|:---|
+| `prasa-opsdir-mlal2-*` | `prasa-OPSDIR-MLAL2-CF` | MarkLogic | Amazon Linux 2 |
+| `prasa-mlal2-*` | `prasa-MLAL2-CF` | MarkLogic | Amazon Linux 2 |
 
-#### TFE Exception Account (`444455556666`)
+### 2️⃣ Prasa Customized (AWS Base Images)
 
-| Principal ARN Pattern | Access |
-|:----------------------|:------:|
-| `arn:aws:iam::444455556666:role/Admin*` | ✅ Allowed |
-| `arn:aws:iam::444455556666:role/Developer*` | ✅ Allowed |
-| `arn:aws:iam::444455556666:role/TerraformEnterprise*` | ✅ Allowed |
-| `arn:aws:iam::*:role/*` (any other role) | ❌ Denied |
-| `arn:aws:iam::*:user/*` (any user) | ❌ Denied |
+AWS base images customized by Prasa Operations team.
 
-#### Migration Exception Account (`777788889999`)
+#### Linux AMIs
 
-| Principal ARN Pattern | Access |
-|:----------------------|:------:|
-| `arn:aws:iam::777788889999:role/Admin*` | ✅ Allowed |
-| `arn:aws:iam::777788889999:role/Developer*` | ✅ Allowed |
-| `arn:aws:iam::777788889999:role/MigrationRole*` | ✅ Allowed |
-| `arn:aws:iam::*:role/*` (any other role) | ❌ Denied |
-| `arn:aws:iam::*:user/*` (any user) | ❌ Denied |
+| AMI Name Pattern | AMI Alias | Operating System | Status |
+|:-----------------|:----------|:-----------------|:------:|
+| `prasa-rhel8-*` | `prasa-rhel8-cf` | Red Hat Enterprise Linux 8 | ✅ Active |
+| `prasa-rhel9-*` | `prasa-rhel9-cf` | Red Hat Enterprise Linux 9 | ✅ Active |
+| `prasa-al2023-*` | `prasa-al2023-cf` | Amazon Linux 2023 | ✅ Active |
+| `prasa-al2-2024-*` | `prasa-al2-2024-cf` | Amazon Linux 2 (2024) | ✅ Active |
+
+#### Windows AMIs
+
+| AMI Name Pattern | AMI Alias | Operating System | Status |
+|:-----------------|:----------|:-----------------|:------:|
+| `prasa-win16-*` | `prasa-win16-cf` | Windows Server 2016 | ⚠️ Legacy |
+| `prasa-win19-*` | `prasa-win19-cf` | Windows Server 2019 | ✅ Active |
+| `prasa-win22-*` | `prasa-win22-cf` | Windows Server 2022 | ✅ Active |
+
+### AMI Naming Convention
+
+```
+prasa-{os}-{version}-{date}-{build}
+
+Examples:
+  prasa-rhel9-20260115-001
+  prasa-win22-20260110-002
+  prasa-al2023-20260118-001
+  prasa-mlal2-20260105-001
+```
+
+---
+
+## 📊 Complete AMI Access Matrix
+
+| Source | Account ID | Account Alias | Who Can Use | Status |
+|:-------|:----------:|:--------------|:-----------:|:------:|
+| **Prasa Ops DEV** | `565656565656` | prasains-operations-dev-use2 | ✅ Anyone in Org | 🟢 Approved |
+| **Prasa Ops PRD** | `666363636363` | prasains-operations-prd-use2 | ✅ Anyone in Org | 🟢 Approved |
+| **AWS Marketplace** | `*` | Various | ❌ Blocked | 🔴 Denied |
+| **Community AMIs** | `*` | Various | ❌ Blocked | 🔴 Denied |
+| **Third Party** | `*` | Various | ❌ Blocked | 🔴 Denied |
+| **Self-Created** | `*` | Various | ❌ Blocked | 🔴 Denied |
 
 ---
 
@@ -142,8 +162,8 @@ This AMI Governance solution provides **enterprise-grade control** over Amazon M
 
 | File Name | Type | Version | Purpose |
 |:----------|:-----|:--------|:--------|
-| `scp-ami-guardrail-2026-01-11.json` | SERVICE_CONTROL_POLICY | 2026-01-11 | IAM boundary with principal restrictions |
-| `declarative-policy-ec2-2026-01-11.json` | DECLARATIVE_POLICY_EC2 | 2026-01-11 | EC2 service-level enforcement |
+| `scp-ami-guardrail-2026-01-18.json` | SERVICE_CONTROL_POLICY | 2026-01-18 | IAM boundary enforcement |
+| `declarative-policy-ec2-2026-01-18.json` | DECLARATIVE_POLICY_EC2 | 2026-01-18 | EC2 service-level enforcement |
 
 ---
 
@@ -151,15 +171,13 @@ This AMI Governance solution provides **enterprise-grade control** over Amazon M
 
 ### Statement Matrix
 
-| # | Statement ID | Effect | Actions | Condition | Target |
+| # | Statement ID | Effect | Actions | Condition | Impact |
 |:-:|:-------------|:-------|:--------|:----------|:-------|
-| 1 | `DenyEC2LaunchWithNonApprovedAMIs` | DENY | RunInstances, CreateFleet, RequestSpotInstances, RunScheduledInstances | `ec2:Owner` NOT in approved list | All AMIs not in approved list |
-| 2 | `DenyExceptionAMIUsageByUnauthorizedPrincipals` | DENY | RunInstances, CreateFleet, RequestSpotInstances, RunScheduledInstances | `ec2:Owner` = `444455556666` AND `aws:PrincipalArn` NOT LIKE approved | TFE AMIs by unauthorized principals |
-| 3 | `DenyMigrationExceptionAMIUsageByUnauthorizedPrincipals` | DENY | RunInstances, CreateFleet, RequestSpotInstances, RunScheduledInstances | `ec2:Owner` = `777788889999` AND `aws:PrincipalArn` NOT LIKE approved | Migration AMIs by unauthorized principals |
-| 4 | `DenyAMICreationAndSideload` | DENY | CreateImage, CopyImage, RegisterImage, ImportImage | None | All principals |
-| 5 | `DenyPublicAMISharing` | DENY | ModifyImageAttribute | `ec2:Add/group` = `all` | Public sharing attempts |
+| 1 | `DenyEC2LaunchWithNonApprovedAMIs` | DENY | RunInstances, CreateFleet, RequestSpotInstances, RunScheduledInstances | `ec2:Owner` NOT in [565656565656, 666363636363] | Blocks non-Prasa AMIs |
+| 2 | `DenyAMICreationAndSideload` | DENY | CreateImage, CopyImage, RegisterImage, ImportImage | None | Prevents sideloading |
+| 3 | `DenyPublicAMISharing` | DENY | ModifyImageAttribute | `ec2:Add/group` = `all` | Blocks public sharing |
 
-### Statement 1: Block Non-Approved AMI Sources
+### Statement 1: Block Non-Prasa AMI Sources
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -175,79 +193,49 @@ This AMI Governance solution provides **enterprise-grade control** over Amazon M
 │                                                                  │
 │  CONDITION:                                                      │
 │    ec2:Owner NOT IN [                                           │
-│      123456738923,  ← Operations                                │
-│      111122223333,  ← InfoBlox                                  │
-│      222233334444,  ← General Vendor                            │
-│      444455556666,  ← TFE Exception                             │
-│      777788889999   ← Migration Exception                       │
+│      565656565656  ← prasains-operations-dev-use2               │
+│      666363636363  ← prasains-operations-prd-use2               │
 │    ]                                                             │
 │                                                                  │
-│  RESULT: Any AMI from unlisted accounts = BLOCKED               │
+│  RESULT: Any AMI from non-Prasa Operations accounts = BLOCKED   │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Statement 2: TFE Exception Principal Restriction
+### Statement 2: Prevent AMI Sideloading
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  DenyExceptionAMIUsageByUnauthorizedPrincipals                  │
+│  DenyAMICreationAndSideload                                     │
 ├─────────────────────────────────────────────────────────────────┤
 │  EFFECT: DENY                                                    │
 │                                                                  │
-│  CONDITION (ALL must match):                                     │
-│    ┌─────────────────────────────────────────────────────────┐  │
-│    │  ec2:Owner = 444455556666 (TFE Account)                 │  │
-│    └─────────────────────────────────────────────────────────┘  │
-│                        AND                                       │
-│    ┌─────────────────────────────────────────────────────────┐  │
-│    │  aws:PrincipalArn NOT LIKE:                             │  │
-│    │    • arn:aws:iam::444455556666:role/Admin*              │  │
-│    │    • arn:aws:iam::444455556666:role/Developer*          │  │
-│    │    • arn:aws:iam::444455556666:role/TerraformEnterprise*│  │
-│    └─────────────────────────────────────────────────────────┘  │
+│  BLOCKED ACTIONS:                                                │
+│    • ec2:CreateImage      ← Cannot create AMI from instance     │
+│    • ec2:CopyImage        ← Cannot copy AMIs                    │
+│    • ec2:RegisterImage    ← Cannot register external images     │
+│    • ec2:ImportImage      ← Cannot import VM images             │
 │                                                                  │
-│  RESULT: TFE AMIs can ONLY be used by Admin/Developer/TFE roles │
+│  EXCEPTION:                                                      │
+│    Prasa Operations accounts excluded via OU attachment         │
+│                                                                  │
+│  RESULT: Only Prasa Operations can create/publish AMIs          │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Statement 3: Migration Exception Principal Restriction
+### Statement 3: Prevent Public AMI Sharing
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  DenyMigrationExceptionAMIUsageByUnauthorizedPrincipals         │
+│  DenyPublicAMISharing                                           │
 ├─────────────────────────────────────────────────────────────────┤
 │  EFFECT: DENY                                                    │
 │                                                                  │
-│  CONDITION (ALL must match):                                     │
-│    ┌─────────────────────────────────────────────────────────┐  │
-│    │  ec2:Owner = 777788889999 (Migration Account)           │  │
-│    └─────────────────────────────────────────────────────────┘  │
-│                        AND                                       │
-│    ┌─────────────────────────────────────────────────────────┐  │
-│    │  aws:PrincipalArn NOT LIKE:                             │  │
-│    │    • arn:aws:iam::777788889999:role/Admin*              │  │
-│    │    • arn:aws:iam::777788889999:role/Developer*          │  │
-│    │    • arn:aws:iam::777788889999:role/MigrationRole*      │  │
-│    └─────────────────────────────────────────────────────────┘  │
+│  ACTION: ec2:ModifyImageAttribute                               │
 │                                                                  │
-│  RESULT: Migration AMIs can ONLY be used by Admin/Dev/Migration │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Statement 4 & 5: Sideloading & Public Sharing Prevention
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  DenyAMICreationAndSideload          DenyPublicAMISharing       │
-├─────────────────────────────────────────────────────────────────┤
-│  BLOCKED ACTIONS:                    BLOCKED WHEN:              │
-│    • ec2:CreateImage                   ec2:Add/group = "all"    │
-│    • ec2:CopyImage                                              │
-│    • ec2:RegisterImage               Prevents making AMIs       │
-│    • ec2:ImportImage                 publicly accessible        │
+│  CONDITION:                                                      │
+│    ec2:Add/group = "all"  ← Indicates public sharing attempt    │
 │                                                                  │
-│  Prevents bypassing governance                                   │
-│  by creating local AMIs                                          │
+│  RESULT: No AMIs can be made publicly accessible                │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -261,6 +249,24 @@ This AMI Governance solution provides **enterprise-grade control** over Amazon M
 |:--------|:--------------|:--------|:------------|
 | `image_block_public_access.state` | `block_new_sharing` | `block_new_sharing`, `unblocked` | Blocks public AMI sharing |
 | `allowed_images_settings.state` | `audit_mode` | `enabled`, `audit_mode`, `disabled` | Controls AMI source enforcement |
+
+### Allowed Image Providers
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  allowed_image_providers                                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │  565656565656  │  prasains-operations-dev-use2  │  DEV      ││
+│  └─────────────────────────────────────────────────────────────┘│
+│                                                                  │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │  666363636363  │  prasains-operations-prd-use2  │  PRD      ││
+│  └─────────────────────────────────────────────────────────────┘│
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ### Enforcement State Progression
 
@@ -291,77 +297,29 @@ This AMI Governance solution provides **enterprise-grade control** over Amazon M
                          └───────────┬─────────────┘
                                      │
                     ┌────────────────▼────────────────┐
-                    │  Is AMI Owner in Approved List? │
-                    │  [123456738923, 111122223333,   │
-                    │   222233334444, 444455556666,   │
-                    │   777788889999]                 │
+                    │  Is AMI Owner a Prasa Ops       │
+                    │  Account?                       │
+                    │  [565656565656, 666363636363]   │
                     └────────────────┬────────────────┘
                                      │
                     ┌────────NO──────┴──────YES───────┐
                     │                                  │
                     ▼                                  ▼
-            ┌───────────────┐              ┌─────────────────────┐
-            │   ❌ DENIED    │              │ Is Owner Exception? │
-            │   Statement 1  │              │ (444455556666 OR    │
-            │                │              │  777788889999)      │
-            └───────────────┘              └──────────┬──────────┘
-                                                      │
-                                      ┌────NO─────────┴──────YES────┐
-                                      │                             │
-                                      ▼                             ▼
-                              ┌───────────────┐        ┌───────────────────────┐
-                              │  ✅ ALLOWED    │        │ Is Principal in       │
-                              │  Open Access   │        │ Allowed Role List?    │
-                              │                │        │ (Admin*/Developer*/   │
-                              └───────────────┘        │  TFE*/Migration*)     │
-                                                       └───────────┬───────────┘
-                                                                   │
-                                                   ┌────NO─────────┴──────YES────┐
-                                                   │                             │
-                                                   ▼                             ▼
-                                           ┌───────────────┐            ┌───────────────┐
-                                           │   ❌ DENIED    │            │  ✅ ALLOWED    │
-                                           │ Statement 2/3  │            │  Principal OK  │
-                                           │ Unauthorized   │            │                │
-                                           └───────────────┘            └───────────────┘
-```
-
----
-
-## 📝 Exception Process
-
-### Request Flow
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     EXCEPTION REQUEST PROCESS                    │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  1. Submit Jira Ticket                                          │
-│     https://jira.company.com/browse/CLOUD                       │
-│                                                                  │
-│  2. Required Information:                                        │
-│     ┌─────────────────────────────────────────────────────────┐ │
-│     │  • Business justification                                │ │
-│     │  • Account ID requiring exception                        │ │
-│     │  • AMI source account/ID                                 │ │
-│     │  • Duration needed (max 90 days)                         │ │
-│     │  • Security team approval                                │ │
-│     │  • Principal ARNs that need access                       │ │
-│     └─────────────────────────────────────────────────────────┘ │
-│                                                                  │
-│  3. Security Review (2-3 business days)                         │
-│                                                                  │
-│  4. If Approved:                                                 │
-│     • Add account to exception_accounts with expiry date        │
-│     • Add principal ARNs to SCP statement                       │
-│     • Deploy via Terraform pipeline                             │
-│                                                                  │
-│  5. Automatic Expiry:                                            │
-│     • Exception expiry feature removes access after date        │
-│     • (Feature currently disabled, can be enabled)              │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+            ┌───────────────┐              ┌───────────────────────┐
+            │   ❌ DENIED    │              │  Is AMI Name Pattern  │
+            │               │              │  Valid?               │
+            │  SCP blocks   │              │  prasa-{os}-*         │
+            │  non-Prasa    │              └───────────┬───────────┘
+            │  AMI sources  │                          │
+            └───────────────┘              ┌───YES─────┴──────NO───┐
+                                           │                       │
+                                           ▼                       ▼
+                                   ┌───────────────┐       ┌───────────────┐
+                                   │  ✅ ALLOWED    │       │  ⚠️ WARNING   │
+                                   │               │       │               │
+                                   │  Valid Prasa  │       │  Non-standard │
+                                   │  AMI          │       │  naming       │
+                                   └───────────────┘       └───────────────┘
 ```
 
 ---
@@ -372,28 +330,86 @@ This AMI Governance solution provides **enterprise-grade control** over Amazon M
 
 | Error | Cause | Resolution |
 |:------|:------|:-----------|
-| "User: arn:aws:iam::xxx:role/MyRole is not authorized to perform: ec2:RunInstances on resource: arn:aws:ec2:*::image/ami-xxx" | AMI not from approved source | Use AMI from approved publisher account |
-| "Access denied for TFE AMI" | Principal not in allowed list | Ensure using Admin/Developer/TFE role |
-| "Access denied for Migration AMI" | Principal not in allowed list | Ensure using Admin/Developer/Migration role |
-| "Cannot create AMI" | Sideloading prevention | Contact Operations team for official AMI |
+| "Access Denied: ec2:RunInstances on image/ami-xxx" | AMI not from Prasa Operations account | Use AMI from `565656565656` or `666363636363` |
+| "Cannot create image" | Sideloading prevention active | Contact Prasa Operations for official AMI |
+| "Cannot modify image attribute" | Public sharing blocked | AMIs cannot be made public |
 
-### CloudTrail Event Lookup
+### Verify AMI Owner
 
 ```bash
-# Find AMI-related denials
-aws cloudtrail lookup-events \
-  --lookup-attributes AttributeKey=EventName,AttributeValue=RunInstances \
-  --start-time $(date -d '1 hour ago' --iso-8601=seconds) \
-  --query 'Events[?contains(CloudTrailEvent, `AccessDenied`)]'
+# Check AMI owner account
+aws ec2 describe-images --image-ids ami-xxxxxxxxx \
+  --query 'Images[0].OwnerId' --output text
+
+# Expected output: 565656565656 or 666363636363
+```
+
+### List Available Prasa AMIs
+
+```bash
+# List all Prasa AMIs from Operations DEV
+aws ec2 describe-images \
+  --owners 565656565656 \
+  --query 'Images[*].[Name,ImageId,CreationDate]' \
+  --output table
+
+# List all Prasa AMIs from Operations PRD
+aws ec2 describe-images \
+  --owners 666363636363 \
+  --query 'Images[*].[Name,ImageId,CreationDate]' \
+  --output table
+```
+
+### Find AMIs by Pattern
+
+```bash
+# Find RHEL 9 AMIs
+aws ec2 describe-images \
+  --owners 565656565656 666363636363 \
+  --filters "Name=name,Values=prasa-rhel9-*" \
+  --query 'Images[*].[Name,ImageId,CreationDate]' \
+  --output table
+
+# Find Windows Server 2022 AMIs
+aws ec2 describe-images \
+  --owners 565656565656 666363636363 \
+  --filters "Name=name,Values=prasa-win22-*" \
+  --query 'Images[*].[Name,ImageId,CreationDate]' \
+  --output table
 ```
 
 ---
 
-## 📚 Related Documentation
+## 📚 Quick Reference Card
 
-- [AWS Organizations SCPs](https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_policies_scps.html)
-- [EC2 Declarative Policies](https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_policies_declarative.html)
-- [AMI Best Practices](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/AMIs.html)
+### Prasa Operations Accounts
+
+| Environment | Account ID | Alias |
+|:-----------:|:----------:|:------|
+| DEV | `565656565656` | prasains-operations-dev-use2 |
+| PRD | `666363636363` | prasains-operations-prd-use2 |
+
+### Approved AMI Patterns
+
+| Category | Patterns |
+|:---------|:---------|
+| **Linux** | `prasa-rhel8-*`, `prasa-rhel9-*`, `prasa-al2023-*`, `prasa-al2-2024-*` |
+| **Windows** | `prasa-win16-*`, `prasa-win19-*`, `prasa-win22-*` |
+| **MarkLogic** | `prasa-mlal2-*`, `prasa-opsdir-mlal2-*` |
+
+### AMI Aliases (CloudFormation)
+
+| Alias | Description |
+|:------|:------------|
+| `prasa-rhel8-cf` | RHEL 8 |
+| `prasa-rhel9-cf` | RHEL 9 |
+| `prasa-win16-cf` | Windows 2016 |
+| `prasa-win19-cf` | Windows 2019 |
+| `prasa-win22-cf` | Windows 2022 |
+| `prasa-al2023-cf` | Amazon Linux 2023 |
+| `prasa-al2-2024-cf` | Amazon Linux 2 (2024) |
+| `prasa-MLAL2-CF` | MarkLogic |
+| `prasa-OPSDIR-MLAL2-CF` | MarkLogic OpsDir |
 
 ---
 
@@ -401,12 +417,12 @@ aws cloudtrail lookup-events \
 
 | Team | Contact | Purpose |
 |:-----|:--------|:--------|
-| Cloud Security | cloudsec@company.com | Policy questions, exceptions |
-| Operations | ops@company.com | AMI publishing, golden images |
-| Platform | platform@company.com | Terraform, infrastructure |
+| Prasa Operations | ops@prasa.com | AMI requests, golden images |
+| Cloud Security | cloudsec@prasa.com | Policy questions, exceptions |
+| Platform Team | platform@prasa.com | Terraform, infrastructure |
 
 ---
 
-> **Last Updated:** 2026-01-11  
-> **Maintained By:** Cloud Security Team  
+> **Last Updated:** 2026-01-18  
+> **Maintained By:** Prasa Cloud Security Team  
 > **Review Cycle:** Quarterly
