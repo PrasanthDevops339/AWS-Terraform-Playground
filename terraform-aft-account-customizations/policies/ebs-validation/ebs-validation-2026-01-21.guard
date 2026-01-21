@@ -1,0 +1,17 @@
+rule ebsIsEncrypted when resourceType == "AWS::EC2::Volume" {
+    configuration.encrypted == true <<EBS Volumes must be encrypted>>
+}
+
+rule ebsSnapshotIsEncrypted when resourceType == "AWS::EC2::Snapshot" {
+    configuration.encrypted == true <<EBS snapshots must be encrypted at rest>>
+}
+
+rule ebsHasRequiredTags when resourceType == "AWS::EC2::Volume" {
+    let required_tags = ["ops:backupschedule1", "ops:backupschedule2", "ops:backupschedule3", "Environment", "Owner"]
+    
+    configuration.tags exists
+    configuration.tags.* {
+        key in %required_tags
+    }
+    <<EBS volumes must have all required tags>>
+}

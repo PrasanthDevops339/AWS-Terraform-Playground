@@ -1,0 +1,63 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenySQSQueueWithoutEncryption",
+      "Effect": "Deny",
+      "Action": [
+        "sqs:CreateQueue"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "Null": {
+          "sqs:KmsMasterKeyId": "true"
+        }
+      }
+    },
+    {
+      "Sid": "DenySQSQueueWithoutTags",
+      "Effect": "Deny",
+      "Action": [
+        "sqs:CreateQueue"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "Null": {
+          "aws:RequestTag/Environment": "true"
+        }
+      }
+    },
+    {
+      "Sid": "DenySQSPublicAccess",
+      "Effect": "Deny",
+      "Action": [
+        "sqs:AddPermission",
+        "sqs:SetQueueAttributes"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "sqs:Principal": "*"
+        }
+      }
+    },
+    {
+      "Sid": "RestrictSQSQueueDeletion",
+      "Effect": "Deny",
+      "Action": [
+        "sqs:DeleteQueue"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/DeletionProtection": "true"
+        }
+      }
+    },
+    {
+      "Sid": "EnforceSQSMessageRetention",
+      "Effect": "Deny",
+      "Action": [
+        "sqs:CreateQueue",
+        "sqs:SetQueueAttributes"
+      ],

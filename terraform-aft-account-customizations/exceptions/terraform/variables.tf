@@ -32,3 +32,37 @@ variable "config_resource_types" {
     "AWS::RDS::DBInstance"
   ]
 }
+
+#############################################
+# Service Control Policy Variables
+#############################################
+
+variable "enable_ebs_scp" {
+  type        = bool
+  description = "Enable EBS governance SCP"
+  default     = true
+}
+
+variable "enable_sqs_scp" {
+  type        = bool
+  description = "Enable SQS governance SCP"
+  default     = true
+}
+
+variable "enable_efs_scp" {
+  type        = bool
+  description = "Enable EFS governance SCP"
+  default     = true
+}
+
+variable "scp_attach_to_target" {
+  type        = bool
+  description = "Whether to attach SCPs to organizational unit or account"
+  default     = false
+}
+
+variable "scp_target_id" {
+  type        = string
+  description = "The organizational unit ID or account ID to attach SCPs to"
+  default     = null
+}

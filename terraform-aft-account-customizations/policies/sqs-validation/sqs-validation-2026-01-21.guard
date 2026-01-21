@@ -1,0 +1,25 @@
+rule sqsIsEncrypted when resourceType == "AWS::SQS::Queue" {
+    configuration.SqsManagedSseEnabled == "true" <<SQS queues must be encrypted>>
+}
+
+rule sqsHasRequiredTags when resourceType == "AWS::SQS::Queue" {
+    let required_tags = ["Environment", "Owner", "Application", "CostCenter"]
+    
+    configuration.tags exists
+    configuration.tags.* {
+        key in %required_tags
+    }
+    <<SQS queues must have all required tags>>
+}
+
+rule sqsHasValidEnvironmentTag when resourceType == "AWS::SQS::Queue" {
+    let valid_environments = ["dev", "staging", "production", "test"]
+    
+    when configuration.tags exists {
+        some configuration.tags[*] {
+            key == "Environment"
+            value in %valid_environments
+        }
+    }
+    <<SQS queue Environment tag must be one of: dev, staging, production, test>>
+}

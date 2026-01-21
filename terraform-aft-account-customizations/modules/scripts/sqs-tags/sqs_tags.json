@@ -1,0 +1,19 @@
+{
+  "required_tags": {
+    "Environment": [
+      "dev",
+      "staging",
+      "production",
+      "test"
+    ],
+    "Owner": [],
+    "Application": [],
+    "CostCenter": [
+      "engineering",
+      "operations",
+      "product",
+      "finance",
+      "marketing"
+    ]
+  }
+}

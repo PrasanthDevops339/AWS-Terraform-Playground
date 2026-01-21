@@ -1,0 +1,53 @@
+# Account Configuration
+account_name = "my-account"
+environment  = "prd"
+region       = "us-east-1"
+
+# KMS Encryption (Optional)
+kms_key_arn = null
+
+# Tags
+tags = {
+  ManagedBy   = "AFT"
+  Environment = "production"
+  CostCenter  = "engineering"
+}
+
+# AWS Config Resource Types to Monitor
+config_resource_types = [
+  "AWS::EC2::Instance",
+  "AWS::EC2::Volume",
+  "AWS::RDS::DBInstance"
+]
+
+#############################################
+# Service Control Policy Configuration
+#############################################
+
+# Enable/Disable Individual SCPs
+enable_ebs_scp = true
+enable_sqs_scp = true
+enable_efs_scp = true
+
+# SCP Attachment
+# Set to true to automatically attach SCPs to target
+scp_attach_to_target = false
+
+# Target ID - Organizational Unit ID or Account ID
+# Example OU: "ou-xxxx-xxxxxxxx"
+# Example Account: "123456789012"
+scp_target_id = null
+
+# Example configurations:
+
+# Attach to specific OU:
+# scp_attach_to_target = true
+# scp_target_id        = "ou-abcd-12345678"
+
+# Attach to specific account:
+# scp_attach_to_target = true
+# scp_target_id        = "123456789012"
+
+# Just create policies without attaching:
+# scp_attach_to_target = false
+# scp_target_id        = null

@@ -1,0 +1,61 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyUnencryptedEFS",
+      "Effect": "Deny",
+      "Action": [
+        "elasticfilesystem:CreateFileSystem"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "Bool": {
+          "elasticfilesystem:Encrypted": "false"
+        }
+      }
+    },
+    {
+      "Sid": "DenyEFSWithoutTags",
+      "Effect": "Deny",
+      "Action": [
+        "elasticfilesystem:CreateFileSystem"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "Null": {
+          "aws:RequestTag/Environment": "true"
+        }
+      }
+    },
+    {
+      "Sid": "DenyPublicEFSAccess",
+      "Effect": "Deny",
+      "Action": [
+        "elasticfilesystem:CreateFileSystem",
+        "elasticfilesystem:ModifyMountTargetSecurityGroups",
+        "elasticfilesystem:PutFileSystemPolicy"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "Bool": {
+          "elasticfilesystem:PublicAccess": "true"
+        }
+      }
+    },
+    {
+      "Sid": "RestrictEFSDeletion",
+      "Effect": "Deny",
+      "Action": [
+        "elasticfilesystem:DeleteFileSystem"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/DeletionProtection": "true"
+        }
+      }
+    },
+    {
+      "Sid": "EnforceEFSBackupPolicy",
+      "Effect": "Deny",
+      "Action": [
