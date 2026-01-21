@@ -323,3 +323,36 @@ resource "aws_config_config_rule" "efs_tagging_rule" {
 
   depends_on = [aws_lambda_permission.allow_config_invoke_efs]
 }
+
+#############################################
+# Guard Policy Rules Conformance Pack
+# AFT deploys this to each account individually
+#############################################
+
+module "policy_rules_conformance_pack" {
+  source = "../../modules/conformance_pack"
+
+  cpack_name = "resource-validation"
+  random_id  = null
+
+  policy_rules_list = [
+    {
+      config_rule_name     = "ebs-validation"
+      config_rule_version  = "2026-01-21"
+      description          = "Validates EBS encryption and required tags"
+      resource_types_scope = ["AWS::EC2::Volume", "AWS::EC2::Snapshot"]
+    },
+    {
+      config_rule_name     = "sqs-validation"
+      config_rule_version  = "2026-01-21"
+      description          = "Validates SQS encryption and required tags"
+      resource_types_scope = ["AWS::SQS::Queue"]
+    },
+    {
+      config_rule_name     = "efs-validation"
+      config_rule_version  = "2026-01-21"
+      description          = "Validates EFS encryption, performance mode, and required tags"
+      resource_types_scope = ["AWS::EFS::FileSystem"]
+    }
+  ]
+}

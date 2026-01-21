@@ -15,26 +15,8 @@ variable "cpack_name" {
   type        = string
 }
 
-variable "excluded_accounts" {
-  description = "List of excluded accounts (only for organization packs)"
-  type        = list(string)
-  default     = []
-}
-
-variable "organization_pack" {
-  description = "Deploy as organization-wide conformance pack"
-  type        = bool
-  default     = false
-}
-
 variable "random_id" {
   description = "Random ID suffix for resource names"
   type        = string
   default     = null
-}
-
-variable "tags" {
-  description = "Tags to apply to resources"
-  type        = map(string)
-  default     = {}
 }
