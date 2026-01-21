@@ -1,3 +1,37 @@
+"""
+AWS Config Aggregator Query Script
+
+Purpose:
+    Queries AWS Config aggregator for non-compliant resources across multiple accounts.
+    Retrieves resource compliance data and stores results for reporting/remediation.
+
+Features:
+    - Cross-account Config data aggregation
+    - SQL-based querying of resource configurations
+    - OpenTelemetry tracing for observability
+    - Pagination handling for large result sets
+    - Integration with DynamoDB for data persistence
+
+Environment Variables Required:
+    - AGGREGATOR_NAME: Name of the AWS Config aggregator
+    - REGION: AWS region for Config queries
+    - TAGGING_BUCKET: S3 bucket for storing results
+    - BUCKET_PREFIX: S3 key prefix for organizing data
+    - POLICY_TABLE: DynamoDB table for policy tracking
+    - CLOUD_VERSION_TABLE: DynamoDB table for version tracking
+
+Usage:
+    Called by orchestration script with resource type filter
+    Example: main('vol-')  # Query EBS volumes
+
+Output:
+    Returns non-compliant resources with:
+    - Resource type and ID
+    - Compliance status and rule violations
+    - Account and region information
+    - Configuration capture timestamp
+"""
+
 # scripts/config_aggregator.py
 
 import json
@@ -14,9 +48,11 @@ from boto3.dynamodb.conditions import Key, Attr
 import sys
 import logging
 
+# OpenTelemetry for distributed tracing
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind
 
+# Configure logging with OpenTelemetry trace context
 FORMAT = '%(asctime)s - %(levelname)s - [trace_id=%(otelTraceID)s span_id=%(otelSpanID)s resource.service.name=%(otelServiceName)s] - %(message)s'
 logger = logging.getLogger(__name__)
 logger.setLevel("INFO")
@@ -26,24 +62,55 @@ logger.addHandler(h)
 
 logger.info("Starting Config query")
 
-AGGREGATOR_NAME = os.getenv('AGGREGATOR_NAME')
-REGION = os.getenv('REGION')
-bucket_name = os.getenv('TAGGING_BUCKET')
-bucket_prefix = os.getenv('BUCKET_PREFIX')
-policy_table = os.getenv('POLICY_TABLE')
-version_table = os.getenv('CLOUD_VERSION_TABLE')
+# Load configuration from environment variables
+AGGREGATOR_NAME = os.getenv('AGGREGATOR_NAME')  # Config aggregator name
+REGION = os.getenv('REGION')                    # AWS region
+bucket_name = os.getenv('TAGGING_BUCKET')       # S3 bucket for results
+bucket_prefix = os.getenv('BUCKET_PREFIX')      # S3 object key prefix
+policy_table = os.getenv('POLICY_TABLE')        # DynamoDB policy table
+version_table = os.getenv('CLOUD_VERSION_TABLE') # DynamoDB version table
 
 
 def main(item, tries=1):
+    """
+    Main query function for AWS Config aggregator.
+    
+    Args:
+        item (str): Resource ID prefix to filter query (e.g., 'vol-' for EBS volumes)
+        tries (int): Retry attempt number (for error handling)
+        
+    Returns:
+        list: Non-compliant resources matching the filter
+        
+    Process:
+        1. Construct SQL query for Config aggregator
+        2. Execute query with pagination
+        3. Process and format results
+        4. Handle retries on failures
+        
+    Query Logic:
+        - Selects resources with NON_COMPLIANT status
+        - Filters by resource ID prefix
+        - Orders by account ID
+        - Returns resource configuration and compliance details
+    """
     try:
+        # Initialize AWS Config client with retry configuration
         client = boto3.client('config', region_name=REGION, config=Config(retries={'max_attempts': 10}))
-        # SQL query to select all active EC2 instances
+        
+        # SQL query to select all non-compliant resources matching the filter
+        # Query structure:
+        #   - resourceType: Type of AWS resource (e.g., AWS::EC2::Volume)
+        #   - resourceId: Unique resource identifier
+        #   - configuration.complianceType: Compliance status
+        #   - configuration.configRuleList: Rules that evaluated the resource
         query = "SELECT resourceType,resourceId,resourceName,configuration.targetResourceType,configuration.complianceType,configuration.configRuleList," \
                 "configurationItemCaptureTime,configurationItemStatus,accountId,awsRegion " \
                 "WHERE configuration.complianceType = 'NON_COMPLIANT' " \
                 "AND resourceId LIKE '" + item + "%' " \
                 "ORDER BY accountId DESC"
 
+        # Optional: Add time filter for recent violations only
         # "AND configurationItemCaptureTime >= '2025-09-15T00:00:00Z'" \
         #logger.info(query)
 
