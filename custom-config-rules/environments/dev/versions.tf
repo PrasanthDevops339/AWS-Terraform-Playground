@@ -18,7 +18,7 @@ provider "aws" {
       "finops:application"   = "platform_core_services"
       "finops:portfolio"     = "Technology Delivery"
       "finops:costcenter"    = "DTD04"
-      "finops:owner"         = "Angela Ratis-Buford"
+      "finops:owner"         = "B"
       "admin:environment"    = "dev"
     }
   }
@@ -33,7 +33,7 @@ provider "aws" {
       "finops:application"   = "platform_core_services"
       "finops:portfolio"     = "Technology Delivery"
       "finops:costcenter"    = "DTD04"
-      "finops:owner"         = "Angela Ratis-Buford"
+      "finops:owner"         = "A"
       "admin:environment"    = "dev"
     }
   }

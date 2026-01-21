@@ -6,10 +6,10 @@ module "cpack_encryption" {
   cpack_name        = "encryption-validation"
   organization_pack = true
   excluded_accounts = [
-    "040767101640",
-    "066833532577",
-    "589445360618",
-    "667863416739" # smrrnd-tst | config not config'd on account and SCP blocks it
+    "000000000000",
+    "066777777777",
+    "999999990618",
+    "666666666739" # smrrnd-tst | config not config'd on account and SCP blocks it
   ]
 
   policy_rules_list = [
@@ -47,10 +47,10 @@ module "cpack_encryption_use1" {
   cpack_name        = "encryption-validation"
   organization_pack = true
   excluded_accounts = [
-    "040767101640",
-    "066833532577",
-    "589445360618",
-    "667863416739" # smrrnd-tst | config not config'd on account and SCP blocks it
+    "000000000000",
+    "066777777777",
+    "999999990618",
+    "666666666739"  # smrrnd-tst | config not config'd on account and SCP blocks it
   ]
 
   policy_rules_list = [
