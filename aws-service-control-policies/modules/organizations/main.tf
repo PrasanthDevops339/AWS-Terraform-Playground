@@ -1,3 +1,38 @@
+# ============================================================================
+# EXCEPTION EXPIRY FEATURE (disabled by default)
+# ============================================================================
+# This feature automatically filters out expired exception accounts from policies
+# Enable with: enable_exception_expiry = true
+
+locals {
+  # Get today's date for exception expiry comparison
+  today = formatdate("YYYY-MM-DD", timestamp())
+
+  # Filter exception_accounts to only include non-expired accounts
+  # Only active when enable_exception_expiry = true
+  active_exceptions = var.enable_exception_expiry ? {
+    for account_id, expiry_date in var.exception_accounts :
+    account_id => expiry_date
+    if timecmp(expiry_date, local.today) >= 0
+  } : var.exception_accounts
+
+  # Build list of expired exceptions for validation/logging
+  expired_exceptions = var.enable_exception_expiry ? {
+    for account_id, expiry_date in var.exception_accounts :
+    account_id => expiry_date
+    if timecmp(expiry_date, local.today) < 0
+  } : {}
+
+  # Merge exception accounts into policy_vars for use in templates
+  # When exception expiry is enabled, only active exceptions are included
+  merged_policy_vars = merge(
+    var.policy_vars,
+    var.enable_exception_expiry ? {
+      active_exception_accounts = keys(local.active_exceptions)
+    } : {}
+  )
+}
+
 resource "random_string" "main" {
   count   = var.add_random_characters == true ? 1 : 0
   length  = 6
@@ -12,7 +47,7 @@ resource "aws_organizations_policy" "main" {
     jsondecode(
       templatefile(
         "../../policies/${var.policy_name}-${var.file_date}.json",
-        var.policy_vars
+        local.merged_policy_vars
       )
     )
   )

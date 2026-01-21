@@ -112,3 +112,47 @@ module "dev-workload-rcp-scp-test" {
 
   target_ids = [var.workloads]
 }
+
+# ============================================================================
+# AMI GOVERNANCE POLICIES - Prasa Operations
+# ============================================================================
+# Approved AMI Publishers:
+#   - 565656565656 (prasains-operations-dev-use2)
+#   - 666363636363 (prasains-operations-prd-use2)
+# ============================================================================
+
+# AMI Guardrail SCP - Prevents non-approved AMI usage, sideloading, public sharing
+# Only AMIs from Prasa Operations accounts are permitted
+module "scp-ami-guardrail" {
+  source = "../../modules/organizations"
+
+  policy_name = "scp-ami-guardrail"
+  file_date   = "2026-01-18"
+  description = "SCP to enforce Prasa AMI governance: only prasa-* AMIs from Operations accounts (565656565656, 666363636363), prevent sideloading, deny public sharing"
+  type        = "SERVICE_CONTROL_POLICY"
+
+  # Deploy to workloads OU - adjust target as needed
+  target_ids = [var.workloads]
+
+  # Exception expiry feature (disabled by default)
+  enable_exception_expiry = false
+  exception_accounts      = {}
+}
+
+# EC2 Declarative Policy - Enforces AMI settings at the EC2 service level
+# Prasa Operations accounts only: prasains-operations-dev-use2, prasains-operations-prd-use2
+module "declarative-policy-ec2" {
+  source = "../../modules/organizations"
+
+  policy_name = "declarative-policy-ec2"
+  file_date   = "2026-01-18"
+  description = "EC2 Declarative Policy for Prasa AMI governance: only prasa-* AMIs from Operations accounts permitted"
+  type        = "DECLARATIVE_POLICY_EC2"
+
+  # Deploy to workloads OU - adjust target as needed
+  target_ids = [var.workloads]
+
+  # Exception expiry feature (disabled by default)
+  enable_exception_expiry = false
+  exception_accounts      = {}
+}

@@ -63,3 +63,18 @@ variable "add_random_characters" {
   type        = bool
   default     = false
 }
+
+# ============================================================================
+# EXCEPTION EXPIRY FEATURE (for future use)
+# ============================================================================
+variable "enable_exception_expiry" {
+  description = "(Optional) Enable automatic exception expiry feature. When enabled, exception_accounts with expired dates will be filtered out."
+  type        = bool
+  default     = false
+}
+
+variable "exception_accounts" {
+  description = "(Optional) Map of account IDs to expiry dates (YYYY-MM-DD format). Only used when enable_exception_expiry = true"
+  type        = map(string)
+  default     = {}
+}
