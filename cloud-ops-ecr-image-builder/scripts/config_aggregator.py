@@ -197,6 +197,56 @@ def check_account(account_name):
         return False
 
 
+def is_account_in_suspended_ou(account_id):
+    """
+    Check if an account belongs to a Suspended OU.
+    Returns True if the account is in a suspended OU, False otherwise.
+    """
+    try:
+        org_client = boto3.client('organizations')
+        
+        # Get the parent organizational units for this account
+        response = org_client.list_parents(ChildId=account_id)
+        
+        for parent in response.get('Parents', []):
+            if parent['Type'] == 'ORGANIZATIONAL_UNIT':
+                ou_id = parent['Id']
+                
+                # Get the OU details
+                ou_response = org_client.describe_organizational_unit(OrganizationalUnitId=ou_id)
+                ou_name = ou_response.get('OrganizationalUnit', {}).get('Name', '')
+                
+                logger.info(f"🔍 Account {account_id} - Immediate OU: {ou_name} (ID: {ou_id})")
+                
+                # Check if OU name contains 'suspend' or 'suspended'
+                if 'suspend' in ou_name.lower():
+                    logger.warning(f"🚫 FOUND SUSPENDED OU: Account {account_id} is in suspended OU: '{ou_name}'")
+                    return True
+                
+                # Recursively check parent OUs
+                parent_response = org_client.list_parents(ChildId=ou_id)
+                for parent_ou in parent_response.get('Parents', []):
+                    if parent_ou['Type'] == 'ORGANIZATIONAL_UNIT':
+                        parent_ou_id = parent_ou['Id']
+                        parent_ou_response = org_client.describe_organizational_unit(
+                            OrganizationalUnitId=parent_ou_id
+                        )
+                        parent_ou_name = parent_ou_response.get('OrganizationalUnit', {}).get('Name', '')
+                        logger.info(f"🔍 Account {account_id} - Parent OU: {parent_ou_name} (ID: {parent_ou_id})")
+                        
+                        if 'suspend' in parent_ou_name.lower():
+                            logger.warning(f"🚫 FOUND SUSPENDED OU: Account {account_id} is in suspended OU hierarchy: '{parent_ou_name}'")
+                            return True
+        
+        logger.info(f"✅ Account {account_id} is NOT in suspended OU")
+        return False
+        
+    except Exception as e:
+        logger.error(f"❌ Error checking if account {account_id} is in suspended OU: {e}")
+        # In case of error, assume not suspended to avoid skipping valid accounts
+        return False
+
+
 if __name__ == '__main__':
     tracer = trace.get_tracer(__name__)
     with tracer.start_as_current_span("GetConfig", kind=SpanKind.SERVER):
@@ -257,6 +307,12 @@ if __name__ == '__main__':
                         status = parsed_results.get('configurationItemStatus')
                         account_id = parsed_results.get('accountId')
                         account_name = get_account_name_cached(account_id)
+                        
+                        # Skip accounts in suspended OU
+                        if is_account_in_suspended_ou(account_id):
+                            logger.warning(f"⚠️  SUSPENDED OU - Skipping account: {account_id} ({account_name})")
+                            continue
+                        
                         region = parsed_results.get('awsRegion')
                         config_rule_name = []
                         config_annotation = []
