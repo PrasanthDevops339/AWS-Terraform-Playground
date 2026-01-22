@@ -70,6 +70,15 @@ bucket_prefix = os.getenv('BUCKET_PREFIX')      # S3 object key prefix
 policy_table = os.getenv('POLICY_TABLE')        # DynamoDB policy table
 version_table = os.getenv('CLOUD_VERSION_TABLE') # DynamoDB version table
 
+# ============================================================================
+# SUSPENDED OU CONFIGURATION
+# ============================================================================
+# Hardcoded OU ID for the Suspended OU. All accounts under this OU will be
+# excluded from compliance reporting. Update this if your Suspended OU changes.
+# ============================================================================
+SUSPENDED_OU_ID = 'ou-susp345jkl'  # Update this with your actual Suspended OU ID
+# ============================================================================
+
 
 def main(item, tries=1):
     """
@@ -94,75 +103,58 @@ def main(item, tries=1):
         - Orders by account ID
         - Returns resource configuration and compliance details
     """
+    # Initialize AWS Config client with retry configuration
+    client = boto3.client('config', region_name=REGION, config=Config(retries={'max_attempts': 10}))
+    
+    # SQL query to select all non-compliant resources matching the filter
+    # Query structure:
+    #   - resourceType: Type of AWS resource (e.g., AWS::EC2::Volume)
+    #   - resourceId: Unique resource identifier
+    #   - configuration.complianceType: Compliance status
+    #   - configuration.configRuleList: Rules that evaluated the resource
+    query = "SELECT resourceType,resourceId,resourceName,configuration.targetResourceType,configuration.complianceType,configuration.configRuleList," \
+            "configurationItemCaptureTime,configurationItemStatus,accountId,awsRegion " \
+            "WHERE configuration.complianceType = 'NON_COMPLIANT' " \
+            "AND resourceId LIKE '" + item + "%' " \
+            "ORDER BY accountId DESC"
+
+    # Optional: Add time filter for recent violations only
+    # "AND configurationItemCaptureTime >= '2025-09-15T00:00:00Z'" \
+    #logger.info(query)
+
+    results = []
+
     try:
-        # Initialize AWS Config client with retry configuration
-        client = boto3.client('config', region_name=REGION, config=Config(retries={'max_attempts': 10}))
-        
-        # SQL query to select all non-compliant resources matching the filter
-        # Query structure:
-        #   - resourceType: Type of AWS resource (e.g., AWS::EC2::Volume)
-        #   - resourceId: Unique resource identifier
-        #   - configuration.complianceType: Compliance status
-        #   - configuration.configRuleList: Rules that evaluated the resource
-        query = "SELECT resourceType,resourceId,resourceName,configuration.targetResourceType,configuration.complianceType,configuration.configRuleList," \
-                "configurationItemCaptureTime,configurationItemStatus,accountId,awsRegion " \
-                "WHERE configuration.complianceType = 'NON_COMPLIANT' " \
-                "AND resourceId LIKE '" + item + "%' " \
-                "ORDER BY accountId DESC"
-
-        # Optional: Add time filter for recent violations only
-        # "AND configurationItemCaptureTime >= '2025-09-15T00:00:00Z'" \
-        #logger.info(query)
-
-        results = []
-
-        try:
-            # Initialize the nextToken as None to start the loop
-            next_token = None
-            # Loop to handle pagination with nextToken
-            while True:
-                # Execute the query with the current nextToken
-                if next_token:
-                    response = client.select_aggregate_resource_config(
-                        Expression=query,
-                        ConfigurationAggregatorName=AGGREGATOR_NAME,
-                        NextToken=next_token
-                    )
-                else:
-                    response = client.select_aggregate_resource_config(
-                        Expression=query,
-                        ConfigurationAggregatorName=AGGREGATOR_NAME
-                    )
-
-                #logger.info("Response", response)
-
-                # Process the results (for example, logger.info them)
-                results.extend(response['Results'])
-
-                # Check if there is a nextToken to continue fetching more results
-                next_token = response.get('NextToken')
-
-                # If no nextToken, break out of the loop
-                if not next_token:
-                    break
-
-            return results
-
-        except ClientError as e:
-            if e.response['Error']['Code'] == 'ThrottlingException':
-                if tries <= 3:
-                    logger.error("Throttling Exception Occured.")
-                    logger.error("Retrying.....")
-                    logger.error("Attempt No.: " + str(tries))
-                    time.sleep(3*tries)
-                    return main(tries+1)
-                else:
-                    logger.error("Attempted 3 Times But No Success.")
-                    logger.error("Raising Exception.....")
-                    raise
+        # Initialize the nextToken as None to start the loop
+        next_token = None
+        # Loop to handle pagination with nextToken
+        while True:
+            # Execute the query with the current nextToken
+            if next_token:
+                response = client.select_aggregate_resource_config(
+                    Expression=query,
+                    ConfigurationAggregatorName=AGGREGATOR_NAME,
+                    NextToken=next_token
+                )
             else:
-                logger.error(f"Error executing query : {str(e)}")
-                raise
+                response = client.select_aggregate_resource_config(
+                    Expression=query,
+                    ConfigurationAggregatorName=AGGREGATOR_NAME
+                )
+
+            #logger.info("Response", response)
+
+            # Process the results (for example, logger.info them)
+            results.extend(response['Results'])
+
+            # Check if there is a nextToken to continue fetching more results
+            next_token = response.get('NextToken')
+
+            # If no nextToken, break out of the loop
+            if not next_token:
+                break
+
+        return results
 
     except ClientError as e:
         if e.response['Error']['Code'] == 'ThrottlingException':
@@ -171,7 +163,7 @@ def main(item, tries=1):
                 logger.error("Retrying.....")
                 logger.error("Attempt No.: " + str(tries))
                 time.sleep(3*tries)
-                return main(tries+1)
+                return main(item, tries+1)
             else:
                 logger.error("Attempted 3 Times But No Success.")
                 logger.error("Raising Exception.....")
@@ -264,54 +256,88 @@ def check_account(account_name):
         return False
 
 
+# ============================================================================
+# SUSPENDED OU EXCLUSION - START
+# ============================================================================
+# This function checks if an account is in the 'Suspended' OU and excludes it
+# from compliance reporting. Accounts in suspended OUs are skipped entirely.
+# Uses hardcoded OU ID (SUSPENDED_OU_ID) for fast, reliable checking.
+# ============================================================================
 def is_account_in_suspended_ou(account_id):
     """
-    Check if an account belongs to a Suspended OU.
-    Returns True if the account is in a suspended OU, False otherwise.
+    Check if an account belongs to the Suspended OU (or any of its children).
+    
+    Returns True if the account is under the SUSPENDED_OU_ID, False otherwise.
+    
+    This is more efficient than name-based checking:
+    - OU IDs don't change (names can be renamed)
+    - Direct ID comparison is faster
+    - No case-sensitivity issues
+    
+    Example org structure:
+        Root
+        ├── infrastructure (ou-test123abc)
+        ├── Suspended (ou-susp345jkl)  <- SUSPENDED_OU_ID - Accounts here excluded
+        └── workloads (ou-prod678uvw)
     """
     try:
         org_client = boto3.client('organizations')
         
-        # Get the parent organizational units for this account
-        response = org_client.list_parents(ChildId=account_id)
+        # Walk up the OU hierarchy from the account to root
+        current_id = account_id
+        ou_path = []
         
-        for parent in response.get('Parents', []):
+        while True:
+            # Get parent of current entity
+            response = org_client.list_parents(ChildId=current_id)
+            
+            if not response.get('Parents'):
+                break
+                
+            parent = response['Parents'][0]  # An account/OU has only one parent
+            
+            # If we've reached the root, stop
+            if parent['Type'] == 'ROOT':
+                ou_path.append(('Root', parent['Id']))
+                break
+            
+            # If it's an OU, check if it matches the suspended OU ID
             if parent['Type'] == 'ORGANIZATIONAL_UNIT':
                 ou_id = parent['Id']
                 
-                # Get the OU details
-                ou_response = org_client.describe_organizational_unit(OrganizationalUnitId=ou_id)
-                ou_name = ou_response.get('OrganizationalUnit', {}).get('Name', '')
-                
-                logger.info(f"🔍 Account {account_id} - Immediate OU: {ou_name} (ID: {ou_id})")
-                
-                # Check if OU name contains 'suspend' or 'suspended'
-                if 'suspend' in ou_name.lower():
-                    logger.warning(f"🚫 FOUND SUSPENDED OU: Account {account_id} is in suspended OU: '{ou_name}'")
+                # ⚡ DIRECT OU ID CHECK - Fast and reliable
+                if ou_id == SUSPENDED_OU_ID:
+                    ou_response = org_client.describe_organizational_unit(OrganizationalUnitId=ou_id)
+                    ou_name = ou_response.get('OrganizationalUnit', {}).get('Name', '')
+                    logger.warning(f"🚫 SUSPENDED OU DETECTED: Account {account_id} is under Suspended OU")
+                    logger.warning(f"   OU Name: '{ou_name}' | OU ID: {ou_id}")
                     return True
                 
-                # Recursively check parent OUs
-                parent_response = org_client.list_parents(ChildId=ou_id)
-                for parent_ou in parent_response.get('Parents', []):
-                    if parent_ou['Type'] == 'ORGANIZATIONAL_UNIT':
-                        parent_ou_id = parent_ou['Id']
-                        parent_ou_response = org_client.describe_organizational_unit(
-                            OrganizationalUnitId=parent_ou_id
-                        )
-                        parent_ou_name = parent_ou_response.get('OrganizationalUnit', {}).get('Name', '')
-                        logger.info(f"🔍 Account {account_id} - Parent OU: {parent_ou_name} (ID: {parent_ou_id})")
-                        
-                        if 'suspend' in parent_ou_name.lower():
-                            logger.warning(f"🚫 FOUND SUSPENDED OU: Account {account_id} is in suspended OU hierarchy: '{parent_ou_name}'")
-                            return True
+                # Get OU name for logging path (optional)
+                ou_response = org_client.describe_organizational_unit(OrganizationalUnitId=ou_id)
+                ou_name = ou_response.get('OrganizationalUnit', {}).get('Name', '')
+                ou_path.append((ou_name, ou_id))
+                
+                # Move up to the next level
+                current_id = ou_id
+            else:
+                break
         
+        # Log the full OU path for debugging
+        ou_path.reverse()
+        path_str = ' -> '.join([f"{name}" for name, _ in ou_path])
+        logger.info(f"🔍 Account {account_id} OU Path: {path_str}")
         logger.info(f"✅ Account {account_id} is NOT in suspended OU")
         return False
         
     except Exception as e:
-        logger.error(f"❌ Error checking if account {account_id} is in suspended OU: {e}")
-        # In case of error, assume not suspended to avoid skipping valid accounts
+        logger.error(f"❌ Error checking OU for account {account_id}: {e}")
+        # In case of error, assume not suspended to avoid accidentally skipping valid accounts
         return False
+
+# ============================================================================
+# SUSPENDED OU EXCLUSION - END
+# ============================================================================
 
 
 if __name__ == '__main__':
@@ -375,10 +401,14 @@ if __name__ == '__main__':
                         account_id = parsed_results.get('accountId')
                         account_name = get_account_name_cached(account_id)
                         
-                        # Skip accounts in suspended OU
+                        # ================================================================
+                        # SUSPENDED OU CHECK: Exclude accounts from Suspended OU
+                        # If account is in a Suspended OU, skip it entirely from reporting
+                        # ================================================================
                         if is_account_in_suspended_ou(account_id):
                             logger.warning(f"⚠️  SUSPENDED OU - Skipping account: {account_id} ({account_name})")
                             continue
+                        # ================================================================
                         
                         region = parsed_results.get('awsRegion')
                         config_rule_name = []
