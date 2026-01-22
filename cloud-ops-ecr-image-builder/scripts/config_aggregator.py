@@ -305,11 +305,11 @@ def is_account_in_suspended_ou(account_id):
             if parent['Type'] == 'ORGANIZATIONAL_UNIT':
                 ou_id = parent['Id']
                 
-                # ⚡ DIRECT OU ID CHECK - Fast and reliable
+                # DIRECT OU ID CHECK - Fast and reliable
                 if ou_id == SUSPENDED_OU_ID:
                     ou_response = org_client.describe_organizational_unit(OrganizationalUnitId=ou_id)
                     ou_name = ou_response.get('OrganizationalUnit', {}).get('Name', '')
-                    logger.warning(f"🚫 SUSPENDED OU DETECTED: Account {account_id} is under Suspended OU")
+                    logger.warning(f"[SUSPENDED OU DETECTED] Account {account_id} is under Suspended OU")
                     logger.warning(f"   OU Name: '{ou_name}' | OU ID: {ou_id}")
                     return True
                 
@@ -326,12 +326,12 @@ def is_account_in_suspended_ou(account_id):
         # Log the full OU path for debugging
         ou_path.reverse()
         path_str = ' -> '.join([f"{name}" for name, _ in ou_path])
-        logger.info(f"🔍 Account {account_id} OU Path: {path_str}")
-        logger.info(f"✅ Account {account_id} is NOT in suspended OU")
+        logger.info(f"[DEBUG] Account {account_id} OU Path: {path_str}")
+        logger.info(f"[OK] Account {account_id} is NOT in suspended OU")
         return False
         
     except Exception as e:
-        logger.error(f"❌ Error checking OU for account {account_id}: {e}")
+        logger.error(f"[ERROR] Error checking OU for account {account_id}: {e}")
         # In case of error, assume not suspended to avoid accidentally skipping valid accounts
         return False
 
@@ -406,7 +406,7 @@ if __name__ == '__main__':
                         # If account is in a Suspended OU, skip it entirely from reporting
                         # ================================================================
                         if is_account_in_suspended_ou(account_id):
-                            logger.warning(f"⚠️  SUSPENDED OU - Skipping account: {account_id} ({account_name})")
+                            logger.warning(f"[SUSPENDED OU] Skipping account: {account_id} ({account_name})")
                             continue
                         # ================================================================
                         
