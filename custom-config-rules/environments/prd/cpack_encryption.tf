@@ -34,17 +34,6 @@ module "cpack_encryption" {
     }
   ]
   
-  # AWS Managed Rules
-  managed_rules_list = [
-    {
-      config_rule_name     = "efs-encrypted-check"
-      description          = "AWS Managed Rule - Checks if Amazon EFS are configured to encrypt file data at rest using AWS KMS"
-      source_identifier    = "EFS_ENCRYPTED_CHECK"
-      resource_types_scope = ["AWS::EFS::FileSystem"]
-      input_parameters     = {}
-    }
-  ]
-  
   # Lambda Custom Rules
   lambda_rules_list = [
     {
@@ -99,17 +88,6 @@ module "cpack_encryption_use1" {
       config_rule_version  = "2025-10-30"
       description          = "Config Rule for checking if an EFS is encrypted"
       resource_types_scope = ["AWS::EFS::FileSystem"]
-    }
-  ]
-  
-  # AWS Managed Rules
-  managed_rules_list = [
-    {
-      config_rule_name     = "efs-encrypted-check"
-      description          = "AWS Managed Rule - Checks if Amazon EFS are configured to encrypt file data at rest using AWS KMS"
-      source_identifier    = "EFS_ENCRYPTED_CHECK"
-      resource_types_scope = ["AWS::EFS::FileSystem"]
-      input_parameters     = {}
     }
   ]
   

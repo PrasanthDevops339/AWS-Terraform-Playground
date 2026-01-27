@@ -554,31 +554,22 @@ module "cpack_encryption" {
   organization_pack = true  # Deploy to all accounts
   
   # Guard Policy Rules (custom policy as code)
+  # Validates EFS encryption at-rest via policies/efs-is-encrypted/efs-is-encrypted-2025-10-30.guard
   policy_rules_list = [
     {
       config_rule_name     = "efs-is-encrypted"
-      config_rule_version  = "2025-10-30"
-      description          = "Check if EFS is encrypted"
+      config_rule_version  = "2025-10-30"  # References the Guard policy file version
+      description          = "Check if EFS is encrypted at-rest"
       resource_types_scope = ["AWS::EFS::FileSystem"]
-    }
-  ]
-  
-  # AWS Managed Rules (built-in AWS rules)
-  managed_rules_list = [
-    {
-      config_rule_name     = "efs-encrypted-check"
-      description          = "AWS native EFS encryption check"
-      source_identifier    = "EFS_ENCRYPTED_CHECK"
-      resource_types_scope = ["AWS::EFS::FileSystem"]
-      input_parameters     = {}
     }
   ]
   
   # Lambda Custom Rules (our custom Lambda)
+  # Validates EFS TLS enforcement for in-transit encryption
   lambda_rules_list = [
     {
       config_rule_name     = "efs-tls-enforcement"
-      description          = "Validate EFS policy enforces TLS"
+      description          = "Validate EFS policy enforces TLS (in-transit)"
       lambda_function_arn  = module.efs_tls_enforcement.lambda_arn
       resource_types_scope = ["AWS::EFS::FileSystem"]
       message_type         = "ConfigurationItemChangeNotification"

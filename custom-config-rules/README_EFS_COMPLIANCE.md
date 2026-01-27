@@ -5,21 +5,47 @@
 This implementation provides comprehensive AWS Config compliance checking for Amazon EFS file systems across your AWS Organization:
 
 1. **EFS Encryption at Rest** - Guard policy rule (custom policy)
-2. **EFS Encryption at Rest** - AWS Managed rule (`EFS_ENCRYPTED_CHECK`)
-3. **EFS TLS Enforcement** - Custom Lambda rule (validates file system policies require `aws:SecureTransport`)
+2. **EFS TLS Enforcement** - Custom Lambda rule (validates file system policies require `aws:SecureTransport`)
 
 All rules are deployed organization-wide via **AWS Config Organization Conformance Packs**.
+
+## EFS Compliance Rules Matrix
+
+| Rule Name | Type | Purpose | Validates | Location | Version | Deployment |
+|-----------|------|---------|-----------|----------|---------|------------|
+| **efs-is-encrypted** | Guard Policy Rule | Encryption At-Rest | `configuration.Encrypted == true` | `policies/efs-is-encrypted/efs-is-encrypted-2025-10-30.guard` | `2025-10-30` | Conformance Pack |
+| **efs-tls-enforcement** | Custom Lambda Rule | Encryption In-Transit | `aws:SecureTransport` in resource policy | `scripts/efs-tls-enforcement/lambda_function.py` | Current | Conformance Pack + Standalone |
+
+### Rule Details
+
+| Aspect | Guard Policy (At-Rest) | Lambda Rule (In-Transit) |
+|--------|------------------------|--------------------------|
+| **What it checks** | EFS file system has encryption enabled | EFS resource policy enforces TLS |
+| **Resource type** | `AWS::EFS::FileSystem` | `AWS::EFS::FileSystem` |
+| **Technology** | AWS Config Guard DSL | Python 3.12 Lambda |
+| **Trigger** | Configuration changes | Configuration changes |
+| **Evaluation** | Guard engine evaluates policy | Lambda calls `DescribeFileSystemPolicy` API |
+| **Compliant when** | `Encrypted == true` | Policy has `Deny` with `SecureTransport == false` |
+| **Non-compliant when** | `Encrypted == false` or missing | No policy or missing TLS requirement |
+| **Region deployment** | us-east-2, us-east-1 | us-east-2, us-east-1 |
+| **Maintenance** | Policy file updates only | Lambda code + IAM policy updates |
+| **Dependencies** | None | Lambda function, IAM role, S3 bootstrap bucket |
+
+### Why Two Separate Rules?
+
+- **At-Rest Encryption**: Validates the EFS file system configuration itself (enabled/disabled)
+- **In-Transit Encryption**: Validates the resource-based policy attached to EFS (TLS enforcement)
+
+Both are required for complete EFS security compliance.
 
 ## Architecture
 
 ```
 Organization Conformance Pack
 ├── Guard Policy Rules
-│   └── efs-is-encrypted (Custom Policy)
-├── AWS Managed Rules
-│   └── efs-encrypted-check (AWS Managed)
+│   └── efs-is-encrypted (Custom Policy - validates encryption at-rest)
 └── Lambda Custom Rules
-    └── efs-tls-enforcement (Custom Lambda)
+    └── efs-tls-enforcement (Custom Lambda - validates TLS in-transit)
         ├── Lambda Function
         ├── Lambda Execution Role
         └── Config Rule
@@ -27,9 +53,11 @@ Organization Conformance Pack
 
 ## Components
 
-### 1. Guard Policy Rule: EFS Encryption
+### 1. Guard Policy Rule: EFS Encryption At-Rest
 
-**File:** `policies/efs-is-encrypted/efs-is-encrypted-2025-10-30.guard`
+**File:** `policies/efs-is-encrypted/efs-is-encrypted-2025-10-30.guard`  
+**Version:** `2025-10-30` (referenced in `environments/prd/cpack_encryption.tf`)  
+**Scope:** Encryption at-rest validation
 
 Validates that EFS file systems have encryption enabled at rest.
 
@@ -39,17 +67,19 @@ rule efsIsEncrypted when resourceType == "AWS::EFS::FileSystem" {
 }
 ```
 
-### 2. AWS Managed Rule: EFS_ENCRYPTED_CHECK
+**Why Guard Policy Instead of AWS Managed Rule?**  
+The Guard policy rule provides the same encryption-at-rest validation as the AWS managed rule `EFS_ENCRYPTED_CHECK`, but with these advantages:
+- Full control over policy logic and versioning
+- No dependency on AWS managed rule availability
+- Consistent policy-as-code approach across all rules
+- Version tracked in Git (`policies/efs-is-encrypted/efs-is-encrypted-2025-10-30.guard`)
 
-AWS-managed rule that checks if Amazon EFS file systems are configured to encrypt file data at rest using AWS KMS.
-
-**Source Identifier:** `EFS_ENCRYPTED_CHECK`
-
-### 3. Custom Lambda Rule: EFS TLS Enforcement
+### 2. Custom Lambda Rule: EFS TLS Enforcement (In-Transit)
 
 **Files:**
 - `scripts/efs-tls-enforcement/lambda_function.py` - Lambda function code
-- `iam/efs-tls-enforcement.json` - IAM policy for Lambda
+- `iam/efs-tls-enforcement.json` - IAM policy for Lambda  
+**Scope:** Encryption in-transit validation (TLS enforcement)
 
 **Functionality:**
 - Triggered on EFS file system configuration changes
