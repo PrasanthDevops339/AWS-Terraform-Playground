@@ -61,8 +61,7 @@ custom-config-rules/
 │       ├── variables.tf                 # Module inputs
 │       └── templates/
 │           ├── guard_template.yml       # Guard rule template
-│           ├── lambda_template.yml      # Lambda rule template
-│           └── managed_template.yml     # Managed rule template
+│           └── lambda_template.yml     # Lambda rule template
 │
 └── environments/
     ├── dev/

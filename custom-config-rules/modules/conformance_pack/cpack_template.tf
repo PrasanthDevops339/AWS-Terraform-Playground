@@ -35,30 +35,30 @@ locals {
     })
   ]) : ""
   
-  # Generate Managed rule blocks
-  managed_blocks = length(var.managed_rules_list) > 0 ? join("\n", [
-    for rule_block in var.managed_rules_list :
-    templatefile("${path.module}/templates/managed_template.yml", {
-      block_name        = replace("${title(rule_block.config_rule_name)}${local.random_id}", "-", "")
-      config_rule_name  = "${local.account_alias}-${rule_block.config_rule_name}${local.random_id}"
-      description       = rule_block.description
-      source_identifier = rule_block.source_identifier
-
-      resource_types_scope = trimspace(join("", [
-        for res_type in rule_block.resource_types_scope :
-        "        - ${res_type}\n"
-      ]))
-      
-      input_parameters = length(rule_block.input_parameters) > 0 ? format("InputParameters: %s",
-        jsonencode(rule_block.input_parameters)
-      ) : ""
-    })
-  ]) : ""
+  # Managed rule blocks - Placeholder for future use
+  # Currently not used - Guard policy rules provide equivalent functionality
+  # Uncomment and restore variable in variables.tf if AWS Managed rules are needed
+  # managed_blocks = length(var.managed_rules_list) > 0 ? join("\n", [
+  #   for rule_block in var.managed_rules_list :
+  #   templatefile("${path.module}/templates/managed_template.yml", {
+  #     block_name        = replace("${title(rule_block.config_rule_name)}${local.random_id}", "-", "")
+  #     config_rule_name  = "${local.account_alias}-${rule_block.config_rule_name}${local.random_id}"
+  #     description       = rule_block.description
+  #     source_identifier = rule_block.source_identifier
+  #     resource_types_scope = trimspace(join("", [
+  #       for res_type in rule_block.resource_types_scope :
+  #       "        - ${res_type}\n"
+  #     ]))
+  #     input_parameters = length(rule_block.input_parameters) > 0 ? format("InputParameters: %s",
+  #       jsonencode(rule_block.input_parameters)
+  #     ) : ""
+  #   })
+  # ]) : ""
   
-  # Combine all rule blocks
+  # Combine all rule blocks (Guard + Lambda only)
   cpack_blocks = trimspace(join("\n", compact([
     local.guard_blocks,
-    local.lambda_blocks,
-    local.managed_blocks
+    local.lambda_blocks
+    # local.managed_blocks  # Uncomment if managed rules are enabled
   ])))
 }

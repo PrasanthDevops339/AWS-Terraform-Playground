@@ -22,17 +22,19 @@ variable "lambda_rules_list" {
   default = []
 }
 
-variable "managed_rules_list" {
-  description = "List of AWS managed config rules to include in the conformance pack"
-  type = list(object({
-    config_rule_name     = string
-    description          = string
-    source_identifier    = string
-    resource_types_scope = list(string)
-    input_parameters     = optional(map(string), {})
-  }))
-  default = []
-}
+# Placeholder variable for AWS Managed rules - currently not in use
+# Uncomment if AWS Managed rules are needed in the future
+# variable "managed_rules_list" {
+#   description = "List of AWS managed config rules to include in the conformance pack"
+#   type = list(object({
+#     config_rule_name     = string
+#     description          = string
+#     source_identifier    = string
+#     resource_types_scope = list(string)
+#     input_parameters     = optional(map(string), {})
+#   }))
+#   default = []
+# }
 
 variable "cpack_name" {
   description = "Name of the conformance pack"

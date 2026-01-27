@@ -4,15 +4,15 @@
 [![AWS](https://img.shields.io/badge/AWS-Config-orange.svg)](https://aws.amazon.com/config/)
 [![License](https://img.shields.io/badge/License-Internal-blue.svg)]()
 
-Terraform modules for deploying AWS Config rules organization-wide using AWS Config Organization Conformance Packs. Supports Guard policies, AWS managed rules, and custom Lambda rules.
+Terraform modules for deploying AWS Config rules organization-wide using AWS Config Organization Conformance Packs. Supports Guard policies and custom Lambda rules. (AWS managed rules support available as placeholder for future use.)
 
 ## Features
 
 - 🎯 **Organization-wide deployment** via AWS Config Conformance Packs
 - 🛡️ **Multiple rule types**:
   - Guard policy rules (custom policy-as-code)
-  - AWS managed rules (built-in AWS rules)
   - Custom Lambda rules (advanced validation logic)
+  - AWS managed rules (placeholder - available for future use)
 - 🌍 **Multi-region support** (us-east-2, us-east-1)
 - 🔐 **Least privilege IAM** permissions
 - 📊 **Comprehensive compliance validation**
@@ -26,8 +26,6 @@ AWS Organization
 ├── Conformance Packs (Organization-wide)
 │   ├── Guard Policy Rules
 │   │   └── Custom policy validation (Guard DSL)
-│   ├── AWS Managed Rules
-│   │   └── Pre-built AWS compliance rules
 │   └── Lambda Custom Rules
 │       ├── Lambda Function (Python 3.12)
 │       ├── IAM Execution Role
@@ -48,8 +46,8 @@ AWS Organization
 | `sqs-is-encrypted` | Guard Policy | Validates SQS queues are encrypted | SQS::Queue |
 | `efs-is-encrypted` | Guard Policy | Validates EFS file systems are encrypted | EFS::FileSystem |
 | `efs-encrypted-check` | AWS Managed | AWS native EFS encryption check | EFS::FileSystem |
-| `efs-tls-enforcement` | Lambda Custom | Validates EFS policies enforce TLS | EFS::FileSystem |
-| `port-443-is-open` | Policy Rule | Validates port 443 is open | EC2::SecurityGroup |
+| `efs-tls-enforcement` | Lambda Custom | Validates EFS policies encrypted at-rest | EFS::FileSystem |
+| `efs-tls-enforcement` | Lambda Rule | Validates EFS policies enforce TLS in-transitSecurityGroup |
 
 ## Quick Start
 
@@ -110,8 +108,7 @@ custom-config-rules/
 │   │   ├── variables.tf
 │   │   └── templates/
 │   │       ├── guard_template.yml
-│   │       ├── lambda_template.yml
-│   │       └── managed_template.yml
+│   │       └── lambda_template.yml
 │   ├── lambda_rule/       # Lambda-based custom rules
 │   │   ├── lambda.tf
 │   │   ├── rule_organization.tf
@@ -472,9 +469,9 @@ Internal use only. All rights reserved.
 ### 2026-01-26
 - Added Lambda custom rule support to conformance packs
 - Added EFS TLS enforcement Lambda rule
-- Added AWS managed rule support (EFS_ENCRYPTED_CHECK)
-- Enhanced conformance pack module with multi-rule type support
-- Added comprehensive testing and monitoring
+- Removed AWS Managed rule dependency (using Guard policy for at-rest validation)
+- Enhanced conformance pack module with Guard and Lambda rule support
+- Added comprehensive EFS compliance matrix documentation
 
 ### 2026-01-09
 - Updated EBS encryption policy to version 2026-01-09
