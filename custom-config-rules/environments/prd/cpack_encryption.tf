@@ -12,6 +12,7 @@ module "cpack_encryption" {
     "666666666739" # smrrnd-tst | config not config'd on account and SCP blocks it
   ]
 
+  # Guard Policy Rules (Custom Policy)
   policy_rules_list = [
     {
       config_rule_name     = "ebs-is-encrypted"
@@ -31,6 +32,32 @@ module "cpack_encryption" {
       description          = "Config Rule for checking if an EFS is encrypted"
       resource_types_scope = ["AWS::EFS::FileSystem"]
     }
+  ]
+  
+  # AWS Managed Rules
+  managed_rules_list = [
+    {
+      config_rule_name     = "efs-encrypted-check"
+      description          = "AWS Managed Rule - Checks if Amazon EFS are configured to encrypt file data at rest using AWS KMS"
+      source_identifier    = "EFS_ENCRYPTED_CHECK"
+      resource_types_scope = ["AWS::EFS::FileSystem"]
+      input_parameters     = {}
+    }
+  ]
+  
+  # Lambda Custom Rules
+  lambda_rules_list = [
+    {
+      config_rule_name     = "efs-tls-enforcement"
+      description          = "Custom Lambda rule to validate EFS file system policies enforce TLS (aws:SecureTransport)"
+      lambda_function_arn  = module.efs_tls_enforcement.lambda_arn
+      resource_types_scope = ["AWS::EFS::FileSystem"]
+      message_type         = "ConfigurationItemChangeNotification"
+    }
+  ]
+  
+  depends_on = [
+    module.efs_tls_enforcement
   ]
 }
 
@@ -53,6 +80,7 @@ module "cpack_encryption_use1" {
     "666666666739"  # smrrnd-tst | config not config'd on account and SCP blocks it
   ]
 
+  # Guard Policy Rules (Custom Policy)
   policy_rules_list = [
     {
       config_rule_name     = "ebs-is-encrypted"
@@ -72,5 +100,31 @@ module "cpack_encryption_use1" {
       description          = "Config Rule for checking if an EFS is encrypted"
       resource_types_scope = ["AWS::EFS::FileSystem"]
     }
+  ]
+  
+  # AWS Managed Rules
+  managed_rules_list = [
+    {
+      config_rule_name     = "efs-encrypted-check"
+      description          = "AWS Managed Rule - Checks if Amazon EFS are configured to encrypt file data at rest using AWS KMS"
+      source_identifier    = "EFS_ENCRYPTED_CHECK"
+      resource_types_scope = ["AWS::EFS::FileSystem"]
+      input_parameters     = {}
+    }
+  ]
+  
+  # Lambda Custom Rules
+  lambda_rules_list = [
+    {
+      config_rule_name     = "efs-tls-enforcement"
+      description          = "Custom Lambda rule to validate EFS file system policies enforce TLS (aws:SecureTransport)"
+      lambda_function_arn  = module.efs_tls_enforcement_use1.lambda_arn
+      resource_types_scope = ["AWS::EFS::FileSystem"]
+      message_type         = "ConfigurationItemChangeNotification"
+    }
+  ]
+  
+  depends_on = [
+    module.efs_tls_enforcement_use1
   ]
 }

@@ -1,0 +1,12 @@
+${block_name}:
+  Type: AWS::Config::ConfigRule
+  Properties:
+    ConfigRuleName: ${config_rule_name}
+    Description: ${description}
+    Scope:
+      ComplianceResourceTypes:
+${resource_types_scope}
+    Source:
+      Owner: AWS
+      SourceIdentifier: ${source_identifier}
+    ${input_parameters}

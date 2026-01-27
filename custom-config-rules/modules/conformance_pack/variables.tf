@@ -10,6 +10,30 @@ variable "policy_rules_list" {
   default = []
 }
 
+variable "lambda_rules_list" {
+  description = "List of Lambda-based custom config rules to include in the conformance pack"
+  type = list(object({
+    config_rule_name     = string
+    description          = string
+    lambda_function_arn  = string
+    resource_types_scope = list(string)
+    message_type         = optional(string, "ConfigurationItemChangeNotification")
+  }))
+  default = []
+}
+
+variable "managed_rules_list" {
+  description = "List of AWS managed config rules to include in the conformance pack"
+  type = list(object({
+    config_rule_name     = string
+    description          = string
+    source_identifier    = string
+    resource_types_scope = list(string)
+    input_parameters     = optional(map(string), {})
+  }))
+  default = []
+}
+
 variable "cpack_name" {
   description = "Name of the conformance pack"
   type        = string

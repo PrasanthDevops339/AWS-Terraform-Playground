@@ -1,0 +1,14 @@
+${block_name}:
+  Type: AWS::Config::ConfigRule
+  Properties:
+    ConfigRuleName: ${config_rule_name}
+    Description: ${description}
+    Scope:
+      ComplianceResourceTypes:
+${resource_types_scope}
+    Source:
+      Owner: CUSTOM_LAMBDA
+      SourceDetails:
+        - EventSource: aws.config
+          MessageType: ${message_type}
+      SourceIdentifier: ${lambda_function_arn}
