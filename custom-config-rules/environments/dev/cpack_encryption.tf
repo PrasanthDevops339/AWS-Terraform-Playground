@@ -23,6 +23,21 @@ module "cpack_encryption" {
       resource_types_scope = ["AWS::EFS::FileSystem"]
     }
   ]
+  
+  # Lambda Custom Rules (for dev testing)
+  lambda_rules_list = [
+    {
+      config_rule_name     = "efs-tls-enforcement"
+      description          = "Custom Lambda rule to validate EFS file system policies enforce TLS (aws:SecureTransport)"
+      lambda_function_arn  = module.efs_tls_enforcement_dev.lambda_arn
+      resource_types_scope = ["AWS::EFS::FileSystem"]
+      message_type         = "ConfigurationItemChangeNotification"
+    }
+  ]
+  
+  depends_on = [
+    module.efs_tls_enforcement_dev
+  ]
 }
 
 # For Pre-Dev debugging
