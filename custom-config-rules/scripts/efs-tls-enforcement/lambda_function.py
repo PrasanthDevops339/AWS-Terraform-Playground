@@ -1,6 +1,24 @@
 """
 AWS Config Custom Lambda Rule: EFS TLS Enforcement
-This Lambda function validates that EFS file systems enforce TLS (aws:SecureTransport) in their policies.
+
+PURPOSE:
+This Lambda function validates that EFS file systems enforce TLS (aws:SecureTransport) 
+in their resource policies for encryption in-transit.
+
+WHY LAMBDA IS REQUIRED:
+1. EFS resource policies are NOT included in AWS Config configuration items
+2. Must call elasticfilesystem:DescribeFileSystemPolicy API to retrieve policy
+3. Must parse JSON policy document and evaluate Deny statements with conditions
+4. Guard policy rules cannot make API calls or access data outside Config items
+
+WHAT IT VALIDATES:
+- EFS file system has a resource policy attached
+- Policy contains Deny effect with "aws:SecureTransport": "false" condition
+- This ensures all connections to EFS must use TLS/encryption in transit
+
+COMPLEMENTS:
+- Guard policy (efs-is-encrypted) validates encryption-at-rest configuration
+- This Lambda validates encryption-in-transit via resource policy enforcement
 """
 
 import json

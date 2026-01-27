@@ -11,7 +11,18 @@ variable "policy_rules_list" {
 }
 
 variable "lambda_rules_list" {
-  description = "List of Lambda-based custom config rules to include in the conformance pack"
+  description = <<-EOT
+    List of Lambda-based custom config rules to include in the conformance pack.
+    
+    Lambda rules are required when validation needs:
+    - AWS API calls (Config item doesn't contain all data)
+    - Complex logic beyond Guard DSL (JSON parsing, conditional evaluation)
+    - Runtime queries to other AWS services
+    - Evaluation of resource policies or external configurations
+    
+    Example: EFS TLS enforcement requires calling DescribeFileSystemPolicy API
+    because resource policies are not in Config items.
+  EOT
   type = list(object({
     config_rule_name     = string
     description          = string

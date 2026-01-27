@@ -1,3 +1,19 @@
+# Lambda-based AWS Config Custom Rule Module
+# 
+# WHY THIS MODULE EXISTS:
+# Deploys Python Lambda functions as AWS Config custom rules when validation requires:
+# - AWS API calls to retrieve data not in Config items (e.g., resource policies)
+# - Complex logic beyond Guard DSL (JSON parsing, conditional evaluation)
+# - Runtime queries to other AWS services
+# - Custom compliance logic that Guard policy language cannot express
+#
+# COMPONENTS CREATED:
+# - Lambda function (Python 3.12) with Config rule evaluation logic
+# - IAM execution role with least privilege permissions
+# - Lambda permission for Config service to invoke function
+# - AWS Config rule (organization-wide OR account-level)
+# - S3 bucket for Lambda deployment package
+
 resource "aws_lambda_permission" "lambda_perm" {
   action        = "lambda:InvokeFunction"
   function_name = module.lambda.lambda_function_name

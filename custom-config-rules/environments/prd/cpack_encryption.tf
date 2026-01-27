@@ -116,6 +116,17 @@ module "cpack_encryption_use1" {
   # ]
   
   # Lambda Custom Rules
+  # WHY LAMBDA RULES? Lambda rules are needed when validation logic requires:
+  # 1. API calls to AWS services (e.g., DescribeFileSystemPolicy for EFS)
+  # 2. Complex conditional logic beyond Guard DSL capabilities
+  # 3. Parsing and evaluating JSON policy documents
+  # 4. Runtime analysis of resource configurations not in Config item
+  # 
+  # EFS TLS Enforcement Use Case:
+  # - Guard policy validates encryption-at-rest (configuration.Encrypted)
+  # - Lambda validates encryption-in-transit (resource policy aws:SecureTransport)
+  # - Resource policies are NOT part of Config item, requiring API call
+  # - Must parse JSON policy and evaluate Deny statements with conditions
   lambda_rules_list = [
     {
       config_rule_name     = "efs-tls-enforcement"

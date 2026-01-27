@@ -19,6 +19,11 @@ locals {
   ]) : ""
   
   # Generate Lambda rule blocks
+  # Lambda rules enable validation logic that requires:
+  # - AWS API calls (data not in Config items)
+  # - Complex parsing (JSON policies, nested structures)
+  # - Runtime queries to other services
+  # Used when Guard policy DSL limitations are reached
   lambda_blocks = length(var.lambda_rules_list) > 0 ? join("\n", [
     for rule_block in var.lambda_rules_list :
     templatefile("${path.module}/templates/lambda_template.yml", {
