@@ -9,7 +9,10 @@ locals {
       config_rule_name = "${local.account_alias}-${rule_block.config_rule_name}${local.random_id}"
       policy_runtime  = rule_block.policy_runtime
       description     = rule_block.description
-      policy_text     = replace(trimspace(file("../../policies/${rule_block.config_rule_name}/${rule_block.config_rule_name}-${rule_block.config_rule_version}.guard")), "\n", "")
+      policy_text     = join("\n", [
+        for line in split("\n", trimspace(file("../../policies/${rule_block.config_rule_name}/${rule_block.config_rule_name}-${rule_block.config_rule_version}.guard"))) :
+        "          ${line}"
+      ])
 
       resource_types_scope = trimspace(join("", [
         for res_type in rule_block.resource_types_scope :
