@@ -1,17 +1,12 @@
-# AWS Managed Config Rule Template
-# This template is a placeholder for future AWS Managed rule support
-# Currently not in use - Guard policy rules provide equivalent functionality
-
-# Template structure for reference:
-# ${block_name}:
-#   Type: AWS::Config::ConfigRule
-#   Properties:
-#     ConfigRuleName: ${config_rule_name}
-#     Description: ${description}
-#     Source:
-#       Owner: AWS
-#       SourceIdentifier: ${source_identifier}
-#     Scope:
-#       ComplianceResourceTypes:
-# ${resource_types_scope}
-#     ${input_parameters}
+${block_name}:
+  Type: AWS::Config::ConfigRule
+  Properties:
+    ConfigRuleName: ${config_rule_name}
+    Description: ${description}
+    Source:
+      Owner: AWS
+      SourceIdentifier: ${source_identifier}
+    Scope:
+      ComplianceResourceTypes:
+${resource_types_scope}
+    ${input_parameters}
