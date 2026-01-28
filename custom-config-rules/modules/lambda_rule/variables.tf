@@ -66,3 +66,9 @@ variable "additional_policies" {
   type    = list(string)
   default = []
 }
+
+variable "random_id" {
+  description = "Random ID suffix for pre-dev resource name isolation"
+  type        = string
+  default     = null
+}

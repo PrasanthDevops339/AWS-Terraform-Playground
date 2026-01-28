@@ -28,7 +28,7 @@ module "lambda" {
 
   upload_to_s3      = true
   lambda_role_arn   = module.lambda_role.iam_role_arn
-  lambda_name       = var.config_rule_name
+  lambda_name       = var.random_id != null ? "${var.config_rule_name}-${var.random_id}" : var.config_rule_name
   runtime           = "python3.12"
   lambda_script_dir = var.lambda_script_dir
   lambda_bucket_name = data.aws_s3_bucket.bootstrap.id

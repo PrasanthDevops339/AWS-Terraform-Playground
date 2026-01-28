@@ -2,7 +2,7 @@
 resource "aws_config_config_rule" "main" {
   count = (!var.organization_rule && var.create_config_rule) ? 1 : 0
 
-  name        = var.config_rule_name
+  name        = var.random_id != null ? "${var.config_rule_name}-${var.random_id}" : var.config_rule_name
   description = var.description
 
   scope {

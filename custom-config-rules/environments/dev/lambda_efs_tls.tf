@@ -21,9 +21,10 @@ module "efs_tls_enforcement_dev" {
   source            = "../../modules/lambda_rule"
   organization_rule = false  # Single account only for testing
   create_config_rule = true
-  config_rule_name  = "efs-tls-enforcement-dev"
+  config_rule_name  = var.is_pre_dev ? "efs-tls-enforcement-dev-${local.random_id}" : "efs-tls-enforcement-dev"
   description       = "Custom Lambda rule to validate EFS file system policies enforce TLS (aws:SecureTransport) - DEV TESTING"
   lambda_script_dir = "../../scripts/efs-tls-enforcement"
+  random_id         = local.random_id
   
   resource_types_scope = ["AWS::EFS::FileSystem"]
   trigger_types        = ["ConfigurationItemChangeNotification"]
