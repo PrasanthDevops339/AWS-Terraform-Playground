@@ -14,4 +14,4 @@ ${block_name}:
       CustomPolicyDetails:
         PolicyRuntime: ${policy_runtime}
         PolicyText: |
-${policy_text}
+         ${policy_text}
