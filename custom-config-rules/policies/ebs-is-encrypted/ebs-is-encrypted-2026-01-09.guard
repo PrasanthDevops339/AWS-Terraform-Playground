@@ -3,5 +3,5 @@ rule ebsIsEncrypted when resourceType == "AWS::EC2::Volume" {
 }
 
 rule ebsSnapshotIsEncrypted when resourceType == "AWS::EC2::Snapshot" {
-    cconfiguration.encrypted == true <<EBS snapshots must be encrypted at rest>>
+    configuration.encrypted == true <<EBS snapshots must be encrypted at rest>>
 }
