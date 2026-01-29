@@ -20,13 +20,13 @@ All rules are deployed organization-wide via **AWS Config Organization Conforman
 
 | Aspect | Guard Policy (At-Rest) | Lambda Rule (In-Transit) |
 |--------|------------------------|--------------------------|
-| **What it checks** | EFS file system has encryption enabled | EFS resource policy enforces TLS |
+| **What it checks** | EFS file system has encryption enabled | EFS resource policy enforces TLS for client actions |
 | **Resource type** | `AWS::EFS::FileSystem` | `AWS::EFS::FileSystem` |
 | **Technology** | AWS Config Guard DSL | Python 3.12 Lambda |
 | **Trigger** | Configuration changes | Configuration changes |
-| **Evaluation** | Guard engine evaluates policy | Lambda calls `DescribeFileSystemPolicy` API |
-| **Compliant when** | `Encrypted == true` | Policy has `Deny` with `SecureTransport == false` |
-| **Non-compliant when** | `Encrypted == false` or missing | No policy or missing TLS requirement |
+| **Evaluation** | Guard engine evaluates policy | Lambda calls `efs:DescribeFileSystemPolicy` API |
+| **Compliant when** | `Encrypted == true` | Policy has `Deny` with `SecureTransport == false` for EFS client actions |
+| **Non-compliant when** | `Encrypted == false` or missing | No policy, missing TLS requirement, or Deny doesn't apply to client actions |
 | **Region deployment** | us-east-2, us-east-1 | us-east-2, us-east-1 |
 | **Maintenance** | Policy file updates only | Lambda code + IAM policy updates |
 | **Dependencies** | None | Lambda function, IAM role, S3 bootstrap bucket |
@@ -78,21 +78,37 @@ The Guard policy rule provides the same encryption-at-rest validation as the AWS
 
 **Files:**
 - `scripts/efs-tls-enforcement/lambda_function.py` - Lambda function code
+- `scripts/efs-tls-enforcement/test_lambda.py` - Local test suite (8 test scenarios)
 - `iam/efs-tls-enforcement.json` - IAM policy for Lambda  
 **Scope:** Encryption in-transit validation (TLS enforcement)
 
 **Functionality:**
 - Triggered on EFS file system configuration changes
-- Calls `elasticfilesystem:DescribeFileSystemPolicy`
+- Calls `efs:DescribeFileSystemPolicy` (boto3 service name is `efs`, not `elasticfilesystem`)
 - Validates that the file system policy enforces TLS by checking for:
   - Deny statement with `aws:SecureTransport == false`
+  - Deny applies to EFS client actions: `ClientMount`, `ClientWrite`, `ClientRootAccess`
   - Proper policy structure requiring encrypted transport
 - Returns compliance status to AWS Config
 
+**EFS Client Actions Validated:**
+- `elasticfilesystem:ClientMount` - Mount operations
+- `elasticfilesystem:ClientWrite` - Write operations
+- `elasticfilesystem:ClientRootAccess` - Root access operations
+
+**Accepted Action Patterns:**
+- `*` (all actions)
+- `elasticfilesystem:*` (all EFS actions)
+- `elasticfilesystem:Client*` (all client actions)
+- Explicit list of client actions
+
 **Compliance Logic:**
-- ✅ **COMPLIANT**: Policy exists and enforces `aws:SecureTransport`
-- ❌ **NON_COMPLIANT**: No policy, or policy doesn't enforce TLS
+- ✅ **COMPLIANT**: Policy exists, enforces `aws:SecureTransport`, and applies to EFS client actions
+- ❌ **NON_COMPLIANT**: No policy, policy doesn't enforce TLS, or Deny applies to wrong actions
 - ⚠️ **NOT_APPLICABLE**: Resource deleted
+
+**Local Testing:**
+The Lambda function supports local testing without AWS credentials. See [LAMBDA_LOCAL_TESTING.md](LAMBDA_LOCAL_TESTING.md) for details.
 
 ## Deployment
 
@@ -310,31 +326,47 @@ The Lambda execution role has the following permissions:
 ```python
 1. Receive Config evaluation event
 2. Extract EFS file system ID
-3. Call DescribeFileSystemPolicy
-   ├─ PolicyNotFoundException → NON_COMPLIANT
+3. Call efs:DescribeFileSystemPolicy (lazy client initialization)
+   ├─ PolicyNotFound → NON_COMPLIANT
    ├─ Parse policy JSON
    └─ Check for aws:SecureTransport enforcement
-       ├─ Deny with SecureTransport=false → COMPLIANT
+       ├─ Find Deny with SecureTransport=false
+       │   └─ Validate Deny applies to EFS client actions
+       │       ├─ Action: * → COMPLIANT
+       │       ├─ Action: elasticfilesystem:* → COMPLIANT
+       │       ├─ Action: elasticfilesystem:Client* → COMPLIANT
+       │       ├─ Action includes ClientMount/Write/RootAccess → COMPLIANT
+       │       └─ Action doesn't cover client actions → NON_COMPLIANT
        └─ No valid enforcement → NON_COMPLIANT
 4. Submit evaluation to Config with PutEvaluations
 ```
 
-### Testing the Lambda Function
+### Local Testing
 
-You can test the Lambda function locally or via AWS Console:
+The Lambda function can be tested locally without AWS credentials:
 
-**Test Event:**
-```json
-{
-  "configRuleInvokingEvent": "{\"configurationItem\":{\"resourceId\":\"fs-12345678\",\"resourceType\":\"AWS::EFS::FileSystem\",\"configurationItemCaptureTime\":\"2026-01-26T12:00:00.000Z\",\"configurationItemStatus\":\"OK\"}}",
-  "resultToken": "test-token-123"
-}
+```bash
+cd scripts/efs-tls-enforcement
+python3 test_lambda.py
 ```
+
+**Test Scenarios (8 total):**
+1. No Policy → NON_COMPLIANT
+2. Deny + Action=* + SecureTransport=false → COMPLIANT
+3. Deny + Specific EFS client actions → COMPLIANT
+4. Deny + elasticfilesystem:* → COMPLIANT
+5. Deny + elasticfilesystem:Client* → COMPLIANT
+6. Deny + BoolIfExists condition → COMPLIANT
+7. Allow without SecureTransport → NON_COMPLIANT
+8. Deny + SecureTransport=false but wrong actions (e.g., s3:GetObject) → NON_COMPLIANT
+
+See [LAMBDA_LOCAL_TESTING.md](LAMBDA_LOCAL_TESTING.md) for detailed testing guide.
 
 ## Compliance Validation
 
 ### Example Compliant EFS Policy
 
+**Option 1: Wildcard action (simplest)**
 ```json
 {
   "Version": "2012-10-17",
@@ -344,6 +376,52 @@ You can test the Lambda function locally or via AWS Console:
       "Effect": "Deny",
       "Principal": "*",
       "Action": "*",
+      "Resource": "*",
+      "Condition": {
+        "Bool": {
+          "aws:SecureTransport": "false"
+        }
+      }
+    }
+  ]
+}
+```
+
+**Option 2: EFS-specific wildcard**
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyUnencryptedEFS",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "elasticfilesystem:*",
+      "Resource": "*",
+      "Condition": {
+        "Bool": {
+          "aws:SecureTransport": "false"
+        }
+      }
+    }
+  ]
+}
+```
+
+**Option 3: Explicit client actions (most restrictive)**
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyUnencryptedClientAccess",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": [
+        "elasticfilesystem:ClientMount",
+        "elasticfilesystem:ClientWrite",
+        "elasticfilesystem:ClientRootAccess"
+      ],
       "Resource": "*",
       "Condition": {
         "Bool": {
@@ -477,6 +555,7 @@ For issues, questions, or contributions:
 
 ## Version History
 
+- **2026-01-29**: Enhanced Lambda to validate Deny applies to EFS client actions (ClientMount/ClientWrite/ClientRootAccess), fixed boto3 service name to 'efs', added lazy client initialization for local testing, 8 test scenarios
 - **2026-01-26**: Initial implementation with Guard, Managed, and Lambda rules
 - **2025-10-30**: Original EFS encryption Guard policy
 - **2026-01-09**: Updated EBS encryption policy to 2026-01-09
