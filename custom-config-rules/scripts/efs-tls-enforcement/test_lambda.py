@@ -2,28 +2,48 @@
 """
 Test script for EFS TLS Enforcement Lambda Function
 Tests various scenarios for compliance validation
+
+This test script mocks boto3 to allow running tests locally without AWS credentials.
 """
 
 import json
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock
+
+# Mock boto3 BEFORE importing lambda_function
+# This allows tests to run without boto3 installed
+mock_boto3 = MagicMock()
+sys.modules['boto3'] = mock_boto3
 
 # Add the lambda function to the path
 sys.path.insert(0, str(Path(__file__).parent))
 
-# Mock boto3 for testing
+
+class MockPolicyNotFoundException(Exception):
+    """Mock exception for PolicyNotFound"""
+    pass
+
+
+class MockFileSystemNotFoundException(Exception):
+    """Mock exception for FileSystemNotFound"""
+    pass
+
+
+class MockExceptions:
+    """Mock exceptions class for EFS client"""
+    PolicyNotFound = MockPolicyNotFoundException
+    FileSystemNotFound = MockFileSystemNotFoundException
+
+
 class MockEFSClient:
     def __init__(self, scenario):
         self.scenario = scenario
+        self.exceptions = MockExceptions()
     
     def describe_file_system_policy(self, FileSystemId):
         if self.scenario == "no_policy":
-            from botocore.exceptions import ClientError
-            error = ClientError(
-                {'Error': {'Code': 'PolicyNotFound', 'Message': 'Policy not found'}},
-                'DescribeFileSystemPolicy'
-            )
-            raise error
+            raise MockPolicyNotFoundException("Policy not found")
         elif self.scenario == "compliant_deny":
             return {
                 'Policy': json.dumps({
@@ -34,6 +54,52 @@ class MockEFSClient:
                             "Effect": "Deny",
                             "Principal": "*",
                             "Action": "*",
+                            "Resource": "*",
+                            "Condition": {
+                                "Bool": {
+                                    "aws:SecureTransport": "false"
+                                }
+                            }
+                        }
+                    ]
+                })
+            }
+        elif self.scenario == "compliant_efs_actions":
+            # Compliant: Deny with specific EFS client actions
+            return {
+                'Policy': json.dumps({
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Sid": "DenyUnencryptedClientMount",
+                            "Effect": "Deny",
+                            "Principal": "*",
+                            "Action": [
+                                "elasticfilesystem:ClientMount",
+                                "elasticfilesystem:ClientWrite",
+                                "elasticfilesystem:ClientRootAccess"
+                            ],
+                            "Resource": "*",
+                            "Condition": {
+                                "Bool": {
+                                    "aws:SecureTransport": "false"
+                                }
+                            }
+                        }
+                    ]
+                })
+            }
+        elif self.scenario == "compliant_efs_wildcard":
+            # Compliant: Deny with elasticfilesystem:* 
+            return {
+                'Policy': json.dumps({
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Sid": "DenyUnencryptedEFS",
+                            "Effect": "Deny",
+                            "Principal": "*",
+                            "Action": "elasticfilesystem:*",
                             "Resource": "*",
                             "Condition": {
                                 "Bool": {
@@ -59,6 +125,27 @@ class MockEFSClient:
                     ]
                 })
             }
+        elif self.scenario == "non_compliant_wrong_action":
+            # Non-compliant: Deny with SecureTransport=false but wrong actions
+            return {
+                'Policy': json.dumps({
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Sid": "DenyWrongAction",
+                            "Effect": "Deny",
+                            "Principal": "*",
+                            "Action": "s3:GetObject",
+                            "Resource": "*",
+                            "Condition": {
+                                "Bool": {
+                                    "aws:SecureTransport": "false"
+                                }
+                            }
+                        }
+                    ]
+                })
+            }
         elif self.scenario == "compliant_bool_if_exists":
             return {
                 'Policy': json.dumps({
@@ -72,6 +159,27 @@ class MockEFSClient:
                             "Resource": "*",
                             "Condition": {
                                 "BoolIfExists": {
+                                    "aws:SecureTransport": "false"
+                                }
+                            }
+                        }
+                    ]
+                })
+            }
+        elif self.scenario == "compliant_client_wildcard":
+            # Compliant: Deny with elasticfilesystem:Client* pattern
+            return {
+                'Policy': json.dumps({
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Sid": "DenyUnencryptedClient",
+                            "Effect": "Deny",
+                            "Principal": "*",
+                            "Action": "elasticfilesystem:Client*",
+                            "Resource": "*",
+                            "Condition": {
+                                "Bool": {
                                     "aws:SecureTransport": "false"
                                 }
                             }
@@ -98,13 +206,24 @@ def run_test(scenario_name, scenario, expected_compliance):
     print(f"Testing: {scenario_name}")
     print(f"{'='*60}")
     
-    # Import the lambda function module
+    # Import the lambda function module (reimport to reset state)
+    import importlib
     import lambda_function
+    importlib.reload(lambda_function)
     
-    # Mock the boto3 clients
-    lambda_function.efs_client = MockEFSClient(scenario)
+    # Mock the boto3 clients using the getter functions
+    mock_efs = MockEFSClient(scenario)
     mock_config = MockConfigClient()
+    
+    # Patch the global clients directly
+    lambda_function.efs_client = mock_efs
     lambda_function.config_client = mock_config
+    
+    # Also patch the getter functions to return our mocks
+    original_get_efs = lambda_function.get_efs_client
+    original_get_config = lambda_function.get_config_client
+    lambda_function.get_efs_client = lambda: mock_efs
+    lambda_function.get_config_client = lambda: mock_config
     
     # Create test event
     event = {
@@ -147,6 +266,10 @@ def run_test(scenario_name, scenario, expected_compliance):
         import traceback
         traceback.print_exc()
         return False
+    finally:
+        # Restore original functions
+        lambda_function.get_efs_client = original_get_efs
+        lambda_function.get_config_client = original_get_config
 
 
 def main():
@@ -162,8 +285,28 @@ def main():
             'expected': 'NON_COMPLIANT'
         },
         {
-            'name': 'Compliant Policy with Deny + SecureTransport=false',
+            'name': 'Compliant Policy with Deny + Action=* + SecureTransport=false',
             'scenario': 'compliant_deny',
+            'expected': 'COMPLIANT'
+        },
+        {
+            'name': 'Compliant Policy with specific EFS client actions',
+            'scenario': 'compliant_efs_actions',
+            'expected': 'COMPLIANT'
+        },
+        {
+            'name': 'Compliant Policy with elasticfilesystem:* action',
+            'scenario': 'compliant_efs_wildcard',
+            'expected': 'COMPLIANT'
+        },
+        {
+            'name': 'Compliant Policy with elasticfilesystem:Client* pattern',
+            'scenario': 'compliant_client_wildcard',
+            'expected': 'COMPLIANT'
+        },
+        {
+            'name': 'Compliant Policy with BoolIfExists condition',
+            'scenario': 'compliant_bool_if_exists',
             'expected': 'COMPLIANT'
         },
         {
@@ -172,9 +315,9 @@ def main():
             'expected': 'NON_COMPLIANT'
         },
         {
-            'name': 'Compliant Policy with BoolIfExists condition',
-            'scenario': 'compliant_bool_if_exists',
-            'expected': 'COMPLIANT'
+            'name': 'Non-Compliant Policy (SecureTransport but wrong actions)',
+            'scenario': 'non_compliant_wrong_action',
+            'expected': 'NON_COMPLIANT'
         }
     ]
     

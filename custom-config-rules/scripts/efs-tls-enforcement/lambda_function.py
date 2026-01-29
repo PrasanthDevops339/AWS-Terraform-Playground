@@ -7,33 +7,96 @@ in their resource policies for encryption in-transit.
 
 WHY LAMBDA IS REQUIRED:
 1. EFS resource policies are NOT included in AWS Config configuration items
-2. Must call elasticfilesystem:DescribeFileSystemPolicy API to retrieve policy
+2. Must call efs:DescribeFileSystemPolicy API to retrieve policy
 3. Must parse JSON policy document and evaluate Deny statements with conditions
 4. Guard policy rules cannot make API calls or access data outside Config items
 
 WHAT IT VALIDATES:
 - EFS file system has a resource policy attached
 - Policy contains Deny effect with "aws:SecureTransport": "false" condition
+- Deny statement applies to EFS client actions (ClientMount, ClientWrite, ClientRootAccess)
 - This ensures all connections to EFS must use TLS/encryption in transit
+
+IMPORTANT VALIDATION:
+The function validates that the Deny statement with SecureTransport=false applies to
+EFS client actions, not just any actions. This prevents false positives from mis-scoped
+policies (e.g., a policy that denies S3 actions when SecureTransport=false but doesn't
+protect EFS client operations).
+
+Valid action patterns for compliance:
+- "*" (all actions)
+- "elasticfilesystem:*" (all EFS actions)
+- "elasticfilesystem:Client*" (all client actions)
+- Explicit list containing elasticfilesystem:ClientMount/ClientWrite/ClientRootAccess
 
 COMPLEMENTS:
 - Guard policy (efs-is-encrypted) validates encryption-at-rest configuration
 - This Lambda validates encryption-in-transit via resource policy enforcement
+
+LOCAL TESTING:
+The boto3 clients are lazily initialized to support local testing without AWS credentials.
+The test suite (test_lambda.py) mocks boto3 and injects mock clients via the getter
+functions get_efs_client() and get_config_client().
+
+BOTO3 SERVICE NAME:
+The boto3 service name for EFS is 'efs', not 'elasticfilesystem'.
+The IAM actions use 'elasticfilesystem:*' prefix, but boto3.client() uses 'efs'.
 """
 
 import json
 import boto3
 import logging
 from datetime import datetime
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 # Setup logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Initialize AWS clients
-efs_client = boto3.client('elasticfilesystem')
-config_client = boto3.client('config')
+# ============================================================================
+# LAZY CLIENT INITIALIZATION
+# ============================================================================
+# Clients are initialized lazily (on first use) rather than at module load time.
+# This design choice enables:
+# 1. Local testing without AWS credentials or boto3 installed
+# 2. Avoiding NoRegionError when running tests outside AWS environment
+# 3. Test suite can inject mock clients before any AWS API calls are made
+# ============================================================================
+efs_client: Optional[Any] = None
+config_client: Optional[Any] = None
+
+# ============================================================================
+# EFS CLIENT ACTIONS TO VALIDATE
+# ============================================================================
+# These are the EFS actions that clients use to access file systems.
+# A compliant TLS enforcement policy MUST deny these actions when
+# aws:SecureTransport is false to ensure encryption in transit.
+# ============================================================================
+EFS_CLIENT_ACTIONS = [
+    'elasticfilesystem:ClientMount',      # Mount the file system
+    'elasticfilesystem:ClientWrite',       # Write to the file system
+    'elasticfilesystem:ClientRootAccess'   # Root access to the file system
+]
+
+
+def get_efs_client():
+    """
+    Get or create EFS client (lazy initialization for local testing support).
+    
+    The boto3 service name for EFS is 'efs', not 'elasticfilesystem'.
+    """
+    global efs_client
+    if efs_client is None:
+        efs_client = boto3.client('efs')
+    return efs_client
+
+
+def get_config_client():
+    """Get or create Config client (lazy initialization for local testing support)."""
+    global config_client
+    if config_client is None:
+        config_client = boto3.client('config')
+    return config_client
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -81,7 +144,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     }
     
     # Submit evaluation to AWS Config
-    response = config_client.put_evaluations(
+    response = get_config_client().put_evaluations(
         Evaluations=[evaluation],
         ResultToken=event['resultToken']
     )
@@ -108,9 +171,10 @@ def evaluate_efs_tls_policy(file_system_id: str) -> tuple:
     Returns:
         Tuple of (compliance_type, annotation)
     """
+    efs = get_efs_client()
     try:
         # Attempt to retrieve file system policy
-        response = efs_client.describe_file_system_policy(FileSystemId=file_system_id)
+        response = efs.describe_file_system_policy(FileSystemId=file_system_id)
         policy_json = response.get('Policy')
         
         if not policy_json:
@@ -120,17 +184,17 @@ def evaluate_efs_tls_policy(file_system_id: str) -> tuple:
         policy = json.loads(policy_json)
         logger.info(f"EFS Policy for {file_system_id}: {json.dumps(policy)}")
         
-        # Check if policy enforces SecureTransport
-        if is_secure_transport_enforced(policy):
-            return 'COMPLIANT', 'EFS file system policy enforces TLS (aws:SecureTransport)'
+        # Check if policy enforces SecureTransport for EFS client actions
+        if is_secure_transport_enforced(policy, file_system_id):
+            return 'COMPLIANT', 'EFS file system policy enforces TLS (aws:SecureTransport) for client actions'
         else:
-            return 'NON_COMPLIANT', 'EFS file system policy does not enforce TLS (aws:SecureTransport)'
+            return 'NON_COMPLIANT', 'EFS file system policy does not enforce TLS (aws:SecureTransport) for EFS client actions (ClientMount/ClientWrite/ClientRootAccess)'
             
-    except efs_client.exceptions.PolicyNotFoundException:
+    except efs.exceptions.PolicyNotFound:
         logger.warning(f"No policy found for EFS file system: {file_system_id}")
         return 'NON_COMPLIANT', 'EFS file system has no policy - TLS enforcement not configured'
         
-    except efs_client.exceptions.FileSystemNotFound:
+    except efs.exceptions.FileSystemNotFound:
         logger.error(f"EFS file system not found: {file_system_id}")
         return 'NON_COMPLIANT', f'EFS file system not found: {file_system_id}'
         
@@ -139,18 +203,21 @@ def evaluate_efs_tls_policy(file_system_id: str) -> tuple:
         return 'NON_COMPLIANT', f'Error evaluating EFS policy: {str(e)}'
 
 
-def is_secure_transport_enforced(policy: Dict[str, Any]) -> bool:
+def is_secure_transport_enforced(policy: Dict[str, Any], file_system_id: str = None) -> bool:
     """
-    Check if the EFS policy enforces aws:SecureTransport.
+    Check if the EFS policy enforces aws:SecureTransport for EFS client actions.
     
-    The policy should have a statement that denies access when 
-    aws:SecureTransport is false.
+    The policy must have a Deny statement that:
+    1. Denies access when aws:SecureTransport is false
+    2. Applies to EFS client actions (ClientMount, ClientWrite, ClientRootAccess)
+       OR applies to all actions ("*" or "elasticfilesystem:*")
     
     Args:
         policy: Parsed EFS policy dictionary
+        file_system_id: Optional EFS file system ID for resource validation
         
     Returns:
-        True if SecureTransport is enforced, False otherwise
+        True if SecureTransport is enforced for client actions, False otherwise
     """
     statements = policy.get('Statement', [])
     
@@ -158,53 +225,135 @@ def is_secure_transport_enforced(policy: Dict[str, Any]) -> bool:
         effect = statement.get('Effect', '')
         condition = statement.get('Condition', {})
         
-        # Check for Deny effect with SecureTransport condition
-        if effect == 'Deny':
-            # Check for Bool condition with aws:SecureTransport
-            bool_condition = condition.get('Bool', {})
-            secure_transport = bool_condition.get('aws:SecureTransport')
-            
-            # If SecureTransport is explicitly set to false (meaning deny non-TLS), it's compliant
-            if secure_transport == 'false' or secure_transport is False:
-                logger.info("Found Deny statement with aws:SecureTransport=false")
-                return True
-            
-            # Also check for NumericLessThan or StringEquals patterns
-            if 'aws:SecureTransport' in str(condition):
-                logger.info("Found SecureTransport condition in policy")
-                # Additional validation can be added here
+        # Only check Deny statements
+        if effect != 'Deny':
+            continue
         
-        # Alternative: Check for Allow effect that requires SecureTransport=true
-        if effect == 'Allow':
-            bool_condition = condition.get('Bool', {})
-            secure_transport = bool_condition.get('aws:SecureTransport')
-            
-            # If only allowing when SecureTransport is true
-            if secure_transport == 'true' or secure_transport is True:
-                # Need to verify there's a corresponding Deny for false case
-                # or that this is the only statement
-                logger.info("Found Allow statement requiring aws:SecureTransport=true")
-                # This alone may not be sufficient - best practice is Deny when false
-    
-    # Check if there's a blanket Deny for SecureTransport=false
-    for statement in statements:
-        if statement.get('Effect') == 'Deny':
-            condition = statement.get('Condition', {})
-            bool_if_exists = condition.get('BoolIfExists', {})
-            bool_condition = condition.get('Bool', {})
-            
-            # Check both Bool and BoolIfExists
-            secure_transport_check = (
-                bool_condition.get('aws:SecureTransport') == 'false' or
-                bool_condition.get('aws:SecureTransport') is False or
-                bool_if_exists.get('aws:SecureTransport') == 'false' or
-                bool_if_exists.get('aws:SecureTransport') is False
+        # Check for SecureTransport condition (Bool or BoolIfExists)
+        bool_condition = condition.get('Bool', {})
+        bool_if_exists = condition.get('BoolIfExists', {})
+        
+        secure_transport_check = (
+            bool_condition.get('aws:SecureTransport') == 'false' or
+            bool_condition.get('aws:SecureTransport') is False or
+            bool_if_exists.get('aws:SecureTransport') == 'false' or
+            bool_if_exists.get('aws:SecureTransport') is False
+        )
+        
+        if not secure_transport_check:
+            continue
+        
+        # Validate that the Deny applies to EFS client actions
+        if not _validates_client_actions(statement):
+            logger.warning(
+                "Found Deny with SecureTransport=false but does not apply to EFS client actions"
             )
-            
-            if secure_transport_check:
+            continue
+        
+        logger.info(
+            "Found compliant Deny statement: SecureTransport=false with EFS client actions"
+        )
+        return True
+    
+    logger.warning("No valid SecureTransport enforcement found for EFS client actions")
+    return False
+
+
+def _validates_client_actions(statement: Dict[str, Any]) -> bool:
+    """
+    Check if a policy statement applies to EFS client actions.
+    
+    Valid patterns:
+    - Action: "*" (all actions)
+    - Action: "elasticfilesystem:*" (all EFS actions)
+    - Action includes elasticfilesystem:ClientMount, ClientWrite, or ClientRootAccess
+    - NotAction that doesn't exclude client actions
+    
+    Args:
+        statement: Policy statement dictionary
+        
+    Returns:
+        True if statement applies to EFS client actions
+    """
+    actions = statement.get('Action', [])
+    not_actions = statement.get('NotAction', [])
+    
+    # Normalize to list
+    if isinstance(actions, str):
+        actions = [actions]
+    if isinstance(not_actions, str):
+        not_actions = [not_actions]
+    
+    # If using NotAction, check that client actions are not excluded
+    if not_actions:
+        for not_action in not_actions:
+            for client_action in EFS_CLIENT_ACTIONS:
+                if _action_matches(not_action, client_action):
+                    # Client action is excluded, so this statement doesn't apply
+                    logger.warning(f"Client action {client_action} excluded by NotAction")
+                    return False
+        # NotAction doesn't exclude client actions, so they are covered
+        return True
+    
+    # Check if any action covers EFS client actions
+    for action in actions:
+        # Wildcard covers all actions
+        if action == '*':
+            logger.info("Action '*' covers all EFS client actions")
+            return True
+        
+        # elasticfilesystem:* covers all EFS actions
+        if action.lower() == 'elasticfilesystem:*':
+            logger.info("Action 'elasticfilesystem:*' covers all EFS client actions")
+            return True
+        
+        # Check for specific client actions
+        for client_action in EFS_CLIENT_ACTIONS:
+            if _action_matches(action, client_action):
+                logger.info(f"Action '{action}' matches client action '{client_action}'")
                 return True
     
-    logger.warning("No valid SecureTransport enforcement found in policy")
+    logger.warning(f"Actions {actions} do not cover EFS client actions")
+    return False
+
+
+def _action_matches(pattern: str, action: str) -> bool:
+    """
+    Check if an action pattern matches a specific action.
+    
+    Supports:
+    - Exact match
+    - Wildcard patterns (e.g., elasticfilesystem:Client*)
+    - Case-insensitive comparison
+    
+    Args:
+        pattern: Action pattern from policy (may contain wildcards)
+        action: Specific action to check
+        
+    Returns:
+        True if pattern matches action
+    """
+    pattern_lower = pattern.lower()
+    action_lower = action.lower()
+    
+    # Exact match
+    if pattern_lower == action_lower:
+        return True
+    
+    # Wildcard match
+    if '*' in pattern_lower:
+        # Simple wildcard matching: convert pattern to prefix match
+        # e.g., "elasticfilesystem:Client*" matches "elasticfilesystem:ClientMount"
+        prefix = pattern_lower.replace('*', '')
+        if action_lower.startswith(prefix):
+            return True
+        
+        # Handle more complex patterns like "elasticfilesystem:*"
+        if pattern_lower.endswith('*'):
+            prefix = pattern_lower[:-1]
+            if action_lower.startswith(prefix):
+                return True
+    
     return False
 
 
