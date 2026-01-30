@@ -1,0 +1,11 @@
+# Placeholder CI pipeline
+stages:
+  - validate
+
+validate:
+  image: hashicorp/terraform:1.7.5
+  stage: validate
+  script:
+    - terraform fmt -check -recursive
+    - terraform init -backend=false
+    - terraform validate
