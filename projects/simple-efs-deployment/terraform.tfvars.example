@@ -1,0 +1,27 @@
+# Example terraform.tfvars file
+# Copy this file to terraform.tfvars and update values as needed
+
+aws_region   = "us-east-2"
+environment  = "dev"
+project_name = "simple-efs"
+
+# VPC Configuration
+vpc_name           = "ins-dev-vpc-use2"
+subnet_name_filter = "*-data-*"
+
+# Network Access
+allowed_cidrs = [
+  "10.0.0.0/16",      # VPC CIDR
+  "10.223.0.0/20",    # App subnet AZ1
+  "10.223.64.0/20",   # App subnet AZ2
+  "10.223.128.0/20"   # App subnet AZ3
+]
+
+# Backup Settings
+enable_backup = true
+
+# Additional Tags
+tags = {
+  Owner      = "platform-team"
+  CostCenter = "infrastructure"
+}
