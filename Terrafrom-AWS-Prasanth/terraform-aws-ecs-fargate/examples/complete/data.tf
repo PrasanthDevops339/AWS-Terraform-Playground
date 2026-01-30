@@ -6,7 +6,7 @@ data "aws_iam_account_alias" "current" {}
 data "aws_vpc" "main" {
   filter {
     name   = "tag:Name"
-    values = ["erieins-dev-vpc-use2"]
+    values = ["test-placeholder-dev-vpc-use2"]
   }
 }
 

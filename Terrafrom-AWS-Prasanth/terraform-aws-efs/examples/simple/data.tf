@@ -1,11 +1,10 @@
-# Data Sources
-data "aws_iam_account_alias" "current" {}
+data "aws_availability_zones" "available" {}
+data "aws_caller_identity" "current" {}
 
-# Data source to pull vpc_id
 data "aws_vpc" "main" {
   filter {
     name   = "tag:Name"
-    values = ["test-placeholder-dev-vpc-use2"]
+    values = ["ins-dev-vpc-use2"]
   }
 }
 

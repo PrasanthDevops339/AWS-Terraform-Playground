@@ -30,7 +30,7 @@ Key Management Service (KMS) can be leveraged to create, manage, and control cry
 
 ```hcl
 module "simple_key" {
-  source  = "tfe.prasanurance.com/erie-insurance/kms/aws"
+  source  = "tfe.prasanurance.com/test-placeholder/kms/aws"
   version = "insert version here"
 
   enable_region_argument = true

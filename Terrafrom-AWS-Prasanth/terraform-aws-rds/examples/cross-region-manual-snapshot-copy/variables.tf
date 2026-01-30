@@ -118,13 +118,13 @@ variable "lambda_schedule" {
 variable "primary_vpc_name" {
   description = "Name tag of the VPC in primary region for RDS deployment"
   type        = string
-  default     = "erieins-dev-vpc-use2"
+  default     = "test-placeholder-dev-vpc-use2"
 }
 
 variable "secondary_vpc_name" {
   description = "Name tag of the VPC in secondary region for disaster recovery"
   type        = string
-  default     = "erieins-dev-vpc-use1"
+  default     = "test-placeholder-dev-vpc-use1"
 }
 
 variable "enable_deletion_protection" {

@@ -23,7 +23,7 @@ resource "aws_lambda_permission" "lambda_perm" {
 }
 
 module "lambda" {
-  source  = "tfe.com/erie-insurance/lambda/aws"
+  source  = "tfe.com/test-placeholder/lambda/aws"
   version = "1.3.6"
 
   upload_to_s3      = true
@@ -42,7 +42,7 @@ module "lambda" {
 }
 
 module "lambda_role" {
-  source  = "tfe.com/erie-insurance/iam/aws"
+  source  = "tfe.com/test-placeholder/iam/aws"
   version = "2.0.0"
 
   trusted_role_services = ["lambda.amazonaws.com"]
@@ -56,7 +56,7 @@ module "lambda_role" {
 
 module "additional_policies" {
   count   = length(var.additional_policies)
-  source  = "tfe.com/erie-insurance/iam/aws"
+  source  = "tfe.com/test-placeholder/iam/aws"
   version = "2.0.0"
 
   create_policy = true
