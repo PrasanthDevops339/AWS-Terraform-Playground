@@ -3,6 +3,12 @@ variable "config_rule_name" {
   type        = string
 }
 
+variable "create" {
+  description = "Boolean to control whether any resources should be created"
+  type        = bool
+  default     = true
+}
+
 variable "organization_rule" {
   type    = bool
   default = false

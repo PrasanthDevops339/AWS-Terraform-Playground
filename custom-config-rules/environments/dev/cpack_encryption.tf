@@ -1,4 +1,6 @@
+# Only create conformance pack in pre-dev environment
 module "cpack_encryption" {
+  count      = var.is_pre_dev ? 1 : 0
   source     = "../../modules/conformance_pack"
   cpack_name = "encryption-validation"
   random_id  = local.random_id
@@ -29,7 +31,7 @@ module "cpack_encryption" {
     {
       config_rule_name     = "efs-tls-enforcement"
       description          = "Custom Lambda rule to validate EFS file system policies enforce TLS (aws:SecureTransport)"
-      lambda_function_arn  = module.efs_tls_enforcement_dev.lambda_arn
+      lambda_function_arn  = module.efs_tls_enforcement_dev[0].lambda_arn
       resource_types_scope = ["AWS::EFS::FileSystem"]
       message_type         = "ConfigurationItemChangeNotification"
     }
