@@ -325,8 +325,18 @@ The Lambda execution role has the following permissions:
 
 ```python
 1. Receive Config evaluation event
-2. Extract EFS file system ID
-3. Call efs:DescribeFileSystemPolicy (lazy client initialization)
+   ├─ Support both 'invokingEvent' and 'configRuleInvokingEvent' keys
+   ├─ Log event keys (not full payload for security)
+   └─ Top-level try/catch for graceful error handling
+2. Validate configuration item
+   ├─ Missing config item → NOT_APPLICABLE
+   ├─ Missing resource ID → NOT_APPLICABLE
+   └─ Non-target resource type → NOT_APPLICABLE
+3. Parse OrderingTimestamp
+   └─ Convert to datetime object (SDK requirement)
+4. Handle deleted resources → NOT_APPLICABLE
+5. Extract EFS file system ID
+6. Call efs:DescribeFileSystemPolicy (lazy client initialization)
    ├─ PolicyNotFound → NON_COMPLIANT
    ├─ Parse policy JSON
    └─ Check for aws:SecureTransport enforcement
@@ -338,8 +348,23 @@ The Lambda execution role has the following permissions:
        │       ├─ Action includes ClientMount/Write/RootAccess → COMPLIANT
        │       └─ Action doesn't cover client actions → NON_COMPLIANT
        └─ No valid enforcement → NON_COMPLIANT
-4. Submit evaluation to Config with PutEvaluations
+7. Clip annotation to 256 chars (AWS Config limit)
+8. Submit evaluation to Config with PutEvaluations
 ```
+
+### Robustness Features
+
+The Lambda function includes defensive coding patterns:
+
+| Feature | Description |
+|---------|-------------|
+| **Dual event key support** | Accepts both `invokingEvent` and `configRuleInvokingEvent` |
+| **Top-level exception handling** | Prevents silent failures, logs and re-raises |
+| **Safe timestamp parsing** | Converts to datetime with fallback to current time |
+| **Graceful missing data handling** | Returns NOT_APPLICABLE for missing config items |
+| **Annotation clipping** | Truncates long messages to 256 char AWS limit |
+| **Reduced log verbosity** | Logs event keys, not full payload |
+| **Centralized evaluation submission** | Helper functions for consistent responses |
 
 ### Local Testing
 

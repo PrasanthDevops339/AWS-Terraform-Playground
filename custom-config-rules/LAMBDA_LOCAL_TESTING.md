@@ -319,6 +319,45 @@ The lambda function uses **lazy initialization** for boto3 clients:
 - This allows tests to inject mocks before any AWS calls are made
 - Prevents `NoRegionError` when running locally without AWS credentials
 
+### Robustness Features (Production Hardening)
+
+The Lambda function includes defensive coding patterns for production reliability:
+
+| Feature | Implementation | Purpose |
+|---------|----------------|---------|
+| **Dual event key support** | `event.get('invokingEvent') or event.get('configRuleInvokingEvent')` | Handle different AWS Config event formats |
+| **Top-level try/catch** | Wraps entire handler | Prevent silent failures, ensure clear error logging |
+| **Safe timestamp parsing** | `parse_ordering_timestamp()` helper | Convert string to datetime with fallback |
+| **Missing data handling** | Check for config item/resource ID | Return NOT_APPLICABLE gracefully |
+| **Annotation clipping** | `clip_annotation()` helper (256 chars max) | Prevent AWS Config API errors |
+| **Reduced log verbosity** | Log event keys, not full payload | Security and performance |
+| **Centralized evaluation** | `submit_evaluation()` helper | Consistent response format |
+
+### Helper Functions
+
+```python
+def clip_annotation(text: str, max_len: int = 256) -> str:
+    """Clip annotation to AWS Config maximum length."""
+    if len(text) <= max_len:
+        return text
+    return text[:max_len - 3] + "..."
+
+def parse_ordering_timestamp(timestamp_str: Optional[str]) -> datetime:
+    """Parse ISO timestamp to datetime, with fallback to now()."""
+    if not timestamp_str:
+        return datetime.now(timezone.utc)
+    try:
+        return datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+    except (ValueError, AttributeError):
+        return datetime.now(timezone.utc)
+
+def submit_evaluation(...) -> Dict[str, Any]:
+    """Centralized evaluation submission to AWS Config."""
+    # Build evaluation dict
+    # Call put_evaluations()
+    # Return response
+```
+
 ### Test Flow
 
 ```
