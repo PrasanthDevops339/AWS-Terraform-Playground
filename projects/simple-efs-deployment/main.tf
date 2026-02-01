@@ -68,13 +68,18 @@ module "kms" {
         "kms:UntagResource",
         "kms:ScheduleKeyDeletion",
         "kms:CancelKeyDeletion",
-        "kms:ReplicateKey"
+        "kms:ReplicateKey",
+        "kms:Encrypt",
+        "kms:Decrypt",
+        "kms:ReEncrypt*",
+        "kms:GenerateDataKey*",
+        "kms:CreateGrant"
       ]
 
       resources = ["*"]
     },
     {
-      sid    = "EFSPermissions"
+      sid    = "EFSServicePermissions"
       effect = "Allow"
 
       principals = [{
@@ -92,6 +97,45 @@ module "kms" {
       ]
 
       resources = ["*"]
+
+      conditions = [{
+        test     = "StringEquals"
+        variable = "kms:CallerAccount"
+        values   = [data.aws_caller_identity.current.account_id]
+      }]
+    },
+    {
+      sid    = "AllowEFSViaService"
+      effect = "Allow"
+
+      principals = [{
+        type        = "AWS"
+        identifiers = ["*"]
+      }]
+
+      actions = [
+        "kms:Encrypt",
+        "kms:Decrypt",
+        "kms:ReEncrypt*",
+        "kms:GenerateDataKey*",
+        "kms:CreateGrant",
+        "kms:DescribeKey"
+      ]
+
+      resources = ["*"]
+
+      conditions = [
+        {
+          test     = "StringEquals"
+          variable = "kms:ViaService"
+          values   = ["elasticfilesystem.${data.aws_region.current.name}.amazonaws.com"]
+        },
+        {
+          test     = "StringEquals"
+          variable = "kms:CallerAccount"
+          values   = [data.aws_caller_identity.current.account_id]
+        }
+      ]
     }
   ]
 
