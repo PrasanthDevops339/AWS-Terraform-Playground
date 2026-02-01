@@ -46,12 +46,17 @@ The IAM actions use 'elasticfilesystem:*' prefix, but boto3.client() uses 'efs'.
 import json
 import boto3
 import logging
-from datetime import datetime
-from typing import Dict, List, Any, Optional
+from datetime import datetime, timezone
+from typing import Dict, List, Any, Optional, Tuple
 
 # Setup logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+# ============================================================================
+# CONSTANTS
+# ============================================================================
+MAX_ANNOTATION_LENGTH = 256  # AWS Config annotation limit
 
 # ============================================================================
 # LAZY CLIENT INITIALIZATION
@@ -110,38 +115,137 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     Returns:
         Response dictionary with evaluation results
     """
-    logger.info(f"Received event: {json.dumps(event)}")
+    try:
+        # Log event keys only (avoid logging full event for large payloads)
+        logger.info(f"Event keys: {list(event.keys())}")
+        logger.info(f"Config rule name: {event.get('configRuleName', 'unknown')}")
+        
+        # Parse the invoking event - support both key formats
+        raw_invoking_event = event.get('invokingEvent') or event.get('configRuleInvokingEvent')
+        
+        if not raw_invoking_event:
+            logger.error(f"Missing invoking event key. Keys present: {list(event.keys())}")
+            raise KeyError("Missing invokingEvent or configRuleInvokingEvent in event")
+        
+        invoking_event = json.loads(raw_invoking_event)
+        configuration_item = invoking_event.get('configurationItem', {})
+        
+        # Validate configuration item exists and has required fields
+        if not configuration_item or not configuration_item.get('resourceId'):
+            logger.warning("Missing configuration item or resource ID")
+            return submit_not_applicable_evaluation(
+                event,
+                resource_type='AWS::EFS::FileSystem',
+                resource_id='UNKNOWN',
+                annotation='Missing configuration item or resource ID in event'
+            )
+        
+        # Extract essential information
+        resource_id = configuration_item.get('resourceId')
+        resource_type = configuration_item.get('resourceType')
+        
+        # Parse timestamp safely
+        ordering_timestamp = parse_ordering_timestamp(
+            configuration_item.get('configurationItemCaptureTime')
+        )
+        
+        # Handle non-target resource types gracefully (NOT_APPLICABLE instead of error)
+        if resource_type != 'AWS::EFS::FileSystem':
+            logger.info(f"Non-target resource type: {resource_type}")
+            return submit_evaluation(
+                event=event,
+                resource_type=resource_type,
+                resource_id=resource_id,
+                compliance_type='NOT_APPLICABLE',
+                annotation=f'Resource type {resource_type} is not evaluated by this rule',
+                ordering_timestamp=ordering_timestamp
+            )
+        
+        # Handle resource deletion
+        if configuration_item.get('configurationItemStatus') == 'ResourceDeleted':
+            compliance_type = 'NOT_APPLICABLE'
+            annotation = 'Resource has been deleted'
+        else:
+            # Evaluate EFS file system policy
+            compliance_type, annotation = evaluate_efs_tls_policy(resource_id)
+        
+        # Clip annotation to AWS Config limit
+        annotation = clip_annotation(annotation)
+        
+        # Submit evaluation to AWS Config
+        return submit_evaluation(
+            event=event,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            compliance_type=compliance_type,
+            annotation=annotation,
+            ordering_timestamp=ordering_timestamp
+        )
+        
+    except Exception as e:
+        logger.exception("Unhandled error during evaluation")
+        # Re-raise to ensure Lambda reports failure
+        raise
+
+
+def clip_annotation(text: str, max_len: int = MAX_ANNOTATION_LENGTH) -> str:
+    """Clip annotation to AWS Config maximum length."""
+    if len(text) <= max_len:
+        return text
+    return text[:max_len - 3] + "..."
+
+
+def parse_ordering_timestamp(timestamp_str: Optional[str]) -> datetime:
+    """
+    Parse configuration item timestamp to datetime object.
     
-    # Parse the invoking event
-    # AWS Config sends the event with key 'invokingEvent', not 'configRuleInvokingEvent'
-    invoking_event = json.loads(event['invokingEvent'])
-    configuration_item = invoking_event.get('configurationItem', {})
+    AWS SDK expects datetime, not string for OrderingTimestamp.
     
-    # Extract essential information
-    resource_id = configuration_item.get('resourceId')
-    resource_type = configuration_item.get('resourceType')
-    configuration_item_capture_time = configuration_item.get('configurationItemCaptureTime')
+    Args:
+        timestamp_str: ISO format timestamp string from Config
+        
+    Returns:
+        datetime object (defaults to now if parsing fails)
+    """
+    if not timestamp_str:
+        return datetime.now(timezone.utc)
     
-    # Validate resource type
-    if resource_type != 'AWS::EFS::FileSystem':
-        logger.error(f"Invalid resource type: {resource_type}")
-        return build_error_response(f"Invalid resource type: {resource_type}")
+    try:
+        # Handle ISO format with Z suffix
+        return datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+    except (ValueError, AttributeError) as e:
+        logger.warning(f"Failed to parse timestamp '{timestamp_str}': {e}")
+        return datetime.now(timezone.utc)
+
+
+def submit_evaluation(
+    event: Dict[str, Any],
+    resource_type: str,
+    resource_id: str,
+    compliance_type: str,
+    annotation: str,
+    ordering_timestamp: datetime
+) -> Dict[str, Any]:
+    """
+    Submit evaluation result to AWS Config.
     
-    # Handle resource deletion
-    if configuration_item.get('configurationItemStatus') == 'ResourceDeleted':
-        compliance_type = 'NOT_APPLICABLE'
-        annotation = 'Resource has been deleted'
-    else:
-        # Evaluate EFS file system policy
-        compliance_type, annotation = evaluate_efs_tls_policy(resource_id)
-    
-    # Build and submit evaluation
+    Args:
+        event: Original Lambda event (for resultToken)
+        resource_type: AWS resource type
+        resource_id: Resource identifier
+        compliance_type: COMPLIANT, NON_COMPLIANT, or NOT_APPLICABLE
+        annotation: Evaluation annotation
+        ordering_timestamp: Timestamp for ordering evaluations
+        
+    Returns:
+        Response dictionary
+    """
     evaluation = {
         'ComplianceResourceType': resource_type,
         'ComplianceResourceId': resource_id,
         'ComplianceType': compliance_type,
         'Annotation': annotation,
-        'OrderingTimestamp': configuration_item_capture_time
+        'OrderingTimestamp': ordering_timestamp
     }
     
     # Submit evaluation to AWS Config
@@ -150,19 +254,39 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         ResultToken=event['resultToken']
     )
     
-    logger.info(f"Evaluation submitted: {json.dumps(evaluation)}")
+    logger.info(f"Evaluation submitted: compliance={compliance_type}, resource={resource_id}")
     logger.info(f"PutEvaluations response: {json.dumps(response, default=str)}")
     
     return {
         'statusCode': 200,
         'body': json.dumps({
             'message': 'Evaluation completed successfully',
-            'evaluation': evaluation
+            'evaluation': {
+                **evaluation,
+                'OrderingTimestamp': ordering_timestamp.isoformat()
+            }
         })
     }
 
 
-def evaluate_efs_tls_policy(file_system_id: str) -> tuple:
+def submit_not_applicable_evaluation(
+    event: Dict[str, Any],
+    resource_type: str,
+    resource_id: str,
+    annotation: str
+) -> Dict[str, Any]:
+    """Submit NOT_APPLICABLE evaluation for edge cases."""
+    return submit_evaluation(
+        event=event,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        compliance_type='NOT_APPLICABLE',
+        annotation=clip_annotation(annotation),
+        ordering_timestamp=datetime.now(timezone.utc)
+    )
+
+
+def evaluate_efs_tls_policy(file_system_id: str) -> Tuple[str, str]:
     """
     Evaluate if EFS file system policy enforces TLS (aws:SecureTransport).
     
@@ -183,13 +307,13 @@ def evaluate_efs_tls_policy(file_system_id: str) -> tuple:
         
         # Parse the policy
         policy = json.loads(policy_json)
-        logger.info(f"EFS Policy for {file_system_id}: {json.dumps(policy)}")
+        logger.info(f"EFS Policy for {file_system_id}: policy retrieved successfully")
         
         # Check if policy enforces SecureTransport for EFS client actions
         if is_secure_transport_enforced(policy, file_system_id):
             return 'COMPLIANT', 'EFS file system policy enforces TLS (aws:SecureTransport) for client actions'
         else:
-            return 'NON_COMPLIANT', 'EFS file system policy does not enforce TLS (aws:SecureTransport) for EFS client actions (ClientMount/ClientWrite/ClientRootAccess)'
+            return 'NON_COMPLIANT', 'EFS policy does not enforce TLS for EFS client actions (ClientMount/ClientWrite/ClientRootAccess)'
             
     except efs.exceptions.PolicyNotFound:
         logger.warning(f"No policy found for EFS file system: {file_system_id}")
@@ -201,7 +325,9 @@ def evaluate_efs_tls_policy(file_system_id: str) -> tuple:
         
     except Exception as e:
         logger.error(f"Error evaluating EFS policy: {str(e)}", exc_info=True)
-        return 'NON_COMPLIANT', f'Error evaluating EFS policy: {str(e)}'
+        # Clip error message to prevent annotation overflow
+        error_msg = clip_annotation(f'Error evaluating EFS policy: {str(e)}')
+        return 'NON_COMPLIANT', error_msg
 
 
 def is_secure_transport_enforced(policy: Dict[str, Any], file_system_id: str = None) -> bool:
