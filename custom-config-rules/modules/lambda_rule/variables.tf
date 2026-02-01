@@ -78,3 +78,48 @@ variable "random_id" {
   type        = string
   default     = null
 }
+
+# ==========================
+# Lambda Configuration
+# ==========================
+
+variable "runtime" {
+  description = "Lambda runtime identifier"
+  type        = string
+  default     = "python3.12"
+}
+
+variable "lambda_handler" {
+  description = "Lambda handler (entry point). Defaults to lambda_function.lambda_handler"
+  type        = string
+  default     = "lambda_function.lambda_handler"
+}
+
+variable "timeout" {
+  description = "Lambda timeout in seconds"
+  type        = number
+  default     = 900
+}
+
+variable "memory_size" {
+  description = "Lambda memory size in MB"
+  type        = number
+  default     = 128
+}
+
+variable "log_level" {
+  description = "Log level for Lambda function (DEBUG, INFO, WARNING, ERROR)"
+  type        = string
+  default     = "INFO"
+}
+
+variable "environment_variables" {
+  description = "Additional environment variables for Lambda function"
+  type        = map(string)
+  default     = {}
+}
+
+variable "tags" {
+  description = "Tags to apply to all resources"
+  type        = map(string)
+  default     = {}

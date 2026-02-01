@@ -26,19 +26,24 @@ module "lambda" {
   source  = "tfe.com/test-placeholder/lambda/aws"
   version = "1.3.6"
 
-  upload_to_s3      = true
-  lambda_role_arn   = module.lambda_role.iam_role_arn
-  lambda_name       = var.random_id != null ? "${var.config_rule_name}-${var.random_id}" : var.config_rule_name
-  runtime           = "python3.12"
-  lambda_script_dir = var.lambda_script_dir
+  upload_to_s3       = true
+  lambda_role_arn    = module.lambda_role.iam_role_arn
+  lambda_name        = var.random_id != null ? "${var.config_rule_name}-${var.random_id}" : var.config_rule_name
+  runtime            = var.runtime
+  lambda_handler     = var.lambda_handler
+  lambda_script_dir  = var.lambda_script_dir
   lambda_bucket_name = data.aws_s3_bucket.bootstrap.id
+  timeout            = var.timeout
+  memory_size        = var.memory_size
 
   test_events = var.test_events
 
-  environment = {
-    Hello      = "World"
-    Serverless = "Terraform"
-  }
+  environment = merge(
+    {
+      LOG_LEVEL = var.log_level
+    },
+    var.environment_variables
+  )
 }
 
 module "lambda_role" {
@@ -48,9 +53,9 @@ module "lambda_role" {
   trusted_role_services = ["lambda.amazonaws.com"]
 
   create_policy = true
-  role_name     = var.config_rule_name
-  description   = "lambda policy which will be assume by deployment account"
-  policy_name   = var.config_rule_name
+  role_name     = var.random_id != null ? "${var.config_rule_name}-${var.random_id}" : var.config_rule_name
+  description   = "Lambda execution role for ${var.config_rule_name} AWS Config custom rule"
+  policy_name   = var.random_id != null ? "${var.config_rule_name}-${var.random_id}" : var.config_rule_name
   policy        = file("${path.module}/iam/lambda_policy.json")
 }
 
