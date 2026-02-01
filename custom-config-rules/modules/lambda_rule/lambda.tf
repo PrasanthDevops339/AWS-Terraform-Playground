@@ -35,6 +35,7 @@ module "lambda" {
   lambda_bucket_name = data.aws_s3_bucket.bootstrap.id
   timeout            = var.timeout
   memory_size        = var.memory_size
+  publish            = true  # Publish new version on code changes
 
   test_events = var.test_events
 
