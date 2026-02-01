@@ -113,7 +113,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     logger.info(f"Received event: {json.dumps(event)}")
     
     # Parse the invoking event
-    invoking_event = json.loads(event['configRuleInvokingEvent'])
+    # AWS Config sends the event with key 'invokingEvent', not 'configRuleInvokingEvent'
+    invoking_event = json.loads(event['invokingEvent'])
     configuration_item = invoking_event.get('configurationItem', {})
     
     # Extract essential information
