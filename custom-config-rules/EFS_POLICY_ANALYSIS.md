@@ -1,8 +1,10 @@
-# EFS Policy Analysis - TLS Enforcement Gap
+# EFS Policy Analysis - Compliance Gap Identified
 
-## Date: February 1, 2026
+## Overview
 
-## Policy Under Review
+This document analyzes a deployed EFS file system policy that was marked **COMPLIANT** by the Lambda rule, but has a **security gap** that should have been flagged.
+
+## Deployed Policy
 
 ```json
 {
@@ -12,7 +14,7 @@
       "Sid": "OnlyallowAccessViaMountTargetandpermitmountaccess",
       "Effect": "Allow",
       "Principal": {
-        "AWS": "arn:aws:iam::637423432759:root"
+        "AWS": "arn:aws:iam::111111111111:root"
       },
       "Action": [
         "elasticfilesystem:ClientWrite",
@@ -29,7 +31,7 @@
       "Sid": "DenyUnencryptedAccessAndUploads",
       "Effect": "Deny",
       "Principal": {
-        "AWS": "arn:aws:iam::111111111111111:root"
+        "AWS": "arn:aws:iam::111111111111:root"
       },
       "Action": "*",
       "Resource": "*",
@@ -45,85 +47,104 @@
 
 ---
 
-## Current Lambda Compliance Result: ✅ COMPLIANT
+## Current Lambda Validation (What IS Checked)
 
-The Lambda rule marked this policy as **COMPLIANT** because it found:
-- ✅ `Effect: Deny` statement exists
-- ✅ `Action: *` covers all actions (including EFS client actions)
-- ✅ `aws:SecureTransport: false` condition present
+| Check | Status | Finding |
+|-------|--------|---------|
+| Policy exists | ✅ PASS | Policy is attached |
+| Effect = "Deny" | ✅ PASS | Second statement has Deny |
+| Condition: `aws:SecureTransport = "false"` | ✅ PASS | Condition present |
+| Action covers EFS client actions | ✅ PASS | Action = `*` covers all |
+
+**Result:** COMPLIANT ✅
 
 ---
 
-## 🚨 CRITICAL GAP IDENTIFIED
+## Security Gap Identified (What is NOT Checked)
 
-### Problem: Principal Restriction in Deny Statement
+### Critical Issue: Principal Restriction
 
-The Deny statement has a **specific Principal**:
+The Deny statement has:
 ```json
 "Principal": {
-  "AWS": "arn:aws:iam::111111111111111:root"
+  "AWS": "arn:aws:iam::111111111111:root"
 }
 ```
 
-**This means TLS enforcement ONLY applies to requests from account `111111111111111`.**
+**Problem:** The TLS enforcement **only applies to this specific AWS account**!
 
-### Security Impact
+| Scenario | TLS Required? |
+|----------|---------------|
+| Access from `arn:aws:iam::111111111111:root` | ✅ Yes (Deny applies) |
+| Access from `arn:aws:iam::222222222222:root` | ❌ **No** (Deny doesn't apply) |
+| Access from any IAM role in another account | ❌ **No** (Deny doesn't apply) |
+| Access from `*` (anonymous) | ❌ **No** (Deny doesn't apply) |
 
-| Scenario | TLS Enforced? | Why |
-|----------|---------------|-----|
-| Request from account `111111111111111` without TLS | ✅ DENIED | Matches Deny principal |
-| Request from account `637423432759` without TLS | ❌ ALLOWED | Doesn't match Deny principal |
-| Request from ANY OTHER account without TLS | ❌ ALLOWED | Doesn't match Deny principal |
+### Why This Matters
 
-**The EFS file system is NOT protected from unencrypted access by most principals!**
+A properly scoped TLS enforcement policy should have:
+```json
+"Principal": "*"
+```
 
----
-
-## What the Lambda Currently Validates
-
-| Check | Status | Notes |
-|-------|--------|-------|
-| Policy exists | ✅ Validated | |
-| Deny statement present | ✅ Validated | |
-| `aws:SecureTransport: false` condition | ✅ Validated | |
-| Deny applies to EFS client actions | ✅ Validated | Action: * covers all |
-| **Principal is `*` (all principals)** | ❌ NOT VALIDATED | **GAP** |
+This ensures TLS is required for **ALL** access, not just from a specific account.
 
 ---
 
-## Missing Validation Cases
+## Missing Validation in Lambda Function
 
-### 1. Principal Validation (HIGH PRIORITY)
+### 1. Principal Validation (HIGH Priority)
 
-**Current behavior:** Lambda accepts any Deny statement with SecureTransport=false, regardless of Principal.
+**Current behavior:** Lambda does NOT check the Principal field
+**Should check:** Principal should be `*` or cover all intended access patterns
 
-**Missing check:** Verify that `Principal` is `*` or `{"AWS": "*"}` to ensure TLS is enforced for ALL requesters.
+```python
+# MISSING CHECK - Should be added
+def _validates_principal(statement: Dict[str, Any]) -> bool:
+    """
+    Check if Deny statement applies to all principals.
+    
+    For TLS enforcement to be effective, the Deny must apply to:
+    - Principal: "*" (all principals)
+    - Or Principal: {"AWS": "*"} (all AWS principals)
+    """
+    principal = statement.get('Principal', {})
+    
+    # Wildcard principal - applies to all
+    if principal == '*':
+        return True
+    
+    # AWS wildcard - applies to all AWS principals
+    if isinstance(principal, dict):
+        aws_principal = principal.get('AWS', '')
+        if aws_principal == '*':
+            return True
+        if isinstance(aws_principal, list) and '*' in aws_principal:
+            return True
+    
+    # Specific principal - TLS enforcement is scoped/limited
+    return False
+```
 
-**Impact:** Policies with restricted principals appear compliant but don't actually enforce TLS universally.
+### 2. Resource Validation (MEDIUM Priority)
 
-### 2. Resource Validation (MEDIUM PRIORITY)
+**Current behavior:** Lambda does NOT check the Resource field
+**Should check:** Resource should be `*` or the specific EFS ARN
 
-**Current behavior:** Lambda doesn't validate the `Resource` field.
+### 3. NotPrincipal Handling (LOW Priority)
 
-**Missing check:** Verify that `Resource` covers the EFS file system (or is `*`).
-
-**Impact:** A policy that denies TLS-less access to a different resource would appear compliant.
-
-### 3. Multiple Deny Statements (LOW PRIORITY)
-
-**Current behavior:** Lambda stops at first matching Deny statement.
-
-**Missing check:** If multiple Deny statements exist, ensure at least one covers all principals.
+**Current behavior:** Lambda does NOT handle NotPrincipal
+**Should check:** NotPrincipal should not exclude legitimate users
 
 ---
 
-## Recommended Policy Fix
+## Compliant vs Non-Compliant Policy Examples
 
-### Option 1: Change Principal to Wildcard (Recommended)
+### ✅ COMPLIANT: Universal TLS Enforcement
 
 ```json
 {
-  "Sid": "DenyUnencryptedAccessAndUploads",
+  "Sid": "DenyUnencryptedAccess",
   "Effect": "Deny",
   "Principal": "*",
   "Action": "*",
@@ -136,14 +157,14 @@ The Deny statement has a **specific Principal**:
 }
 ```
 
-### Option 2: Use AWS Wildcard in Principal Object
+### ❌ NON-COMPLIANT: Scoped TLS Enforcement (Current Policy)
 
 ```json
 {
-  "Sid": "DenyUnencryptedAccessAndUploads",
+  "Sid": "DenyUnencryptedAccess",
   "Effect": "Deny",
   "Principal": {
-    "AWS": "*"
+    "AWS": "arn:aws:iam::111111111111:root"
   },
   "Action": "*",
   "Resource": "*",
@@ -155,98 +176,153 @@ The Deny statement has a **specific Principal**:
 }
 ```
 
+**Why it's non-compliant:** Only enforces TLS for one specific account, not all access.
+
 ---
 
-## Lambda Enhancement Recommendations
+## Recommended Lambda Function Enhancement
 
-### Add Principal Validation
+### Add Principal Validation to `is_secure_transport_enforced()`
 
 ```python
-def _validates_principal(statement: Dict[str, Any]) -> bool:
-    """
-    Check if Deny statement applies to all principals.
+def is_secure_transport_enforced(policy: Dict[str, Any], file_system_id: str = None) -> bool:
+    statements = policy.get('Statement', [])
     
-    Valid patterns:
-    - Principal: "*"
-    - Principal: {"AWS": "*"}
+    for statement in statements:
+        effect = statement.get('Effect', '')
+        condition = statement.get('Condition', {})
+        
+        if effect != 'Deny':
+            continue
+        
+        # Check SecureTransport condition
+        if not _has_secure_transport_condition(condition):
+            continue
+        
+        # Check actions cover EFS client actions
+        if not _validates_client_actions(statement):
+            continue
+        
+        # NEW: Check principal is universal (not scoped)
+        if not _validates_principal_is_universal(statement):
+            logger.warning(
+                "Found Deny with SecureTransport=false but Principal is scoped, not universal"
+            )
+            continue
+        
+        return True
     
-    Invalid (too restrictive):
-    - Principal: {"AWS": "arn:aws:iam::123456789012:root"}
-    - Principal: {"AWS": ["arn:aws:iam::123456789012:root"]}
-    """
-    principal = statement.get('Principal', {})
+    return False
+
+
+def _validates_principal_is_universal(statement: Dict[str, Any]) -> bool:
+    """Check if Principal applies to all access (not scoped to specific accounts)."""
+    principal = statement.get('Principal')
     
-    # Check for wildcard principal
+    # Wildcard - applies to all
     if principal == '*':
         return True
     
+    # AWS wildcard
     if isinstance(principal, dict):
-        aws_principal = principal.get('AWS', '')
+        aws_principal = principal.get('AWS')
         if aws_principal == '*':
             return True
-        # Could also accept a list containing '*'
         if isinstance(aws_principal, list) and '*' in aws_principal:
             return True
     
+    # Scoped principal - TLS enforcement is limited
+    logger.warning(f"Principal is scoped: {principal}")
     return False
-```
-
-### Updated Compliance Logic
-
-```python
-# In is_secure_transport_enforced():
-
-# Current checks
-if not secure_transport_check:
-    continue
-
-if not _validates_client_actions(statement):
-    continue
-
-# NEW: Add principal validation
-if not _validates_principal(statement):
-    logger.warning(
-        "Found Deny with SecureTransport=false but Principal is restricted"
-    )
-    continue
-
-return True
 ```
 
 ---
 
 ## Test Cases to Add
 
-| Test # | Scenario | Expected Result |
-|--------|----------|-----------------|
-| 9 | Deny + SecureTransport=false + Principal=* | COMPLIANT |
-| 10 | Deny + SecureTransport=false + Principal={"AWS": "*"} | COMPLIANT |
-| 11 | Deny + SecureTransport=false + Principal=specific-account | NON_COMPLIANT |
-| 12 | Deny + SecureTransport=false + Principal=list-without-wildcard | NON_COMPLIANT |
+| Test Case | Principal | Expected Result |
+|-----------|-----------|-----------------|
+| Universal Principal | `"*"` | COMPLIANT |
+| AWS Wildcard Principal | `{"AWS": "*"}` | COMPLIANT |
+| Specific Account Principal | `{"AWS": "arn:aws:iam::111111111111:root"}` | **NON_COMPLIANT** |
+| Multiple Accounts (no wildcard) | `{"AWS": ["arn:...:111", "arn:...:222"]}` | **NON_COMPLIANT** |
+| Multiple Accounts (with wildcard) | `{"AWS": ["*", "arn:...:111"]}` | COMPLIANT |
 
 ---
 
-## Summary
+## Summary of Findings
 
-| Aspect | Current State | Recommended State |
-|--------|---------------|-------------------|
-| Policy Principal | `arn:aws:iam::111111111111111:root` | `*` |
-| Lambda Principal Check | Not implemented | Validate Principal is `*` |
-| True Compliance | ❌ FALSE POSITIVE | ✅ Accurate |
+| Category | Finding | Severity |
+|----------|---------|----------|
+| **Principal Validation** | Lambda does NOT check if Deny applies to all principals | 🔴 HIGH |
+| **Current Policy** | TLS is only enforced for one specific account | 🔴 HIGH |
+| **False Positive** | Policy was marked COMPLIANT but has security gap | 🔴 HIGH |
+| **Resource Validation** | Lambda does NOT check Resource field | 🟡 MEDIUM |
 
 ---
 
 ## Action Items
 
-1. **Immediate:** Update EFS policy to use `Principal: "*"` in Deny statement
-2. **Short-term:** Enhance Lambda to validate Principal field
-3. **Testing:** Add test cases for Principal validation
-4. **Documentation:** Update compliance requirements to specify Principal must be `*`
+### Immediate (Fix False Positive)
+
+1. ☐ Add `_validates_principal_is_universal()` function to Lambda
+2. ☐ Update `is_secure_transport_enforced()` to call principal validation
+3. ☐ Add test cases for scoped vs universal principals
+4. ☐ Redeploy Lambda function
+
+### Policy Remediation
+
+1. ☐ Update EFS policy to use `"Principal": "*"`
+2. ☐ Re-evaluate EFS file system after policy update
+3. ☐ Verify new evaluation shows COMPLIANT
+
+---
+
+## Corrected EFS Policy (Recommended)
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "OnlyallowAccessViaMountTargetandpermitmountaccess",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::111111111111:root"
+      },
+      "Action": [
+        "elasticfilesystem:ClientWrite",
+        "elasticfilesystem:ClientMount"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "Bool": {
+          "elasticfilesystem:AccessedViaMountTarget": "true"
+        }
+      }
+    },
+    {
+      "Sid": "DenyUnencryptedAccessForAll",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "*",
+      "Resource": "*",
+      "Condition": {
+        "Bool": {
+          "aws:SecureTransport": "false"
+        }
+      }
+    }
+  ]
+}
+```
+
+**Key Change:** `"Principal": "*"` instead of specific account ARN.
 
 ---
 
 ## References
 
-- [AWS EFS Resource-Based Policies](https://docs.aws.amazon.com/efs/latest/ug/efs-resource-policies.html)
-- [IAM Policy Elements: Principal](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_principal.html)
-- [aws:SecureTransport Condition Key](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_condition-keys.html#condition-keys-securetransport)
+- [AWS EFS Resource-Based Policies](https://docs.aws.amazon.com/efs/latest/ug/efs-resource-based-policies.html)
+- [AWS Policy Principal Element](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_principal.html)
+- [Encrypting Data in Transit with EFS](https://docs.aws.amazon.com/efs/latest/ug/encryption-in-transit.html)
