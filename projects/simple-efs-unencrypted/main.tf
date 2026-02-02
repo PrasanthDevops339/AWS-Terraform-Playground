@@ -1,12 +1,12 @@
 ###############################################################################
-# Simple EFS Deployment - UNENCRYPTED
+# Simple EFS Deployment - ENCRYPTED AT REST (NO TLS IN TRANSIT)
 # 
-# WARNING: This EFS is NOT encrypted at rest. 
+# WARNING: This EFS is encrypted at rest but does NOT enforce encryption in transit.
 # Use only for non-sensitive data or testing purposes.
 #
 # This configuration deploys:
 # - Security group for EFS access
-# - EFS file system (unencrypted) with mount targets
+# - EFS file system (encrypted at rest) with mount targets
 ###############################################################################
 
 locals {
@@ -32,6 +32,118 @@ locals {
       Environment = var.environment
     }
   )
+}
+
+###############################################################################
+# KMS Key for EFS Encryption
+###############################################################################
+
+module "kms" {
+  source = "../../Terrafrom-AWS-Prasanth/terraform-aws-kms"
+
+  enable_creation         = true
+  enable_key              = true
+  key_name                = "${local.name_prefix}-efs-key"
+  description             = "KMS key for EFS encryption - ${local.name_prefix}"
+  deletion_window_in_days = 7
+
+  key_statements = [
+    {
+      sid    = "EnableKeyAdministration"
+      effect = "Allow"
+
+      principals = [{
+        type        = "AWS"
+        identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/operation-admin-role"]
+      }]
+
+      actions = [
+        "kms:Create*",
+        "kms:Describe*",
+        "kms:Enable*",
+        "kms:List*",
+        "kms:Put*",
+        "kms:Update*",
+        "kms:Revoke*",
+        "kms:Disable*",
+        "kms:Get*",
+        "kms:Delete*",
+        "kms:TagResource",
+        "kms:UntagResource",
+        "kms:ScheduleKeyDeletion",
+        "kms:CancelKeyDeletion",
+        "kms:ReplicateKey",
+        "kms:Encrypt",
+        "kms:Decrypt",
+        "kms:ReEncrypt*",
+        "kms:GenerateDataKey*",
+        "kms:CreateGrant"
+      ]
+
+      resources = ["*"]
+    },
+    {
+      sid    = "EFSServicePermissions"
+      effect = "Allow"
+
+      principals = [{
+        type        = "Service"
+        identifiers = ["elasticfilesystem.amazonaws.com"]
+      }]
+
+      actions = [
+        "kms:Encrypt",
+        "kms:Decrypt",
+        "kms:ReEncrypt*",
+        "kms:GenerateDataKey*",
+        "kms:CreateGrant",
+        "kms:DescribeKey"
+      ]
+
+      resources = ["*"]
+
+      conditions = [{
+        test     = "StringEquals"
+        variable = "kms:CallerAccount"
+        values   = [data.aws_caller_identity.current.account_id]
+      }]
+    },
+    {
+      sid    = "AllowEFSViaService"
+      effect = "Allow"
+
+      principals = [{
+        type        = "AWS"
+        identifiers = ["*"]
+      }]
+
+      actions = [
+        "kms:Encrypt",
+        "kms:Decrypt",
+        "kms:ReEncrypt*",
+        "kms:GenerateDataKey*",
+        "kms:CreateGrant",
+        "kms:DescribeKey"
+      ]
+
+      resources = ["*"]
+
+      conditions = [
+        {
+          test     = "StringEquals"
+          variable = "kms:ViaService"
+          values   = ["elasticfilesystem.${data.aws_region.current.name}.amazonaws.com"]
+        },
+        {
+          test     = "StringEquals"
+          variable = "kms:CallerAccount"
+          values   = [data.aws_caller_identity.current.account_id]
+        }
+      ]
+    }
+  ]
+
+  tags = local.common_tags
 }
 
 ###############################################################################
@@ -76,7 +188,7 @@ resource "aws_vpc_security_group_egress_rule" "efs_all" {
 }
 
 ###############################################################################
-# EFS File System - UNENCRYPTED
+# EFS File System - ENCRYPTED AT REST
 ###############################################################################
 
 resource "aws_efs_file_system" "main" {
@@ -84,8 +196,9 @@ resource "aws_efs_file_system" "main" {
   performance_mode = "generalPurpose"
   throughput_mode  = "bursting"
   
-  # NO ENCRYPTION
-  encrypted = false
+  # Encryption at rest enabled with customer-managed KMS key
+  encrypted = true
+  kms_key_id = module.kms.key_arn
 
   # Lifecycle policy - transition to IA after 30 days
   lifecycle_policy {

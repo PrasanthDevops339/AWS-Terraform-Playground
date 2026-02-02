@@ -1,6 +1,6 @@
-# Simple EFS Deployment - Unencrypted
+# Simple EFS Deployment - Encrypted at Rest (No TLS in Transit)
 
-⚠️ **WARNING: This EFS file system is NOT encrypted at rest.**
+⚠️ **WARNING: This EFS file system is encrypted at rest but does NOT enforce encryption in transit.**
 
 Use only for non-sensitive data or testing purposes. For production workloads with sensitive data, use the encrypted version in `../simple-efs-deployment`.
 
@@ -8,8 +8,9 @@ Use only for non-sensitive data or testing purposes. For production workloads wi
 
 This deployment creates:
 
+- **KMS Key**: Customer-managed KMS key for EFS encryption at rest
 - **Security Group**: Controls network access to EFS mount targets (NFS port 2049)
-- **EFS File System**: Unencrypted file system with configurable performance settings
+- **EFS File System**: Encrypted-at-rest file system with configurable performance settings
 - **Mount Targets**: Deployed across multiple subnets for high availability
 
 ## Prerequisites
@@ -51,6 +52,8 @@ sudo mkdir -p /mnt/efs
 sudo mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport <efs-dns-name>:/ /mnt/efs
 ```
 
+> **Note:** The example mount command does not enable TLS (in-transit encryption). Use TLS options for production workloads.
+
 ## Inputs
 
 | Name | Description | Type | Default |
@@ -74,15 +77,16 @@ sudo mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,ret
 | `efs_mount_target_ids` | IDs of mount targets |
 | `security_group_id` | ID of the security group |
 | `mount_command` | Example mount command |
-| `encryption_status` | Shows encryption is disabled |
+| `encryption_status` | Shows encryption at rest enabled without in-transit encryption |
 
 ## Security Considerations
 
-⚠️ **This EFS is NOT encrypted at rest.**
+⚠️ **This EFS is encrypted at rest but does NOT enforce encryption in transit.**
 
 - Security group restricts access to specified CIDR blocks only
 - Backup policy is enabled by default
-- Consider using encryption in transit via TLS mount options
+- Encryption at rest uses a customer-managed KMS key
+- Consider using encryption in transit via TLS mount options for production workloads
 
 ## Lifecycle Policy
 
