@@ -5,7 +5,7 @@ ${block_name}:
     Description: ${description}
     Scope:
       ComplianceResourceTypes:
-${resource_types_scope}
+        ${resource_types_scope}
     Source:
       Owner: CUSTOM_LAMBDA
       SourceDetails:

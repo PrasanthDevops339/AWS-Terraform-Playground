@@ -111,31 +111,34 @@ aws efs create-file-system \
 
 ## Demo Flow
 
-### High-Level Agenda (30-45 minutes)
+### High-Level Agenda (45-60 minutes) - Lambda-Focused
 
 1. **Introduction** (5 min)
-   - Problem statement
-   - Solution overview
-   - Architecture diagram
+   - Problem statement: Why Lambda for TLS validation?
+   - Quick architecture overview
 
-2. **Code Walkthrough** (10 min)
-   - Lambda function structure
-   - Key validation logic
-   - Local testing approach
+2. **Lambda Function Deep Dive** (25-30 min) ⭐ **MAIN FOCUS**
+   - File structure and organization (2 min)
+   - Entry point: `lambda_handler()` (5 min)
+   - Core validation: `evaluate_efs_tls_policy()` (5 min)
+   - Policy parsing: `is_secure_transport_enforced()` (8 min)
+   - Action validation: `_validates_client_actions()` (5 min)
+   - Helper functions: timestamps, annotations, submission (5 min)
 
-3. **Deployment Demo** (10 min)
-   - Terraform infrastructure
-   - Conformance pack deployment
-   - Multi-account propagation
+3. **Live Function Testing** (10 min)
+   - Run test suite locally
+   - Walk through test scenarios
+   - Demonstrate mock client behavior
+   - Debug a test case live
 
-4. **Live Validation** (10 min)
-   - Compliant EFS evaluation
-   - Non-compliant EFS evaluation
-   - CloudWatch logs inspection
+4. **Live AWS Validation** (5 min)
+   - Trigger Lambda from Config
+   - Inspect CloudWatch logs showing function flow
+   - Compare expected vs actual behavior
 
 5. **Q&A** (5-10 min)
    - Technical questions
-   - Implementation discussion
+   - Function design decisions
 
 ---
 
@@ -179,55 +182,352 @@ aws efs create-file-system \
 
 **Key Point:** "Guard policies can't make API calls. Lambda functions can. This is a perfect use case for a custom Lambda rule."
 
-### Part 2: Code Walkthrough (10 minutes)
+### Part 2: Lambda Function Deep Dive (25-30 minutes) ⭐ **MAIN DEMO FOCUS**
 
-#### Terminal: Show Project Structure
-
-```bash
-cd /Users/prasanthkorepally/Documents/GitHub/AWS-Terraform-Playground/custom-config-rules
-
-# Show directory structure
-tree -L 3 -I 'node_modules|__pycache__|.terraform'
-```
-
-**Say:** "Let me walk you through the code structure..."
-
-#### File 1: Lambda Function (`scripts/efs-tls-enforcement/lambda_function.py`)
+#### Setup: Open Lambda Function
 
 **Open in VS Code:** `scripts/efs-tls-enforcement/lambda_function.py`
 
+**Terminal (Side by Side):**
+```bash
+cd /Users/prasanthkorepally/Documents/GitHub/AWS-Terraform-Playground/custom-config-rules/scripts/efs-tls-enforcement
+
+# Have Python file open on left, terminal on right
+```
+
+**Say:** "This is where the magic happens. Over the next 30 minutes, we'll walk through every function in this Lambda, understanding exactly how it validates EFS TLS enforcement."
+
+---
+
+#### Section A: File Overview (2 minutes)
+
 **Scroll to top and explain:**
 
-**Say:** "This Lambda function has a clear purpose documented at the top. Let's look at the key sections..."
+**Say:** "Before diving into code, let's understand the problem this solves..."
 
-**Highlight Lines 1-30 (Docstring):**
-- Purpose
-- Why Lambda is required (4 reasons)
-- What it validates
-- Important validation details
-- Complements section
+**Highlight Docstring Lines 1-40:**
 
-**Say:** "Notice the detailed explanation of WHY Lambda is needed. This is important for code review and maintenance."
+**Read out loud key points:**
+1. "EFS resource policies are NOT in Config items" ← This is critical
+2. "Must call efs:DescribeFileSystemPolicy API" ← Can't do with Guard
+3. "Must parse JSON policy and evaluate Deny statements" ← Complex logic
+4. "Guard policies can't make API calls" ← Why Lambda
 
-#### Code Section 1: Constants and Lazy Initialization
+**Say:** "Keep these 4 points in mind - they explain every design decision in this code."
+
+**Show file structure:**
+```python
+# Line 50-100: Constants and lazy client initialization
+# Line 100-180: lambda_handler() - Entry point
+# Line 180-220: Helper functions (timestamps, annotations)
+# Line 220-280: evaluate_efs_tls_policy() - Core logic
+# Line 280-350: is_secure_transport_enforced() - Policy validation
+# Line 350-420: _validates_client_actions() - Action scope
+# Line 420-450: _action_matches() - Pattern matching
+```
+
+**Say:** "227 lines total. Let's walk through the execution flow function by function."
+
+---
+
+#### Section B: Constants & Lazy Initialization (3 minutes)
 
 **Scroll to Lines 50-100:**
 
-```python
-# ============================================================================
-# CONSTANTS
-# ============================================================================
-MAX_ANNOTATION_LENGTH = 256  # AWS Config annotation limit
+**Say:** "Let's start with the building blocks..."
 
-# ============================================================================
-# LAZY CLIENT INITIALIZATION
-# ============================================================================
+**Highlight Constants:**
+```python
+MAX_ANNOTATION_LENGTH = 256  # AWS Config annotation limit
+```
+
+**Say:** "AWS Config has a hard limit - 256 characters for annotations. If we exceed this, the API call fails. We'll clip messages later using this constant."
+
+**Highlight Lazy Clients:**
+```python
 efs_client: Optional[Any] = None
 config_client: Optional[Any] = None
 
-# ============================================================================
-# EFS CLIENT ACTIONS TO VALIDATE
-# ============================================================================
+def get_efs_client():
+    global efs_client
+    if efs_client is None:
+        efs_client = boto3.client('efs')  # Note: 'efs', not 'elasticfilesystem'
+    return efs_client
+```
+
+**Say:** "Why not initialize at module level? Two reasons:"
+1. **Local testing**: Can run without AWS credentials
+2. **Mocking**: Test suite injects mock clients before first use
+
+**Pause for emphasis:** "This is a key testing pattern. The clients don't exist until someone calls `get_efs_client()`. Tests call this pattern to inject mocks."
+
+---
+
+#### Section C: Entry Point - `lambda_handler()` (5 minutes)
+
+**Scroll to Line ~100 and highlight function signature:**
+
+```python
+def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """Main Lambda handler for EFS TLS enforcement validation."""
+```
+
+**Say:** "This is where AWS Config calls us. When an EFS resource changes, Config sends a JSON event. Let's trace the execution step by step."
+
+**Step 1: Logging (Lines ~110-115)**
+
+```python
+logger.info(f"Event keys: {list(event.keys())}")
+logger.info(f"Config rule name: {event.get('configRuleName', 'unknown')}")
+```
+
+**Say:** "We DON'T log the full event - it can be huge. Just the keys to help debug."
+
+**Step 2: Parse Invoking Event (Lines ~115-125)**
+
+```python
+raw_invoking_event = event.get('invokingEvent') or event.get('configRuleInvokingEvent')
+invoking_event = json.loads(raw_invoking_event)
+configuration_item = invoking_event.get('configurationItem', {})
+```
+
+**Say:** "Config sends a JSON string inside JSON. We parse it to get the configuration item. Notice we support both key names - backwards compatibility."
+
+**Interactive:** "What happens if this JSON parsing fails?"
+---
+
+#### Section D: Core Evaluation - `evaluate_efs_tls_policy()` (5 minutes)
+
+**Scroll to Line ~220:**
+
+**Say:** "Now the heart of the function - where we actually check EFS."
+
+**Highlight function signature:**
+```python
+def evaluate_efs_tls_policy(file_system_id: str) -> Tuple[str, str]:
+    """Returns: (compliance_type, annotation)"""
+```
+
+**Say:** "Takes EFS ID, returns tuple: compliance status and message. Simple interface, complex logic inside."
+
+**Step 1: Get Client**
+```python
+efs = get_efs_client()
+```
+
+**Say:** "First call to `get_efs_client()` - this is where boto3.client('efs') gets created if it doesn't exist yet."
+
+**Step 2: API Call** ⭐⭐⭐
+
+```python
+response = efs.describe_file_system_policy(FileSystemId=file_system_id)
+policy_json = response.get('Policy')
+```
+
+**Pause dramatically:** "THIS LINE is why we need Lambda."
+
+**Say:** "We're calling the EFS API to get the resource policy. This data is NOT in the Config configuration item. Guard policies only see Config items - they can't make API calls. This is the fundamental reason Lambda is required."
+
+**Show API response format:**
+```python
+# Response structure:
+{
+  'FileSystemId': 'fs-12345678',
+  'Policy': '{"Version":"2012-10-17","Statement":[...]}'  # ← JSON string
+}
+```
+
+**Step 3: Check Policy Exists**
+```python
+if not policy_json:
+    return 'NON_COMPLIANT', 'EFS file system has no policy defined'
+```
+
+**Say:** "No policy? That means no TLS enforcement. Anyone can mount without encryption. NON_COMPLIANT."
+
+**Step 4: Parse JSON**
+```python
+policy = json.loads(policy_json)
+```
+
+**Say:** "The policy comes as a JSON string. We parse it into a Python dict so we can inspect its structure."
+
+**Step 5: Validate Policy**
+```python
+if is_secure_transport_enforced(policy, file_system_id):
+    return 'COMPLIANT', 'EFS policy enforces TLS for client actions'
+else:
+    return 'NON_COMPLIANT', 'EFS policy does not enforce TLS for client actions'
+```
+
+**Say:** "We call another function to inspect the policy details. We'll look at that next."
+
+**Exception Handling:**
+
+```python
+except efs.exceptions.PolicyNotFound:
+    return 'NON_COMPLIANT', 'EFS has no policy - TLS not configured'
+```
+**Say:** "PolicyNotFound is different from empty response. It means EFS explicitly has no policy attached."
+
+```python
+except efs.exceptions.FileSystemNotFound:
+    return 'NON_COMPLIANT', f'EFS not found: {file_system_id}'
+```
+**Say:** "Shouldn't happen - Config wouldn't send us a deleted resource. But we handle it anyway."
+
+```python
+except Exception as e:
+    error_msg = clip_annotation(f'Error evaluating policy: {str(e)}')
+    return 'NON_COMPLIANT', error_msg
+```
+**Say:** "Any other error? Fail closed - return NON_COMPLIANT. We don't want to mark insecure resources as compliant due to evaluation errors."
+
+**Terminal Demo:**
+```bash
+# Show the function
+grep -A 20 "def evaluate_efs_tls_policy" lambda_function.py
+```
+```
+**Say:** "Deleted resources can't be non-compliant. They don't exist."
+
+**Step 5: Core Evaluation (Line ~165)**
+
+```python
+compliance_type, annotation = evaluate_efs_tls_policy(resource_id)
+```
+
+**Pause here:** "THIS is where the real work happens. We'll look at this function next."
+
+**Step 6: Submit Result (Lines ~170-180)**
+
+```python
+return submit_evaluation(
+    event=event,
+    resource_id=resource_id,
+    compliance_type=compliance_type,
+    annotation=clip_annotation(annotation),  # ← Clip to 256 chars
+    ordering_timestamp=ordering_timestamp
+)
+```
+
+---
+
+#### Section E: Policy Validation - `is_secure_transport_enforced()` (8 minutes)
+
+**Scroll to Line ~280:**
+
+**Say:** "Now the complex part - parsing the IAM policy JSON to validate TLS enforcement."
+
+**Show example policy first:**
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Deny",
+      "Action": "*",
+      "Condition": {
+        "Bool": {
+          "aws:SecureTransport": "false"
+        }
+      }
+    }
+  ]
+}
+```
+
+**Say:** "This is what we're looking for. Let's see how the code validates it."
+
+**Function Signature:**
+```python
+def is_secure_transport_enforced(policy: Dict[str, Any], file_system_id: str = None) -> bool:
+```
+
+**Say:** "Takes parsed policy dict, returns boolean. True = compliant, False = not compliant."
+
+**Step 1: Get Statements**
+```python
+statements = policy.get('Statement', [])
+
+for statement in statements:
+```
+
+**Say:** "IAM policies have a Statement array. We check each statement looking for TLS enforcement."
+
+**Step 2: Check Effect**
+```python
+effect = statement.get('Effect', '')
+if effect != 'Deny':
+    continue  # Skip Allow statements
+```
+
+**Interactive:** "Why only check Deny statements?"
+
+**Answer:** "Allow statements don't prevent anything. Only Deny can enforce TLS. An Allow statement says 'you can do this' but doesn't block unencrypted access."
+
+**Step 3: Check Condition** (Lines ~340-355)
+
+```python
+condition = statement.get('Condition', {})
+bool_condition = condition.get('Bool', {})
+bool_if_exists = condition.get('BoolIfExists', {})
+
+secure_transport_check = (
+    bool_condition.get('aws:SecureTransport') == 'false' or
+    bool_condition.get('aws:SecureTransport') is False or
+    bool_if_exists.get('aws:SecureTransport') == 'false' or
+    bool_if_exists.get('aws:SecureTransport') is False
+)
+```
+
+**Say:** "We check FOUR combinations:"
+1. `Bool` condition with string `"false"`
+2. `Bool` condition with boolean `False`
+3. `BoolIfExists` with string `"false"`
+4. `BoolIfExists` with boolean `False`
+
+**Interactive:** "Why both string and boolean?"
+
+**Answer:** "IAM policy JSON can have either. We're defensive - accept both formats."
+
+**Interactive:** "What's the difference between Bool and BoolIfExists?"
+
+**Answer:** 
+- `Bool`: Denies if key exists and is false
+- `BoolIfExists`: Denies if key doesn't exist OR is false
+
+**Say:** "Both work for our purposes - they both enforce TLS."
+
+**Step 4: Validate Action Scope** ⭐ **CRITICAL**
+
+```python
+if not _validates_client_actions(statement):
+    logger.warning("Deny with SecureTransport but doesn't apply to client actions")
+    continue
+```
+
+**Say:** "HERE is where we prevent false positives."
+
+**Show example of false positive:**
+```json
+{
+  "Effect": "Deny",
+  "Action": "s3:*",  // ← Only denies S3!
+  "Condition": {
+    "Bool": {"aws:SecureTransport": "false"}
+  }
+}
+---
+
+#### Section F: Action Validation - `_validates_client_actions()` (5 minutes)
+
+**Scroll to Line ~380:**
+
+**Say:** "This helper function answers: Does this Deny statement actually protect EFS client access?"
+
+**Show the constant again:**
+```python
 EFS_CLIENT_ACTIONS = [
     'elasticfilesystem:ClientMount',
     'elasticfilesystem:ClientWrite',
@@ -235,78 +535,197 @@ EFS_CLIENT_ACTIONS = [
 ]
 ```
 
-**Say:** "Three key things here:"
-1. **MAX_ANNOTATION_LENGTH**: AWS Config limits annotations to 256 chars
-2. **Lazy initialization**: Clients created on first use (enables local testing)
-3. **EFS_CLIENT_ACTIONS**: The specific actions we validate for TLS enforcement
+**Say:** "These are the three actions we MUST protect. If a Deny doesn't cover these, it's not enforcing TLS for EFS."
 
-**Key Point:** "The lazy initialization is crucial. It means we can run tests locally without AWS credentials. The test suite mocks these clients."
+**Function Logic:**
 
-#### Code Section 2: Main Handler
-
-**Scroll to `lambda_handler` function (Lines ~100-180):**
-
-**Say:** "This is the entry point AWS Config calls. Let's trace the flow..."
-
-**Walk through:**
-1. **Log event keys** (not full event - too large)
-2. **Parse invoking event** (supports both key formats)
-3. **Extract configuration item**
-4. **Handle edge cases** (missing data, deletions, wrong resource type)
-5. **Call evaluation logic**
-6. **Submit result to Config**
-
-**Key Point:** "Notice the defensive programming - we handle missing data, deleted resources, wrong resource types gracefully. This prevents false failures."
-
-#### Code Section 3: Core Validation Logic
-
-**Scroll to `evaluate_efs_tls_policy` function:**
-
+**Step 1: Extract Actions**
 ```python
-def evaluate_efs_tls_policy(file_system_id: str) -> Tuple[str, str]:
-    """
-    Evaluate if EFS file system policy enforces TLS (aws:SecureTransport).
-    """
-    efs = get_efs_client()
-    try:
-        # API call to get policy (NOT in Config item!)
-        response = efs.describe_file_system_policy(FileSystemId=file_system_id)
-        policy_json = response.get('Policy')
-        
-        if not policy_json:
-            return 'NON_COMPLIANT', 'EFS file system has no policy defined'
-        
-        # Parse JSON policy
-        policy = json.loads(policy_json)
-        
-        # Check for TLS enforcement
-        if is_secure_transport_enforced(policy, file_system_id):
-            return 'COMPLIANT', 'EFS policy enforces TLS for client actions'
-        else:
-            return 'NON_COMPLIANT', 'EFS policy does not enforce TLS for client actions'
+actions = statement.get('Action', [])
+not_actions = statement.get('NotAction', [])
+
+# Normalize to list
+if isinstance(actions, str):
+    actions = [actions]
 ```
 
-**Say:** "This is where we call the EFS API. Three possible outcomes:"
-1. **No policy** → NON_COMPLIANT
-2. **Policy doesn't enforce TLS** → NON_COMPLIANT  
-3. **Policy enforces TLS** → COMPLIANT
+**Say:** "Actions can be a string or list. We normalize to list for consistent processing."
 
-**Key Point:** "We're making an AWS API call here. This is impossible with Guard policies."
+**Step 2: Handle NotAction (Inverse Logic)**
+```python
+if not_actions:
+    for not_action in not_actions:
+        for client_action in EFS_CLIENT_ACTIONS:
+            if _action_matches(not_action, client_action):
+                return False  # Client action excluded!
+    return True  # Client actions not excluded, so they're covered
+```
 
-#### Code Section 4: Policy Validation Logic
+**Say:** "NotAction is tricky - it means 'everything EXCEPT these'. If our client actions are in the NotAction list, they're NOT protected."
 
-**Scroll to `is_secure_transport_enforced` function:**
+**Example:**
+```json
+{
+  "NotAction": "elasticfilesystem:Client*"
+}
+```
+---
 
-**Say:** "This is the most complex logic - validating the policy structure..."
+### Part 4: Live AWS Validation (5
+**Say:** "Converts ISO timestamp string to datetime object. Config expects datetime, not string."
 
-**Walk through the logic:**
+**3. `submit_evaluation()` - Line ~245**
+```python
+def submit_evaluation(...) -> Dict[str, Any]:
+    evaluation = {
+        'ComplianceResourceType': resource_type,
+        'ComplianceResourceId': resource_id,
+        'ComplianceType': compliance_type,
+        'Annotation': annotation,
+        'OrderingTimestamp': ordering_timestamp
+    }
+    
+    response = get_config_client().put_evaluations(
+        Evaluations=[evaluation],
+        ResultToken=event['resultToken']
+    )
+```
+
+**Say:** "Builds evaluation result and sends to Config via PutEvaluations API. This is how Config gets our compliance verdict."
+
+**Summary:**
+```
+lambda_handler() 
+  → evaluate_efs_tls_policy()
+    → is_secure_transport_enforced()
+      → _validates_client_actions()
+        → _action_matches()
+  → submit_evaluation()
+```
+
+**Say:** "This is the complete execution flow. Every function has a clear purpose."
+
+---
+
+### Part 3: Live Function Testing (10 minutes)
+
+**Say:** "Now let's see these functions in action through local testing."
+
+#### Open Test File
+
+**Open:** `scripts/efs-tls-enforcement/test_lambda.py`
+
+**Scroll to `MockEFSClient` class:**
 
 ```python
-def is_secure_transport_enforced(policy: Dict[str, Any], file_system_id: str = None) -> bool:
-    """
-    Check if policy enforces aws:SecureTransport for EFS client actions.
+class MockEFSClient:
+    def __init__(self, scenario):
+        self.scenario = scenario
     
-    Must have Deny statement that:
+    def describe_file_system_policy(self, FileSystemId):
+        if self.scenario == "no_policy":
+            raise ClientError(...)
+        elif self.scenario == "compliant_deny":
+            return {'Policy': json.dumps({...})}
+```
+
+**Say:** "The mock client simulates AWS API responses without making actual calls. Notice it returns the same data structure the real EFS API would."
+
+**Show mock injection:**
+```python
+import lambda_function
+
+lambda_function.efs_client = MockEFSClient(scenario)
+lambda_function.config_client = MockConfigClient()
+```
+
+**Say:** "We replace the global clients with mocks before calling the lambda handler. This is why lazy initialization is so important."
+
+#### Run Tests Live
+
+**Terminal:**
+```bash
+cd scripts/efs-tls-enforcement
+python3 test_lambda.py
+```
+
+**Expected output:**
+```
+============================================================
+EFS TLS Enforcement Lambda Function - Test Suite
+============================================================
+
+============================================================
+Testing: No Policy (Should be NON_COMPLIANT)
+============================================================
+Compliance: NON_COMPLIANT
+Annotation: EFS file system has no policy - TLS enforcement not configured
+✅ PASSED - Expected NON_COMPLIANT, got NON_COMPLIANT
+
+============================================================
+Testing: Compliant Policy with Deny + SecureTransport=false
+============================================================
+Compliance: COMPLIANT
+Annotation: EFS file system policy enforces TLS (aws:SecureTransport) for client actions
+✅ PASSED - Expected COMPLIANT, got COMPLIANT
+
+============================================================
+Testing: Non-Compliant Policy (No SecureTransport enforcement)
+============================================================
+Compliance: NON_COMPLIANT
+Annotation: EFS policy does not enforce TLS for EFS client actions (ClientMount/ClientWrite/ClientRootAccess)
+✅ PASSED - Expected NON_COMPLIANT, got NON_COMPLIANT
+
+============================================================
+Testing: Compliant Policy with BoolIfExists condition
+============================================================
+Compliance: COMPLIANT
+Annotation: EFS file system policy enforces TLS (aws:SecureTransport) for client actions
+✅ PASSED - Expected COMPLIANT, got COMPLIANT
+
+============================================================
+Test Summary
+============================================================
+✅ PASSED: No Policy (Should be NON_COMPLIANT)
+✅ PASSED: Compliant Policy with Deny + SecureTransport=false
+✅ PASSED: Non-Compliant Policy (No SecureTransport enforcement)
+✅ PASSED: Compliant Policy with BoolIfExists condition
+
+Total: 4/4 tests passed
+
+🎉 All tests passed!
+```
+
+**Say:** "All 4 scenarios pass. Each test calls `lambda_handler()` end-to-end, exercising every function we just reviewed."
+
+#### Debug a Test Case
+
+**Say:** "Let's add some debug output to understand the flow..."
+
+**Edit test file temporarily:**
+```python
+# Add this before running test
+import logging
+logging.basicConfig(level=logging.INFO)
+```
+
+**Re-run one test:**
+```bash
+# Modify test_lambda.py to run only compliant_deny scenario
+python3 test_lambda.py
+```
+
+**Show logs:**
+```
+INFO:root:Event keys: ['configRuleInvokingEvent', 'resultToken']
+INFO:root:Config rule name: test-rule
+INFO:root:EFS Policy for fs-12345678: policy retrieved successfully
+INFO:root:Action '*' covers all EFS client actions
+INFO:root:Found compliant Deny statement: SecureTransport=false with EFS client actions
+INFO:root:Evaluation submitted: compliance=COMPLIANT, resource=fs-12345678
+```
+
+**Say:** "See the execution flow? Event received → Policy retrieved → Actions validated → Compliant statement found → Evaluation submitted. This traces through all our functions
     1. Denies when aws:SecureTransport is false
     2. Applies to EFS client actions
     """
