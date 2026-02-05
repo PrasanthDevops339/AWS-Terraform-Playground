@@ -68,7 +68,9 @@ REGION = os.getenv('REGION')                    # AWS region
 bucket_name = os.getenv('TAGGING_BUCKET')       # S3 bucket for results
 bucket_prefix = os.getenv('BUCKET_PREFIX')      # S3 object key prefix
 policy_table = os.getenv('POLICY_TABLE')        # DynamoDB policy table
-version_table = os.getenv('CLOUD_VERSION_TABLE') # DynamoDB version table
+# CLOUD_VERSION_TABLE: DynamoDB table containing 1.0 accounts to exclude
+# Format: operations-{env}-cloud-versions (e.g., operations-dev-cloud-versions)
+version_table = os.getenv('CLOUD_VERSION_TABLE', 'operations-dev-cloud-versions')  # DynamoDB version table
 
 # ============================================================================
 # SUSPENDED OU CONFIGURATION
@@ -259,81 +261,65 @@ def check_account(account_name):
 # ============================================================================
 # SUSPENDED OU EXCLUSION - START
 # ============================================================================
-# This function checks if an account is in the 'Suspended' OU and excludes it
-# from compliance reporting. Accounts in suspended OUs are skipped entirely.
-# Uses hardcoded OU ID (SUSPENDED_OU_ID) for fast, reliable checking.
+# Build a suspended account set once per run to avoid repeated Organizations API
+# calls (especially expensive for accounts with many resources).
 # ============================================================================
-def is_account_in_suspended_ou(account_id):
+suspended_account_cache = None
+suspended_account_cache_ts = None
+SUSPENDED_OU_CACHE_TTL_ENABLED = os.getenv('SUSPENDED_OU_CACHE_TTL_ENABLED', 'true').strip().lower() == 'true'
+SUSPENDED_OU_CACHE_TTL_SECONDS = int(os.getenv('SUSPENDED_OU_CACHE_TTL_SECONDS', '1800'))
+
+
+def _list_accounts_for_parent(org_client, parent_id):
+    account_ids = []
+    paginator = org_client.get_paginator('list_accounts_for_parent')
+    for page in paginator.paginate(ParentId=parent_id):
+        for account in page.get('Accounts', []):
+            if account.get('Id'):
+                account_ids.append(account['Id'])
+    return account_ids
+
+
+def get_suspended_account_ids():
     """
-    Check if an account belongs to the Suspended OU (or any of its children).
-    
-    Returns True if the account is under the SUSPENDED_OU_ID, False otherwise.
-    
-    This is more efficient than name-based checking:
-    - OU IDs don't change (names can be renamed)
-    - Direct ID comparison is faster
-    - No case-sensitivity issues
-    
-    Example org structure:
-        Root
-        ├── infrastructure (ou-test123abc)
-        ├── Suspended (ou-susp345jkl)  <- SUSPENDED_OU_ID - Accounts here excluded
-        └── workloads (ou-prod678uvw)
+    Fetch all account IDs directly under the Suspended OU.
+    Returns a set of account IDs. Cached for the lifetime of the process.
     """
+    global suspended_account_cache, suspended_account_cache_ts
+    now = time.time()
+    if suspended_account_cache is not None and suspended_account_cache_ts is not None:
+        if not SUSPENDED_OU_CACHE_TTL_ENABLED:
+            return suspended_account_cache
+        if now - suspended_account_cache_ts < SUSPENDED_OU_CACHE_TTL_SECONDS:
+            return suspended_account_cache
+
     try:
         org_client = boto3.client('organizations')
-        
-        # Walk up the OU hierarchy from the account to root
-        current_id = account_id
-        ou_path = []
-        
-        while True:
-            # Get parent of current entity
-            response = org_client.list_parents(ChildId=current_id)
-            
-            if not response.get('Parents'):
-                break
-                
-            parent = response['Parents'][0]  # An account/OU has only one parent
-            
-            # If we've reached the root, stop
-            if parent['Type'] == 'ROOT':
-                ou_path.append(('Root', parent['Id']))
-                break
-            
-            # If it's an OU, check if it matches the suspended OU ID
-            if parent['Type'] == 'ORGANIZATIONAL_UNIT':
-                ou_id = parent['Id']
-                
-                # DIRECT OU ID CHECK - Fast and reliable
-                if ou_id == SUSPENDED_OU_ID:
-                    ou_response = org_client.describe_organizational_unit(OrganizationalUnitId=ou_id)
-                    ou_name = ou_response.get('OrganizationalUnit', {}).get('Name', '')
-                    logger.warning(f"[SUSPENDED OU DETECTED] Account {account_id} is under Suspended OU")
-                    logger.warning(f"   OU Name: '{ou_name}' | OU ID: {ou_id}")
-                    return True
-                
-                # Get OU name for logging path (optional)
-                ou_response = org_client.describe_organizational_unit(OrganizationalUnitId=ou_id)
-                ou_name = ou_response.get('OrganizationalUnit', {}).get('Name', '')
-                ou_path.append((ou_name, ou_id))
-                
-                # Move up to the next level
-                current_id = ou_id
-            else:
-                break
-        
-        # Log the full OU path for debugging
-        ou_path.reverse()
-        path_str = ' -> '.join([f"{name}" for name, _ in ou_path])
-        logger.info(f"[DEBUG] Account {account_id} OU Path: {path_str}")
-        logger.info(f"[OK] Account {account_id} is NOT in suspended OU")
-        return False
-        
+        suspended_accounts = set()
+        for account_id in _list_accounts_for_parent(org_client, SUSPENDED_OU_ID):
+            suspended_accounts.add(account_id)
+
+        suspended_account_cache = suspended_accounts
+        suspended_account_cache_ts = now
+        sorted_accounts = sorted(suspended_accounts)
+        logger.info(f"[SUSPENDED OU] Cached {len(suspended_accounts)} suspended accounts")
+        logger.info(f"[SUSPENDED OU] Account IDs: {', '.join(sorted_accounts)}")
+        return suspended_account_cache
+
     except Exception as e:
-        logger.error(f"[ERROR] Error checking OU for account {account_id}: {e}")
-        # In case of error, assume not suspended to avoid accidentally skipping valid accounts
-        return False
+        logger.error(f"[ERROR] Error building suspended account list: {e}")
+        # In case of error, return empty set to avoid skipping valid accounts
+        suspended_account_cache = set()
+        suspended_account_cache_ts = now
+        return suspended_account_cache
+
+
+def is_account_in_suspended_ou(account_id):
+    """
+    Fast membership check against cached Suspended OU accounts.
+    """
+    suspended_accounts = get_suspended_account_ids()
+    return account_id in suspended_accounts
 
 # ============================================================================
 # SUSPENDED OU EXCLUSION - END
