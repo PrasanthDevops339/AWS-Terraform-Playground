@@ -1,0 +1,32 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowConfigPutEvaluations",
+      "Effect": "Allow",
+      "Action": [
+        "config:PutEvaluations"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "AllowLogs",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": "arn:aws:logs:${region}:${account_id}:*"
+    },
+    {
+      "Sid": "AllowEFSDescribePolicy",
+      "Effect": "Allow",
+      "Action": [
+        "elasticfilesystem:DescribeFileSystemPolicy",
+        "elasticfilesystem:DescribeFileSystems"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
