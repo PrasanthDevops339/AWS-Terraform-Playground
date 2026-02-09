@@ -44,7 +44,7 @@ If an account is in **both** the Suspended OU **and** the DynamoDB table (1.0), 
                     │
                     ▼
 ┌────────────────────────────────────────────────────────────────────┐
-│  Line 391-394: FIRST CHECK - Suspended OU                          │
+│  Line 394-396: FIRST CHECK - Suspended OU                          │
 │                                                                    │
 │  if is_account_in_suspended_ou(account_id):     ◄── Checked FIRST │
 │      logger.warning("[SUSPENDED OU] Skipping...")                  │
@@ -56,8 +56,8 @@ If an account is in **both** the Suspended OU **and** the DynamoDB table (1.0), 
             │  SKIPPED ❌       │
             │  (Suspended OU)   │
             └───────────────────┘
-            
-            DynamoDB check (lines 413-422) is NEVER reached
+
+            DynamoDB check (lines 416-428) is NEVER reached
 ```
 
 ### All Possible Scenarios
@@ -66,8 +66,9 @@ If an account is in **both** the Suspended OU **and** the DynamoDB table (1.0), 
 |----------|------------------|-------------------|--------------|-------------|
 | Both flags | ✅ Yes | ✅ Yes | **Skipped at Suspended OU** (DynamoDB never queried) | `[SUSPENDED OU] Skipping account...` |
 | Only Suspended | ✅ Yes | ❌ No | Skipped at Suspended OU check | `[SUSPENDED OU] Skipping account...` |
-| Only 1.0 | ❌ No | ✅ Yes | Skipped at DynamoDB check | `Account ... are 1.0` |
-| Neither | ❌ No | ❌ No | ✅ **Included in report** | (no skip log, writes to CSV) |
+| Only 1.0 | ❌ No | ✅ Yes | Skipped at DynamoDB check | `Account ... is 1.0 - skipping` |
+| Neither (with annotations) | ❌ No | ❌ No | ✅ **Included in report** | (no skip log, writes to CSV) |
+| Neither (no annotations) | ❌ No | ❌ No | ❌ **Skipped** | `Account ... - skipped (no matching annotations)` |
 
 ### Why This Order?
 
@@ -242,7 +243,7 @@ For each non-compliant resource, the script runs through these checks:
 │           │ → Returns TRUE (account is 1.0)         │           │
 │           └─────────────────────────────────────────┘           │
 │           Result: SKIP this resource ❌                         │
-│           Log: "Account 333344445555 & legacy-finance are 1.0"  │
+│           Log: "Account 333344445555 & legacy-finance is 1.0 - skipping" │
 └──────────────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────────┐
@@ -271,19 +272,31 @@ For each non-compliant resource, the script runs through these checks:
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-### Step 4: Upload to S3
+### Step 4: Upload to S3 (with Safety Check)
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │  Group CSV data by (accountId, accountName)                     │
 │                                                                  │
+│  For each account group:                                         │
+│  ├── CHECK: Is account in Suspended OU? (Lines 461-463)        │
+│  │   └── If YES → Skip CSV creation entirely ❌                 │
+│  │   └── If NO → Continue to S3 upload                          │
+│  │                                                               │
 │  For account 111122223333 (prod-app-account):                   │
+│  ├── Not in Suspended OU ✅                                     │
 │  └── Upload to: s3://my-bucket/config-reports/                  │
 │                 111122223333-prod-app-account_1.csv             │
 │                                                                  │
 │  For account 222233334444 (dev-test-account):                   │
+│  ├── Not in Suspended OU ✅                                     │
 │  └── Upload to: s3://my-bucket/config-reports/                  │
 │                 222233334444-dev-test-account_1.csv             │
+│                                                                  │
+│  For account 444455556666 (old-project):                        │
+│  ├── In Suspended OU ❌                                         │
+│  ├── Log: "[SUSPENDED OU] Skipping CSV creation..."            │
+│  └── NO CSV uploaded (safety net)                               │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -346,9 +359,55 @@ For each non-compliant resource, the script runs through these checks:
 
 ---
 
+## Two-Layer Defense: Suspended OU Exclusion
+
+The script implements **two separate checks** for Suspended OU accounts to ensure no CSV files are ever created for suspended accounts:
+
+### Layer 1: Per-Resource Check (Lines 394-396)
+
+The first check happens during resource processing, **before writing to the in-memory CSV buffer**:
+
+```python
+if is_account_in_suspended_ou(account_id):
+    logger.warning(f"[SUSPENDED OU] Skipping account: {account_id} ({account_name})")
+    continue  # Skip this resource entirely
+```
+
+**Purpose:** Prevent suspended account resources from being written to the CSV buffer in the first place.
+
+### Layer 2: CSV Upload Check (Lines 461-463)
+
+The second check happens during S3 upload, **after grouping but before creating the CSV file**:
+
+```python
+# Extract account ID from group keys
+if isinstance(group_keys, tuple):
+    group_account_id = str(group_keys[0])
+else:
+    group_account_id = str(group_keys)
+
+# Skip CSV creation for accounts in Suspended OU
+if is_account_in_suspended_ou(group_account_id):
+    logger.warning(f"[SUSPENDED OU] Skipping CSV creation for suspended account: {group_account_id}")
+    continue  # Skip CSV creation and S3 upload
+```
+
+**Purpose:** Safety net to catch any suspended account resources that might slip through Layer 1 (e.g., due to race conditions, caching issues, or edge cases).
+
+### Why Two Layers?
+
+| Layer | When It Runs | What It Prevents | Why It's Needed |
+|-------|--------------|------------------|-----------------|
+| **Layer 1** (Per-Resource) | During resource iteration (early) | Resources written to CSV buffer | Primary filter - most efficient |
+| **Layer 2** (CSV Upload) | Before S3 upload (late) | CSV file creation and S3 upload | Safety net - defense in depth |
+
+**Result:** Even if Layer 1 misses a suspended account resource, Layer 2 ensures **no CSV file is ever uploaded to S3** for that account.
+
+---
+
 ## Suspended OU Exclusion - Code Details
 
-### Cache Variables (Lines 268-270)
+### Cache Variables (Lines 267-270)
 
 ```python
 suspended_account_cache = None           # Stores set of suspended account IDs
@@ -356,7 +415,7 @@ suspended_account_cache_ts = None        # Timestamp when cache was refreshed
 SUSPENDED_OU_CACHE_TTL_SECONDS = 1800    # Cache TTL (30 minutes default)
 ```
 
-### Helper Function: `_list_accounts_for_parent()` (Lines 272-279)
+### Helper Function: `_list_accounts_for_parent()` (Lines 273-280)
 
 Lists all accounts **directly under** a given OU (no nested traversal).
 
@@ -366,7 +425,7 @@ def _list_accounts_for_parent(org_client, parent_id):
     # Returns: ['444455556666', '555566667777']
 ```
 
-### Main Function: `get_suspended_account_ids()` (Lines 281-312)
+### Main Function: `get_suspended_account_ids()` (Lines 283-315)
 
 ```python
 def get_suspended_account_ids():
@@ -383,7 +442,7 @@ def get_suspended_account_ids():
     #         "[SUSPENDED OU] Account IDs: 444455556666, 555566667777"
 ```
 
-### Fast Lookup: `is_account_in_suspended_ou()` (Lines 314-320)
+### Fast Lookup: `is_account_in_suspended_ou()` (Lines 317-323)
 
 ```python
 def is_account_in_suspended_ou(account_id):
@@ -406,15 +465,19 @@ def check_account(account_name):
     # If NOT FOUND → return False → Account is 2.0 (include in report)
 ```
 
-### Usage in Main Loop (Lines 413-422)
+### Usage in Main Loop (Lines 416-428)
 
 ```python
-if not check_account(account_name) and config_annotation:
+is_one_dot_zero = check_account(account_name)
+if not is_one_dot_zero and config_annotation:
     # Account is 2.0 AND has annotations → INCLUDE
     writer.writerow({...})
+elif is_one_dot_zero:
+    # Account is 1.0 → SKIP
+    logger.info(f"Account {account_id} & {account_name} is 1.0 - skipping")
 else:
-    # Account is 1.0 OR no annotations → SKIP
-    logger.info(f"Account {account_id} & {account_name} are 1.0")
+    # Account is 2.0 but no matching annotations → SKIP
+    logger.info(f"Account {account_id} & {account_name} - skipped (no matching annotations)")
 ```
 
 ---
@@ -440,13 +503,20 @@ res types: ['vol-', 'i-', 'eni-']
 [SUSPENDED OU] Skipping account: 444455556666 (old-project)
 
 # 1.0 account skipped
-Account 333344445555 & legacy-finance are 1.0
+Account 333344445555 & legacy-finance is 1.0 - skipping
 
-# 2.0 account included (no log, just writes to CSV)
+# 2.0 account with no matching annotations skipped
+Account 777788889999 & dev-account - skipped (no matching annotations)
+
+# 2.0 account with annotations included (no log, just writes to CSV)
 ```
 
 ### S3 Upload
 ```
+# Layer 2: Safety net catches suspended account before CSV creation
+[SUSPENDED OU] Skipping CSV creation for suspended account: 444455556666
+
+# Successful uploads for non-suspended accounts
 CSV saved to s3://my-bucket/config-reports/111122223333-prod-app-account_1.csv
 CSV saved to s3://my-bucket/config-reports/222233334444-dev-test-account_1.csv
 ```
