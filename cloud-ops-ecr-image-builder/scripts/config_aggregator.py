@@ -70,7 +70,7 @@ bucket_prefix = os.getenv('BUCKET_PREFIX')      # S3 object key prefix
 policy_table = os.getenv('POLICY_TABLE')        # DynamoDB policy table
 # CLOUD_VERSION_TABLE: DynamoDB table containing 1.0 accounts to exclude
 # Format: operations-{env}-cloud-versions (e.g., operations-dev-cloud-versions)
-version_table = os.getenv('CLOUD_VERSION_TABLE', 'operations-dev-cloud-versions')  # DynamoDB version table
+version_table = os.getenv('CLOUD_VERSION_TABLE')  # DynamoDB version table
 
 # ============================================================================
 # SUSPENDED OU CONFIGURATION
@@ -413,7 +413,8 @@ if __name__ == '__main__':
                                 continue
 
                         #check if its 2.0 and then insert into list
-                        if not check_account(account_name) and config_annotation:
+                        is_one_dot_zero = check_account(account_name)
+                        if not is_one_dot_zero and config_annotation:
                             # not 1.0 account
                             writer.writerow({
                                 'resourceId': resource_id, 'resourceType': resource_type, 'resourceName': resource_name,
@@ -421,8 +422,10 @@ if __name__ == '__main__':
                                 'configurationItemCaptureTime': capture_time, 'configurationItemStatus': status,
                                 'accountId': account_id, 'accountName': account_name, 'awsRegion': region, 'description': config_annotation
                             })
+                        elif is_one_dot_zero:
+                            logger.info(f"Account {account_id} & {account_name} is 1.0 - skipping")
                         else:
-                            logger.info(f"Account {account_id} & {account_name} are 1.0")
+                            logger.info(f"Account {account_id} & {account_name} - skipped (no matching annotations)")
 
                 n = datetime.now()
                 time = n.strftime("%H:%M:%S")
@@ -451,9 +454,16 @@ if __name__ == '__main__':
                     # Create a safe file name from the grouping keys
                     # Convert tuple to string, e.g., (101, 'John Doe') -> '101_John Doe'
                     if isinstance(group_keys, tuple):
+                        group_account_id = str(group_keys[0])
                         group_key_str = '-'.join(str(key) for key in group_keys)
                     else:
+                        group_account_id = str(group_keys)
                         group_key_str = str(group_keys)
+
+                    # Skip CSV creation for accounts in Suspended OU
+                    if is_account_in_suspended_ou(group_account_id):
+                        logger.warning(f"[SUSPENDED OU] Skipping CSV creation for suspended account: {group_account_id}")
+                        continue
 
                     # Create an in-memory buffer for the group's CSV data
                     csv_out_buffer = io.StringIO()
