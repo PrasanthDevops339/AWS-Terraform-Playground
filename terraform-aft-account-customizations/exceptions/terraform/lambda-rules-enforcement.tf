@@ -43,26 +43,31 @@ module "efs_tls_enforcement_compliance" {
 ###############################################################################
 # Conformance pack that deploys Config Rules for Lambda-based validation      #
 ###############################################################################
+#
+# Note: YAML template is defined in conformance-pack-templates.tf
+#       This keeps templates separate from resource configurations
+#
+###############################################################################
+
+# Save generated YAML locally for pre-deployment validation on Windows
+resource "local_file" "conformance_pack_yaml" {
+  content  = local.lambda_rules_conformance_pack_template
+  filename = "${path.module}/generated-lambda-rules-conformance-pack.yaml"
+}
 
 resource "aws_config_conformance_pack" "lambdarules" {
   name = "Lambdarulesconformancepack"
 
-  template_body = <<EOT
-Resources:
-  efstlsenforcement:
-    Properties:
-      ConfigRuleName: efstlsenforcement_${data.aws_caller_identity.current.account_id}
-      Scope:
-        ComplianceResourceTypes:
-          - "AWS::EFS::FileSystem"
-      Source:
-        Owner: CUSTOM_LAMBDA
-        SourceIdentifier: "${module.efs_tls_enforcement_compliance.lambda_arn}"
-        SourceDetails:
-          - EventSource: "aws.config"
-            MessageType: "ConfigurationItemChangeNotification"
-      Type: AWS::Config::ConfigRule
-EOT
+  template_body = local.lambda_rules_conformance_pack_template
 
-  depends_on = [module.efs_tls_enforcement_compliance]
+  depends_on = [
+    module.efs_tls_enforcement_compliance,
+    local_file.conformance_pack_yaml
+  ]
+}
+
+# Output YAML during terraform plan for review before deployment
+output "lambda_conformance_pack_yaml" {
+  description = "Generated YAML for Lambda rules conformance pack - Review before applying"
+  value       = local.lambda_rules_conformance_pack_template
 }

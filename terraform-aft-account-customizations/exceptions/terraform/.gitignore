@@ -1,0 +1,13 @@
+# Generated YAML files from local_file resources
+generated-*.yaml
+generated-*.yml
+
+# Terraform plan files
+tfplan
+*.tfplan
+
+# Terraform state files (if accidentally created here)
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
