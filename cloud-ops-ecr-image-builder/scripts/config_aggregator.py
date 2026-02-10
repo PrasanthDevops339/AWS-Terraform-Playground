@@ -428,8 +428,8 @@ if __name__ == '__main__':
                             logger.info(f"Account {account_id} & {account_name} - skipped (no matching annotations)")
 
                 n = datetime.now()
-                time = n.strftime("%H:%M:%S")
-                logger.info(f"After csv: {time}")
+                current_time_str = n.strftime("%H:%M:%S")
+                logger.info(f"After csv: {current_time_str}")
 
                 # Read the CSV buffer into a pandas DataFrame
                 try:
