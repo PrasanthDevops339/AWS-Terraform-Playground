@@ -19,11 +19,11 @@ provider "aws" {
 
   default_tags {
     tags = {
-      "finops:application"  = "platform_core_services"
-      "finops:portfolio"    = "Technology Delivery"
-      "finops:costcenter"   = ""
-      "finops:owner"        = ""
-      "admin:environment"   = "dev"
+      "finops:application" = "platform_core_services"
+      "finops:portfolio"   = "Technology Delivery"
+      "finops:costcenter"  = ""
+      "finops:owner"       = ""
+      "admin:environment"  = "dev"
     }
   }
 }

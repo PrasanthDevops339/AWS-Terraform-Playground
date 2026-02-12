@@ -36,9 +36,9 @@ module "baseline-scps-workloads-prd" {
 module "deny-policy" {
   source = "../../modules/organizations"
 
-  policy_name  = "Deny Policy"
-  file_date    = "2025-03-26"
-  description  = "Catch-all deny policy for suspended accounts"
+  policy_name = "Deny Policy"
+  file_date   = "2025-03-26"
+  description = "Catch-all deny policy for suspended accounts"
 
   target_ids = [var.suspended]
 }
@@ -46,9 +46,9 @@ module "deny-policy" {
 module "global-policies-prd" {
   source = "../../modules/organizations"
 
-  policy_name  = "Global_Policies"
-  file_date    = "2025-11-19"
-  description  = "Policies in place for all accounts"
+  policy_name = "Global_Policies"
+  file_date   = "2025-11-19"
+  description = "Policies in place for all accounts"
 
   target_ids = [var.root]
 }
@@ -72,6 +72,7 @@ module "imds-v2-policy" {
 
 # AMI Guardrail SCP - Prevents non-approved AMI usage, sideloading, public sharing
 # Only AMIs from Prasa Operations accounts are permitted
+# Hardcoded accounts: 565656565656 (prasains-operations-dev-use2), 666363636363 (prasains-operations-prd-use2)
 module "scp-ami-guardrail" {
   source = "../../modules/organizations"
 
@@ -82,14 +83,11 @@ module "scp-ami-guardrail" {
 
   # Deploy to workloads and sandbox OUs
   target_ids = [var.workloads, var.sandbox]
-
-  # Exception expiry feature (disabled by default)
-  enable_exception_expiry = false
-  exception_accounts      = {}
 }
 
 # EC2 Declarative Policy - Enforces AMI settings at the EC2 service level
 # Prasa Operations accounts only: prasains-operations-dev-use2, prasains-operations-prd-use2
+# Hardcoded AMI controls: 300-day max age, 0-day deprecation tolerance
 module "declarative-policy-ec2" {
   source = "../../modules/organizations"
 
@@ -101,7 +99,10 @@ module "declarative-policy-ec2" {
   # Deploy to workloads and sandbox OUs
   target_ids = [var.workloads, var.sandbox]
 
-  # Exception expiry feature (disabled by default)
-  enable_exception_expiry = false
-  exception_accounts      = {}
+  # Policy template variables - only enforcement_mode is configurable
+  policy_vars = {
+    # Enforcement mode: "audit_mode" (logs violations without blocking) or "enabled" (actively blocks)
+    # Starting with audit_mode for initial rollout to assess impact before full enforcement
+    enforcement_mode = "audit_mode"
+  }
 }

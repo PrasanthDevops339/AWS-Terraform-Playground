@@ -1,94 +1,7 @@
 {
-  "_comment": "============================================================================",
-  "_comment_title": "AMI GOVERNANCE SCP - Prasa Operations AMI Guardrail",
-  "_comment_version": "2026-01-18",
-  "_comment_description": "This SCP enforces AMI governance across the organization. Only AMIs from Prasa Operations accounts are permitted.",
-  "_comment_separator": "============================================================================",
-
-  "_accounts_reference": {
-    "_comment": "=== PRASA OPERATIONS ACCOUNT REFERENCE TABLE ===",
-    "prasa_operations_dev": {
-      "account_id": "565656565656",
-      "account_alias": "prasains-operations-dev-use2",
-      "account_arn": "arn:aws:iam::565656565656:root",
-      "description": "Prasa Operations DEV - AMI publishing account (US-East-2)",
-      "environment": "dev"
-    },
-    "prasa_operations_prd": {
-      "account_id": "666363636363",
-      "account_alias": "prasains-operations-prd-use2",
-      "account_arn": "arn:aws:iam::666363636363:root",
-      "description": "Prasa Operations PRD - AMI publishing account (US-East-2)",
-      "environment": "prd"
-    }
-  },
-
-  "_ami_catalog": {
-    "_comment": "=== APPROVED AMI CATALOG ===",
-    
-    "marketplace_customized": {
-      "_category": "1) Marketplace but Customized (MarkLogic AWS Marketplace)",
-      "_description": "MarkLogic AMIs customized for Prasa environment",
-      "ami_patterns": [
-        "prasa-opsdir-mlal2-*",
-        "prasa-mlal2-*"
-      ],
-      "ami_aliases": [
-        "prasa-OPSDIR-MLAL2-CF",
-        "prasa-MLAL2-CF"
-      ]
-    },
-    
-    "prasa_customized": {
-      "_category": "2) Prasa Customized (AWS Base Images)",
-      "_description": "AWS base images customized by Prasa Operations team",
-      "ami_patterns": {
-        "rhel": {
-          "rhel8": { "pattern": "prasa-rhel8-*", "alias": "prasa-rhel8-cf" },
-          "rhel9": { "pattern": "prasa-rhel9-*", "alias": "prasa-rhel9-cf" }
-        },
-        "windows": {
-          "win16": { "pattern": "prasa-win16-*", "alias": "prasa-win16-cf" },
-          "win19": { "pattern": "prasa-win19-*", "alias": "prasa-win19-cf" },
-          "win22": { "pattern": "prasa-win22-*", "alias": "prasa-win22-cf" }
-        },
-        "amazon_linux": {
-          "al2023": { "pattern": "prasa-al2023-*", "alias": "prasa-al2023-cf" },
-          "al2_2024": { "pattern": "prasa-al2-2024-*", "alias": "prasa-al2-2024-cf" }
-        }
-      },
-      "all_patterns": [
-        "prasa-rhel8-*",
-        "prasa-rhel9-*",
-        "prasa-win16-*",
-        "prasa-win19-*",
-        "prasa-win22-*",
-        "prasa-al2023-*",
-        "prasa-al2-2024-*"
-      ],
-      "all_aliases": [
-        "prasa-rhel8-cf",
-        "prasa-rhel9-cf",
-        "prasa-win16-cf",
-        "prasa-win19-cf",
-        "prasa-win22-cf",
-        "prasa-al2023-cf",
-        "prasa-al2-2024-cf"
-      ]
-    }
-  },
-
   "Version": "2012-10-17",
   "Statement": [
     {
-      "_comment": "=== STATEMENT 1: BLOCK NON-APPROVED AMI SOURCES ===",
-      "_description": "Denies EC2 launch operations using AMIs from any owner NOT in the Prasa Operations accounts. Only AMIs owned by prasains-operations-dev-use2 (565656565656) or prasains-operations-prd-use2 (666363636363) are permitted.",
-      "_approved_accounts": [
-        "565656565656 (prasains-operations-dev-use2)",
-        "666363636363 (prasains-operations-prd-use2)"
-      ],
-      "_impact": "DENY if AMI owner is NOT in [565656565656, 666363636363]",
-      
       "Sid": "DenyEC2LaunchWithNonApprovedAMIs",
       "Effect": "Deny",
       "Action": [
@@ -108,11 +21,6 @@
       }
     },
     {
-      "_comment": "=== STATEMENT 2: PREVENT AMI SIDELOADING ===",
-      "_description": "Denies all AMI creation, copying, registration, and import operations. This prevents users from bypassing the approved AMI governance by creating their own AMIs. Only Prasa Operations accounts should create AMIs.",
-      "_impact": "DENY CreateImage, CopyImage, RegisterImage, ImportImage for ALL principals",
-      "_exception": "Prasa Operations accounts (565656565656, 666363636363) should be excluded via OU structure",
-      
       "Sid": "DenyAMICreationAndSideload",
       "Effect": "Deny",
       "Action": [
@@ -124,10 +32,6 @@
       "Resource": "*"
     },
     {
-      "_comment": "=== STATEMENT 3: PREVENT PUBLIC AMI SHARING ===",
-      "_description": "Denies modification of AMI attributes to make them publicly accessible. This prevents accidental or intentional exposure of Prasa AMIs to the public.",
-      "_impact": "DENY ModifyImageAttribute when attempting to add 'all' (public) group",
-      
       "Sid": "DenyPublicAMISharing",
       "Effect": "Deny",
       "Action": [

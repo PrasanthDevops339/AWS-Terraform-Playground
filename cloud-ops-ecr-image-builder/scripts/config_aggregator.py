@@ -68,6 +68,8 @@ REGION = os.getenv('REGION')                    # AWS region
 bucket_name = os.getenv('TAGGING_BUCKET')       # S3 bucket for results
 bucket_prefix = os.getenv('BUCKET_PREFIX')      # S3 object key prefix
 policy_table = os.getenv('POLICY_TABLE')        # DynamoDB policy table
+# Optional: comma-separated allowlist of account IDs to query (e.g., "111111111111,222222222222")
+ACCOUNT_ID_ALLOWLIST = os.getenv('ACCOUNT_ID_ALLOWLIST')
 # CLOUD_VERSION_TABLE: DynamoDB table containing 1.0 accounts to exclude
 # Format: operations-{env}-cloud-versions (e.g., operations-dev-cloud-versions)
 version_table = os.getenv('CLOUD_VERSION_TABLE')  # DynamoDB version table
@@ -114,10 +116,20 @@ def main(item, tries=1):
     #   - resourceId: Unique resource identifier
     #   - configuration.complianceType: Compliance status
     #   - configuration.configRuleList: Rules that evaluated the resource
+    allowlist = []
+    if ACCOUNT_ID_ALLOWLIST:
+        allowlist = [a.strip() for a in ACCOUNT_ID_ALLOWLIST.split(",") if a.strip()]
+
+    account_filter = ""
+    if allowlist:
+        quoted_accounts = ",".join([f"'{a}'" for a in allowlist])
+        account_filter = f"AND accountId IN ({quoted_accounts}) "
+
     query = "SELECT resourceType,resourceId,resourceName,configuration.targetResourceType,configuration.complianceType,configuration.configRuleList," \
             "configurationItemCaptureTime,configurationItemStatus,accountId,awsRegion " \
             "WHERE configuration.complianceType = 'NON_COMPLIANT' " \
             "AND resourceId LIKE '" + item + "%' " \
+            + account_filter + \
             "ORDER BY accountId DESC"
 
     # Optional: Add time filter for recent violations only

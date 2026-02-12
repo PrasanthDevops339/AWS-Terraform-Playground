@@ -12,7 +12,7 @@ variable "file_date" {
 
 variable "policy_vars" {
   description = "(Optional) Map of arguments to pass into policy JSON files"
-  type        = map(any)
+  type        = any
   default     = {}
 }
 
@@ -62,19 +62,4 @@ variable "add_random_characters" {
   description = "(Optional) Add random characters to the end of policy name"
   type        = bool
   default     = false
-}
-
-# ============================================================================
-# EXCEPTION EXPIRY FEATURE (for future use)
-# ============================================================================
-variable "enable_exception_expiry" {
-  description = "(Optional) Enable automatic exception expiry feature. When enabled, exception_accounts with expired dates will be filtered out."
-  type        = bool
-  default     = false
-}
-
-variable "exception_accounts" {
-  description = "(Optional) Map of account IDs to expiry dates (YYYY-MM-DD format). Only used when enable_exception_expiry = true"
-  type        = map(string)
-  default     = {}
 }
