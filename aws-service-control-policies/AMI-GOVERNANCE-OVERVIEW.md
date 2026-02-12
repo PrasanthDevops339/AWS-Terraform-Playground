@@ -84,14 +84,15 @@ Developer Launches EC2 Instance
            DENY      ALLOW
 ```
 
-### Prasa Operations Accounts
+### Approved AMI Publisher Accounts
 
 The following accounts are authorized to publish approved AMIs:
 
-| Account ID    | Account Alias                     | Environment | Region     |
-|---------------|-----------------------------------|-------------|------------|
-| 565656565656  | prasains-operations-dev-use2      | DEV         | us-east-2  |
-| 666363636363  | prasains-operations-prd-use2      | PRD         | us-east-2  |
+| Account ID    | Account Alias                     | Environment | Region     | AMI Patterns              |
+|---------------|-----------------------------------|-------------|------------|---------------------------|
+| 565656565656  | prasains-operations-dev-use2      | DEV         | us-east-2  | prasa-* (all patterns)    |
+| 666363636363  | prasains-operations-prd-use2      | PRD         | us-east-2  | prasa-* (all patterns)    |
+| 123456789014  | Golden AMI Publisher              | N/A         | N/A        | golden-ami-* only         |
 
 ---
 
@@ -165,7 +166,13 @@ The following accounts are authorized to publish approved AMIs:
 
 ## Approved AMI Catalog
 
-### Category 1: Marketplace Customized AMIs
+The declarative policy uses **multiple image criteria** to allow AMIs from different sources. An AMI is approved if it matches **any** of the defined criteria.
+
+### Category 1: Prasa Operations AMIs (Criteria 1)
+
+**Publisher**: Prasa Operations accounts (565656565656, 666363636363)
+**Pattern**: Any name (no restriction)
+**Source**: Marketplace customized and AWS base images customized by Prasa Operations
 
 **MarkLogic AMIs** (from AWS Marketplace, customized for Prasa):
 
@@ -173,8 +180,6 @@ The following accounts are authorized to publish approved AMIs:
 |---------------------------|-------------------------|---------------|-----------------|
 | `prasa-opsdir-mlal2-*`    | prasa-OPSDIR-MLAL2-CF   | MarkLogic     | Amazon Linux 2  |
 | `prasa-mlal2-*`           | prasa-MLAL2-CF          | MarkLogic     | Amazon Linux 2  |
-
-### Category 2: Prasa Customized AMIs
 
 **AWS Base Images** (customized by Prasa Operations team):
 
@@ -188,6 +193,22 @@ The following accounts are authorized to publish approved AMIs:
 | `prasa-al2023-*`          | prasa-al2023-cf         | Amazon Linux 2023         |
 | `prasa-al2-2024-*`        | prasa-al2-2024-cf       | Amazon Linux 2 (2024)     |
 
+### Category 2: Golden AMIs (Criteria 2)
+
+**Publisher**: Golden AMI account (123456789014)
+**Pattern**: `golden-ami-*` (strictly enforced)
+**Source**: Pre-approved golden AMI images
+
+| AMI Name Pattern          | Description                                           |
+|---------------------------|-------------------------------------------------------|
+| `golden-ami-*`            | Golden AMI images from approved publisher account     |
+
+**Requirements**:
+- ✅ Must be from account 123456789014
+- ✅ Must match naming pattern `golden-ami-*`
+- ✅ Must be less than 300 days old
+- ✅ Must NOT be deprecated
+
 ---
 
 ## Configuration Approach
@@ -200,10 +221,12 @@ The following values are **hardcoded directly** in the policy JSON files:
 
 | Component                    | Value                                                | Location                               |
 |------------------------------|------------------------------------------------------|----------------------------------------|
-| **Prasa Operations Accounts**| `565656565656`, `666363636363`                       | Both policy files                      |
-| **AMI Age Limit**            | 300 days                                             | Declarative policy                     |
-| **Deprecation Tolerance**    | 0 days (immediate block)                             | Declarative policy                     |
-| **AMI Name Patterns**        | `prasa-rhel8-*`, `prasa-rhel9-*`, etc.              | Declarative policy exception message   |
+| **Prasa Operations Accounts**| `565656565656`, `666363636363`                       | Declarative policy (criteria_1)        |
+| **Golden AMI Account**       | `123456789014`                                       | Declarative policy (criteria_2)        |
+| **Golden AMI Pattern**       | `golden-ami-*`                                       | Declarative policy (criteria_2)        |
+| **AMI Age Limit**            | 300 days                                             | Declarative policy (both criteria)     |
+| **Deprecation Tolerance**    | 0 days (immediate block)                             | Declarative policy (both criteria)     |
+| **AMI Name Patterns**        | `prasa-rhel8-*`, `prasa-rhel9-*`, `golden-ami-*`    | Declarative policy exception message   |
 | **Exception Request URL**    | `https://jira.example.com/servicedesk/ami-exception` | Declarative policy exception message   |
 | **Exception Durations**      | 365 days (AMI), 90 days (other)                     | Declarative policy exception message   |
 
@@ -306,14 +329,21 @@ The declarative policy includes **hardcoded** AMI freshness and deprecation cont
 
 ### Compliance Requirements
 
-For an AMI to be approved for launching instances, it must meet **all** of these criteria:
+For an AMI to be approved for launching instances, it must match **one of these criteria sets**:
 
+#### Criteria 1: Prasa Operations AMIs
 1. ✅ **Owner Account**: Must be from Prasa Operations (565656565656 or 666363636363)
 2. ✅ **Age**: Must be less than 300 days old
 3. ✅ **Status**: Must NOT be deprecated
-4. ✅ **Naming**: Must follow approved naming patterns (prasa-*)
+4. ✅ **Naming**: Any pattern allowed (no restriction)
 
-**All four conditions are enforced simultaneously.**
+#### Criteria 2: Golden AMIs
+1. ✅ **Owner Account**: Must be from Golden AMI account (123456789014)
+2. ✅ **Age**: Must be less than 300 days old
+3. ✅ **Status**: Must NOT be deprecated
+4. ✅ **Naming**: Must match pattern `golden-ami-*`
+
+**An AMI is ALLOWED if it meets ALL requirements in ANY criteria set (OR logic between criteria, AND logic within criteria).**
 
 ---
 

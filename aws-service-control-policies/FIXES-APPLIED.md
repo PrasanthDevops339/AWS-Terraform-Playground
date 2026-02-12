@@ -776,5 +776,197 @@ terraform fmt -recursive  # ✅ All files properly formatted
 
 ---
 
-**Status**: ✅ All fixes, simplifications, and hardcoding applied successfully
-**Last Updated**: 2026-02-11 (Update 3)
+## Update 4: Added Golden AMI Criterion
+
+**Date**: 2026-02-11 (Fourth Update)
+
+### Overview
+
+Added a second image criterion to the declarative policy to support AMIs from an additional approved publisher (Golden AMI account 123456789014) with strict naming pattern enforcement.
+
+### Changes Made
+
+#### 1. ✅ Added Criteria 2 to Declarative Policy
+
+**Modified**: `policies/declarative-policy-ec2-2026-01-18.json`
+
+Added a new image criterion that allows AMIs from account **123456789014** with names matching **golden-ami-***:
+
+**Addition to image_criteria**:
+```json
+"criteria_2": {
+  "allowed_image_providers": [
+    "123456789014"
+  ],
+  "allowed_image_names": [
+    "golden-ami-*"
+  ],
+  "creation_date_condition": {
+    "maximum_days_since_created": 300
+  },
+  "deprecation_time_condition": {
+    "maximum_days_since_deprecated": 0
+  }
+}
+```
+
+**Impact**:
+- ✅ AMIs from account 123456789014 are now allowed
+- ✅ Must match naming pattern `golden-ami-*`
+- ✅ Same age and deprecation controls apply (300 days, 0 days)
+- ✅ Uses OR logic: AMI approved if it matches **either** criteria_1 **or** criteria_2
+
+#### 2. ✅ Updated Exception Message
+
+**Modified**: `policies/declarative-policy-ec2-2026-01-18.json`
+
+Updated the exception message to inform users about both approved AMI sources:
+
+**New Exception Message Structure**:
+```
+AMI not approved for use in this organization.
+
+Only images from approved accounts are permitted:
+  (1) Prasa Operations accounts (565656565656, 666363636363)
+      - Approved patterns: prasa-rhel8-*, prasa-rhel9-*, prasa-win16-*,
+        prasa-win19-*, prasa-win22-*, prasa-al2023-*, prasa-al2-2024-*,
+        prasa-mlal2-*, prasa-opsdir-mlal2-*
+
+  (2) Golden AMI account (123456789014)
+      - Approved pattern: golden-ami-*
+
+All AMIs must be less than 300 days old and not deprecated.
+```
+
+#### 3. ✅ Fixed Terraform Configuration Issues
+
+**Modified**: `environments/dev/variables.tf`
+- Fixed validation error message (added period to comply with Terraform standards)
+
+**Modified**: `environments/dev/versions.tf`
+- Removed invalid `use_lockfile` parameter from S3 backend configuration
+
+#### 4. ✅ Multi-Criteria Policy Logic
+
+The declarative policy now evaluates AMIs using **OR logic** between criteria:
+
+```
+AMI Approval Decision Flow:
+       ↓
+┌─────────────────────────────────────┐
+│ Does AMI match Criteria 1?          │
+│ - Account: 565656565656/666363636363│
+│ - Any name pattern                  │
+│ - < 300 days old, not deprecated    │
+└─────────────────────────────────────┘
+       ↓
+      YES → ALLOW
+       ↓
+      NO → Check Criteria 2
+       ↓
+┌─────────────────────────────────────┐
+│ Does AMI match Criteria 2?          │
+│ - Account: 123456789014             │
+│ - Name: golden-ami-*                │
+│ - < 300 days old, not deprecated    │
+└─────────────────────────────────────┘
+       ↓
+      YES → ALLOW
+       ↓
+      NO → DENY
+```
+
+### Validation Results
+
+```bash
+# Dev environment
+cd environments/dev
+terraform init -backend=false  # ✅ Successful
+terraform validate             # ✅ Success! The configuration is valid.
+
+# Production environment
+cd environments/prd
+terraform validate             # ✅ Success! The configuration is valid.
+```
+
+### Benefits of Multi-Criteria Approach
+
+| Aspect                      | Single Criterion                     | Multi-Criteria (Current)              |
+|-----------------------------|--------------------------------------|---------------------------------------|
+| **Flexibility**             | One AMI source only                  | Multiple approved AMI sources         |
+| **Publisher Control**       | All AMIs from one account group      | Different accounts with different rules|
+| **Naming Enforcement**      | Optional or all-or-nothing           | Per-criterion pattern enforcement     |
+| **Vendor Support**          | Requires AMI sharing/copying         | Can approve vendor accounts directly  |
+| **Governance**              | Centralized to one team              | Distributed with policy controls      |
+
+### Current Approved AMI Sources
+
+**Criteria 1: Prasa Operations AMIs**
+- **Accounts**: 565656565656, 666363636363
+- **Patterns**: Any (no restriction)
+- **AMIs**: prasa-rhel8-*, prasa-rhel9-*, prasa-win16-*, prasa-win19-*, prasa-win22-*, prasa-al2023-*, prasa-al2-2024-*, prasa-mlal2-*, prasa-opsdir-mlal2-*
+
+**Criteria 2: Golden AMIs**
+- **Account**: 123456789014
+- **Pattern**: golden-ami-* (strictly enforced)
+- **AMIs**: All AMIs matching golden-ami-* pattern
+
+### Files Modified (Update 4)
+
+**Policy Templates**:
+- ✅ `policies/declarative-policy-ec2-2026-01-18.json` (added criteria_2, updated exception message)
+
+**Environment Configurations**:
+- ✅ `environments/dev/variables.tf` (fixed validation error message)
+- ✅ `environments/dev/versions.tf` (removed use_lockfile parameter)
+
+**Documentation**:
+- ✅ `AMI-GOVERNANCE-OVERVIEW.md` (added golden AMI documentation)
+- ✅ `FIXES-APPLIED.md` (this update)
+
+### Updated Verification Checklist
+
+**Initial Fixes (Update 1)**:
+- [x] Policy JSON files cleaned (no comments)
+- [x] Declarative policy structure corrected (`ec2_attributes` at top level)
+- [x] Production SCP has `policy_vars` configured
+- [x] Dev SCP has `policy_vars` configured
+- [x] Dev declarative policy has all `policy_vars` configured
+- [x] Module variable type fixed (`map(any)` → `any`)
+- [x] All Terraform files formatted
+- [x] Terraform validation passes
+
+**Simplification (Update 2)**:
+- [x] Hardcoded AMI age control (300 days) in declarative policy
+- [x] Hardcoded deprecation control (0 days) in declarative policy
+- [x] Removed exception expiry locals from module
+- [x] Removed exception expiry variables from module
+- [x] Removed exception expiry outputs from module
+- [x] Removed exception parameters from environment configs
+- [x] Updated documentation with new architecture
+- [x] Terraform validation passes after simplification
+
+**Complete Hardcoding (Update 3)**:
+- [x] Hardcoded account IDs in both policy JSON files
+- [x] Hardcoded AMI name patterns in exception message
+- [x] Hardcoded exception request URL in exception message
+- [x] Hardcoded exception durations in exception message
+- [x] Removed all policy_vars from SCP modules (prd + dev)
+- [x] Reduced declarative policy_vars to only enforcement_mode (prd + dev)
+- [x] Updated AMI-GOVERNANCE-OVERVIEW.md with hardcoding approach
+- [x] Terraform validation passes in both environments
+
+**Golden AMI Criterion (Update 4)**:
+- [x] Added criteria_2 for Golden AMI account (123456789014)
+- [x] Hardcoded golden-ami-* naming pattern in criteria_2
+- [x] Applied same age/deprecation controls to criteria_2
+- [x] Updated exception message with both AMI sources
+- [x] Fixed Terraform validation error in dev/variables.tf
+- [x] Removed invalid use_lockfile from dev/versions.tf
+- [x] Updated AMI-GOVERNANCE-OVERVIEW.md with multi-criteria documentation
+- [x] Terraform validation passes in both environments
+
+---
+
+**Status**: ✅ All fixes, simplifications, hardcoding, and multi-criteria support applied successfully
+**Last Updated**: 2026-02-11 (Update 4)

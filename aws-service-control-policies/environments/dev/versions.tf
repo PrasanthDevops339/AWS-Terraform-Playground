@@ -7,10 +7,9 @@ terraform {
   }
 
   backend "s3" {
-    bucket       = "acme-audit-dev-tf-backend-use2"
-    use_lockfile = true
-    key          = "aws-service-control-policies"
-    region       = "us-east-2"
+    bucket = "acme-audit-dev-tf-backend-use2"
+    key    = "aws-service-control-policies"
+    region = "us-east-2"
   }
 }
 

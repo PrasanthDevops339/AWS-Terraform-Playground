@@ -20,9 +20,23 @@
           "deprecation_time_condition": {
             "maximum_days_since_deprecated": 0
           }
+        },
+        "criteria_2": {
+          "allowed_image_providers": [
+            "123456789014"
+          ],
+          "allowed_image_names": [
+            "golden-ami-*"
+          ],
+          "creation_date_condition": {
+            "maximum_days_since_created": 300
+          },
+          "deprecation_time_condition": {
+            "maximum_days_since_deprecated": 0
+          }
         }
       },
-      "exception_message": "AMI not approved for use in this organization. Only images from Prasa Operations accounts (565656565656: prasains-operations-dev-use2, 666363636363: prasains-operations-prd-use2) are permitted. Approved AMI patterns: prasa-rhel8-*, prasa-rhel9-*, prasa-win16-*, prasa-win19-*, prasa-win22-*, prasa-al2023-*, prasa-al2-2024-*, prasa-mlal2-*, prasa-opsdir-mlal2-*. To request an exception, submit a ticket at: https://jira.example.com/servicedesk/ami-exception. Exception durations: up to 365 days for exception AMIs, up to 90 days for other exceptions."
+      "exception_message": "AMI not approved for use in this organization. Only images from approved accounts are permitted: (1) Prasa Operations accounts (565656565656: prasains-operations-dev-use2, 666363636363: prasains-operations-prd-use2) - Approved patterns: prasa-rhel8-*, prasa-rhel9-*, prasa-win16-*, prasa-win19-*, prasa-win22-*, prasa-al2023-*, prasa-al2-2024-*, prasa-mlal2-*, prasa-opsdir-mlal2-*; (2) Golden AMI account (123456789014) - Approved pattern: golden-ami-*. All AMIs must be less than 300 days old and not deprecated. To request an exception, submit a ticket at: https://jira.example.com/servicedesk/ami-exception. Exception durations: up to 365 days for exception AMIs, up to 90 days for other exceptions."
     }
   }
 }
