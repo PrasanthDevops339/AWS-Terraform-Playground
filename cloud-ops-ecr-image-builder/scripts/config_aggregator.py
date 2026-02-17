@@ -249,6 +249,17 @@ def get_account_name_cached(account_id):
     return account_cache[account_id]
 
 
+# A cache to store 1.0/2.0 version lookups once they've been fetched per account
+version_cache = {}
+
+
+def check_account_cached(account_name):
+    # Returns cached result to avoid repeated DynamoDB queries for the same account
+    if account_name not in version_cache:
+        version_cache[account_name] = check_account(account_name)
+    return version_cache[account_name]
+
+
 def check_account(account_name):
     # Check if the account is in dynamo to determine 1.0 or 2.0
     dynamodb = boto3.resource('dynamodb', region_name=REGION)
@@ -425,7 +436,7 @@ if __name__ == '__main__':
                                 continue
 
                         #check if its 2.0 and then insert into list
-                        is_one_dot_zero = check_account(account_name)
+                        is_one_dot_zero = check_account_cached(account_name)
                         if not is_one_dot_zero and config_annotation:
                             # not 1.0 account
                             writer.writerow({
