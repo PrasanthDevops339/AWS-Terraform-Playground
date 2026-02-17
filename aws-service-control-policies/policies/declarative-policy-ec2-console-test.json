@@ -10,7 +10,7 @@
     "allowed_images_settings": {
       "@@operators_allowed_for_child_policies": ["@@none"],
       "state": {
-        "@@assign": "${enforcement_mode}"
+        "@@assign": "audit_mode"
       },
       "image_criteria": {
         "criteria_1": {

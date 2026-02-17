@@ -1,0 +1,1 @@
+# No external dependencies — unit tests use Python stdlib only
