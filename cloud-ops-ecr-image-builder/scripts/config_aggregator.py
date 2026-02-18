@@ -125,16 +125,50 @@ def main(item, tries=1):
         quoted_accounts = ",".join([f"'{a}'" for a in allowlist])
         account_filter = f"AND accountId IN ({quoted_accounts}) "
 
+    # =========================================================================
+    # PRODUCTION QUERY (active by default)
+    # TO TEST: comment out this query block and uncomment the TEST QUERY block below
+    # =========================================================================
     query = "SELECT resourceType,resourceId,resourceName,configuration.targetResourceType,configuration.complianceType,configuration.configRuleList," \
             "configurationItemCaptureTime,configurationItemStatus,accountId,awsRegion " \
             "WHERE configuration.complianceType = 'NON_COMPLIANT' " \
             "AND resourceId LIKE '" + item + "%' " \
             + account_filter + \
             "ORDER BY accountId DESC"
+    # =========================================================================
 
     # Optional: Add time filter for recent violations only
     # "AND configurationItemCaptureTime >= '2025-09-15T00:00:00Z'" \
     #logger.info(query)
+
+    # =========================================================================
+    # TEST QUERY — hardcoded dummy account IDs (commented out by default)
+    # TO ACTIVATE: uncomment this block and comment out the PRODUCTION QUERY block above
+    # Replace dummy IDs below with real test account IDs before running
+    # =========================================================================
+    # query = (
+    #     "SELECT resourceType,resourceId,resourceName,configuration.targetResourceType,"
+    #     "configuration.complianceType,configuration.configRuleList,"
+    #     "configurationItemCaptureTime,configurationItemStatus,accountId,awsRegion "
+    #     "WHERE configuration.complianceType = 'NON_COMPLIANT' "
+    #     "AND resourceId LIKE '" + item + "%' "
+    #     "AND accountId IN ("
+    #     "    '111122223333',"  # dummy-sandbox-account-01
+    #     "    '222233334444',"  # dummy-sandbox-account-02
+    #     "    '333344445555',"  # dummy-dev-account-01
+    #     "    '444455556666',"  # dummy-dev-account-02
+    #     "    '555566667777',"  # dummy-dev-account-03
+    #     "    '666677778888',"  # dummy-staging-account-01
+    #     "    '777788889999',"  # dummy-staging-account-02
+    #     "    '888899990000',"  # dummy-nonprod-account-01
+    #     "    '999900001111',"  # dummy-nonprod-account-02
+    #     "    '000011112222',"  # dummy-nonprod-account-03
+    #     "    '101010101010',"  # dummy-test-account-01
+    #     "    '121212121212' "  # dummy-test-account-02
+    #     ") "
+    #     "ORDER BY accountId DESC"
+    # )
+    # =========================================================================
 
     results = []
 
