@@ -117,6 +117,8 @@ def main(item, tries=1):
     #   - configuration.complianceType: Compliance status
     #   - configuration.configRuleList: Rules that evaluated the resource
 
+    safe_item = item.replace("'", "''")
+
     allowlist = []
     if ACCOUNT_ID_ALLOWLIST:
         allowlist = [a.strip() for a in ACCOUNT_ID_ALLOWLIST.split(",") if a.strip()]
