@@ -116,6 +116,7 @@ def main(item, tries=1):
     #   - resourceId: Unique resource identifier
     #   - configuration.complianceType: Compliance status
     #   - configuration.configRuleList: Rules that evaluated the resource
+
     allowlist = []
     if ACCOUNT_ID_ALLOWLIST:
         allowlist = [a.strip() for a in ACCOUNT_ID_ALLOWLIST.split(",") if a.strip()]
@@ -151,20 +152,20 @@ def main(item, tries=1):
     #     "configuration.complianceType,configuration.configRuleList,"
     #     "configurationItemCaptureTime,configurationItemStatus,accountId,awsRegion "
     #     "WHERE configuration.complianceType = 'NON_COMPLIANT' "
-    #     "AND resourceId LIKE '" + item + "%' "
+    #     "AND resourceId LIKE '" + safe_item + "%' "
     #     "AND accountId IN ("
-    #     "    '111122223333',"  # dummy-sandbox-account-01
-    #     "    '222233334444',"  # dummy-sandbox-account-02
-    #     "    '333344445555',"  # dummy-dev-account-01
-    #     "    '444455556666',"  # dummy-dev-account-02
-    #     "    '555566667777',"  # dummy-dev-account-03
-    #     "    '666677778888',"  # dummy-staging-account-01
-    #     "    '777788889999',"  # dummy-staging-account-02
-    #     "    '888899990000',"  # dummy-nonprod-account-01
-    #     "    '999900001111',"  # dummy-nonprod-account-02
-    #     "    '000011112222',"  # dummy-nonprod-account-03
-    #     "    '101010101010',"  # dummy-test-account-01
-    #     "    '121212121212' "  # dummy-test-account-02
+    #     "'111122223333',"  # dummy-sandbox-account-01
+    #     "'222233334444',"  # dummy-sandbox-account-02
+    #     "'333344445555',"  # dummy-dev-account-01
+    #     "'444455556666',"  # dummy-dev-account-02
+    #     "'555566667777',"  # dummy-dev-account-03
+    #     "'666677778888',"  # dummy-staging-account-01
+    #     "'777788889999',"  # dummy-staging-account-02
+    #     "'888899990000',"  # dummy-nonprod-account-01
+    #     "'999900001111',"  # dummy-nonprod-account-02
+    #     "'000011112222',"  # dummy-nonprod-account-03
+    #     "'101010101010',"  # dummy-test-account-01
+    #     "'121212121212'"   # dummy-test-account-02
     #     ") "
     #     "ORDER BY accountId DESC"
     # )
@@ -218,6 +219,7 @@ def main(item, tries=1):
                 raise
         else:
             logger.error(f"Error executing query : {str(e)}")
+            logger.error(f"Failed query: {query}")
             raise
 
 
