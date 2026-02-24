@@ -56,6 +56,7 @@ from opentelemetry.trace import SpanKind
 FORMAT = '%(asctime)s - %(levelname)s - [trace_id=%(otelTraceID)s span_id=%(otelSpanID)s resource.service.name=%(otelServiceName)s] - %(message)s'
 logger = logging.getLogger(__name__)
 logger.setLevel("INFO")
+logger.propagate = False  # prevent duplicate output if root logger also has handlers
 h = logging.StreamHandler(sys.stdout)
 h.setFormatter(logging.Formatter(FORMAT))
 logger.addHandler(h)
@@ -428,6 +429,13 @@ if __name__ == '__main__':
                 writer = csv.DictWriter(csv_buffer, fieldnames=fieldnames)
                 writer.writeheader()
 
+                # Track accounts we've already logged a skip message for, so each
+                # message fires at most once per account regardless of how many
+                # non-compliant resources that account has.
+                _logged_suspended: set = set()
+                _logged_1dot0: set = set()
+                _logged_no_annotations: set = set()
+
                 for item in res_types:
                     logger.info(item)
                     results = main(item)
@@ -453,7 +461,9 @@ if __name__ == '__main__':
                         # If account is in a Suspended OU, skip it entirely from reporting
                         # ================================================================
                         if is_account_in_suspended_ou(account_id):
-                            logger.warning(f"[SUSPENDED OU] Skipping account: {account_id} ({account_name})")
+                            if account_id not in _logged_suspended:
+                                logger.warning(f"[SUSPENDED OU] Skipping account: {account_id} ({account_name})")
+                                _logged_suspended.add(account_id)
                             continue
                         # ================================================================
                         
@@ -484,9 +494,13 @@ if __name__ == '__main__':
                                 'accountId': account_id, 'accountName': account_name, 'awsRegion': region, 'description': config_annotation
                             })
                         elif is_one_dot_zero:
-                            logger.info(f"Account {account_id} & {account_name} is 1.0 - skipping")
+                            if account_id not in _logged_1dot0:
+                                logger.info(f"Account {account_id} & {account_name} is 1.0 - skipping")
+                                _logged_1dot0.add(account_id)
                         else:
-                            logger.info(f"Account {account_id} & {account_name} - skipped (no matching annotations)")
+                            if account_id not in _logged_no_annotations:
+                                logger.info(f"Account {account_id} & {account_name} - skipped (no matching annotations)")
+                                _logged_no_annotations.add(account_id)
 
                 n = datetime.now()
                 current_time_str = n.strftime("%H:%M:%S")
