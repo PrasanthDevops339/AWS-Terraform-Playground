@@ -116,6 +116,11 @@ def main(item, tries=1):
     #   - resourceId: Unique resource identifier
     #   - configuration.complianceType: Compliance status
     #   - configuration.configRuleList: Rules that evaluated the resource
+
+    # Escape single quotes in item to prevent SQL syntax errors
+    # (AWS Config Advanced Query uses '' to represent a literal single quote)
+    safe_item = item.replace("'", "''")
+
     allowlist = []
     if ACCOUNT_ID_ALLOWLIST:
         allowlist = [a.strip() for a in ACCOUNT_ID_ALLOWLIST.split(",") if a.strip()]
@@ -132,14 +137,14 @@ def main(item, tries=1):
     query = "SELECT resourceType,resourceId,resourceName,configuration.targetResourceType,configuration.complianceType,configuration.configRuleList," \
             "configurationItemCaptureTime,configurationItemStatus,accountId,awsRegion " \
             "WHERE configuration.complianceType = 'NON_COMPLIANT' " \
-            "AND resourceId LIKE '" + item + "%' " \
+            "AND resourceId LIKE '" + safe_item + "%' " \
             + account_filter + \
             "ORDER BY accountId DESC"
     # =========================================================================
 
     # Optional: Add time filter for recent violations only
     # "AND configurationItemCaptureTime >= '2025-09-15T00:00:00Z'" \
-    #logger.info(query)
+    logger.info(f"Executing Config query: {query}")
 
     # =========================================================================
     # TEST QUERY — hardcoded dummy account IDs (commented out by default)
@@ -218,6 +223,7 @@ def main(item, tries=1):
                 raise
         else:
             logger.error(f"Error executing query : {str(e)}")
+            logger.error(f"Failed query: {query}")
             raise
 
 
