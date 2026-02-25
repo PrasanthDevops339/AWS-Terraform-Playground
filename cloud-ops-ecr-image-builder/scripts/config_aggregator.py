@@ -194,6 +194,9 @@ def main(item, tries=1):
                     ConfigurationAggregatorName=AGGREGATOR_NAME
                 )
 
+            # Track Config query API call
+            api_metrics['config_query_calls'] += 1
+
             #logger.info("Response", response)
 
             # Process the results (for example, logger.info them)
@@ -230,12 +233,38 @@ def main(item, tries=1):
 annotation_cache = {}
 
 
+# ============================================================================
+# API CALL METRICS TRACKING
+# ============================================================================
+# Track API usage for cost monitoring and optimization validation
+# ============================================================================
+api_metrics = {
+    'config_query_calls': 0,
+    'rule_description_calls': 0,
+    'rule_description_cache_hits': 0,
+    'rule_description_wildcard_skips': 0
+}
+
+
 def get_rule_description(rule_name, account_id, region, rule_ann):
-    client = boto3.client('config', region_name=REGION, config=Config(retries={'max_attempts': 10}))
+    client = get_config_client()  # Use cached client instead of creating new one
 
     cache_key = (rule_name, account_id, region)
 
     if cache_key in annotation_cache:
+        api_metrics['rule_description_cache_hits'] += 1
+        return annotation_cache[cache_key]
+
+    # Handle empty/missing annotations (treat as wildcard)
+    if not rule_ann or rule_ann == {} or rule_ann == []:
+        logger.warning(f"No annotation filter for {rule_name} - treating as wildcard")
+        rule_ann = ["*"]
+
+    # Wildcard shortcut - skip API call if any annotation is acceptable
+    if "*" in rule_ann:
+        logger.info(f"Wildcard annotation filter - skipping API call for {rule_name}")
+        annotation_cache[cache_key] = "NON_COMPLIANT (wildcard match)"
+        api_metrics['rule_description_wildcard_skips'] += 1
         return annotation_cache[cache_key]
 
     detail_paginator = client.get_paginator('get_aggregate_compliance_details_by_config_rule')
@@ -244,8 +273,15 @@ def get_rule_description(rule_name, account_id, region, rule_ann):
         ConfigRuleName=rule_name,
         AccountId=account_id,
         AwsRegion=region,
-        ComplianceType='NON_COMPLIANT'
+        ComplianceType='NON_COMPLIANT',
+        PaginationConfig={
+            'PageSize': 100  # Fetch 100 per page (max allowed) instead of default 50
+        }
     )
+
+    # Track API call (each pagination may involve multiple API requests, but count as 1 lookup)
+    api_metrics['rule_description_calls'] += 1
+
     for details_page in detail_iterator:
         for result in details_page['AggregateEvaluationResults']:
             if 'Annotation' in result:
@@ -318,6 +354,33 @@ def check_account(account_name):
     except ClientError as e:
         logger.error(f"Error in Dynamo query: {e}")
         return False
+
+
+# ============================================================================
+# BOTO3 CLIENT CACHING
+# ============================================================================
+# Create shared boto3 clients once at module level to avoid repeated client
+# creation in loops, which can trigger unnecessary STS API calls
+# ============================================================================
+_config_client = None
+_s3_client = None
+
+
+def get_config_client():
+    """Get or create cached Config client"""
+    global _config_client
+    if _config_client is None:
+        _config_client = boto3.client('config', region_name=REGION,
+                                      config=Config(retries={'max_attempts': 10}))
+    return _config_client
+
+
+def get_s3_client():
+    """Get or create cached S3 client"""
+    global _s3_client
+    if _s3_client is None:
+        _s3_client = boto3.client('s3', region_name=REGION)
+    return _s3_client
 
 
 # ============================================================================
@@ -524,6 +587,9 @@ if __name__ == '__main__':
 
                 logger.info(f"Found {len(grouped_data)} unique account groups.")
 
+                # Get S3 client once before loop (instead of creating new client per iteration)
+                s3 = get_s3_client()
+
                 # Iterate over each group and upload to S3
                 for group_keys, group_df in grouped_data:
                     # Create a safe file name from the grouping keys
@@ -552,7 +618,7 @@ if __name__ == '__main__':
                         logger.info(timestamp)
                         object_key = f'{bucket_prefix}/{group_key_str}_{rule_id}.csv'
 
-                        s3 = boto3.client('s3', region_name=REGION)
+                        # Use cached S3 client from outside the loop
                         s3.put_object(
                             Bucket=bucket_name,
                             Key=object_key,
@@ -569,4 +635,22 @@ if __name__ == '__main__':
 
         except ClientError as e:
             logger.error(f"Error in Dynamo query: {e}")
+
+        # Log API call metrics summary for cost monitoring
+        logger.info("=" * 80)
+        logger.info("API CALL METRICS SUMMARY")
+        logger.info("=" * 80)
+        logger.info(f"Config Query API Calls: {api_metrics['config_query_calls']}")
+        logger.info(f"Rule Description API Calls: {api_metrics['rule_description_calls']}")
+        logger.info(f"Rule Description Cache Hits: {api_metrics['rule_description_cache_hits']}")
+        logger.info(f"Rule Description Wildcard Skips: {api_metrics['rule_description_wildcard_skips']}")
+        total_rule_lookups = (api_metrics['rule_description_calls'] +
+                              api_metrics['rule_description_cache_hits'] +
+                              api_metrics['rule_description_wildcard_skips'])
+        if total_rule_lookups > 0:
+            cache_hit_rate = (api_metrics['rule_description_cache_hits'] / total_rule_lookups) * 100
+            logger.info(f"Cache Hit Rate: {cache_hit_rate:.1f}%")
+        logger.info(f"Total Config API Calls: {api_metrics['config_query_calls'] + api_metrics['rule_description_calls']}")
+        logger.info("=" * 80)
+
         trace.get_tracer_provider().shutdown()

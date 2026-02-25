@@ -91,7 +91,7 @@ The implementation follows a phased approach:
     - Add inline documentation comments explaining each variable
     - _Requirements: 1.1, 1.2, 1.5, 5.1, 7.2, 7.3, 8.3, 8.6_
   
-  - [~] 3.2 Update SCP module invocation
+  - [ ] 3.2 Update SCP module invocation
     - Edit `aws-service-control-policies/environments/prd/main.tf`
     - Locate `module "scp-ami-guardrail"` block
     - Add `policy_vars` map with same `ops_accounts` as declarative policy
@@ -99,21 +99,21 @@ The implementation follows a phased approach:
     - Add inline documentation comments
     - _Requirements: 1.1, 1.2, 4.2, 7.5, 10.4_
   
-  - [~] 3.3 Configure resource tagging
+  - [ ] 3.3 Configure resource tagging
     - Add `tags` parameter to both module invocations
     - Include: `Environment = "prd"`, `ManagedBy = "Terraform"`, `PolicyType = "<type>"`
     - Add custom tags: `Owner = "Cloud Platform Team"`, `Purpose = "AMI Governance"`
     - _Requirements: 14.1, 14.2, 14.3, 14.4, 14.5, 14.6_
 
 - [ ] 4. Configure exception expiry feature
-  - [~] 4.1 Enable exception expiry in module invocations
+  - [ ] 4.1 Enable exception expiry in module invocations
     - Update both module blocks in `environments/prd/main.tf`
     - Set `enable_exception_expiry = true`
     - Add empty `exception_accounts = {}` map (no exceptions initially)
     - Add multi-line comment explaining exception format
     - _Requirements: 3.1, 3.2, 3.3_
   
-  - [~] 4.2 Document exception account format
+  - [ ] 4.2 Document exception account format
     - Add comment block showing example exception:
       ```hcl
       # exception_accounts = {
@@ -125,14 +125,14 @@ The implementation follows a phased approach:
     - Document maximum exception duration (365 days for exception AMIs, 90 days for others)
     - _Requirements: 3.1, 15.4, 15.5_
   
-  - [~] 4.3 Add exception expiry validation
+  - [ ] 4.3 Add exception expiry validation
     - Verify module's built-in expiry validation is active
     - Confirm expired exceptions will fail terraform apply
     - Document error message format in comments
     - _Requirements: 3.4, 17.1, 17.2, 17.3, 17.4, 17.5_
 
 - [ ] 5. Create dev environment configuration
-  - [~] 5.1 Copy production configuration to dev
+  - [ ] 5.1 Copy production configuration to dev
     - Copy `environments/prd/main.tf` structure to `environments/dev/main.tf`
     - Update target_ids to reference dev OU variables (var.dev_workloads, var.dev_sandbox)
     - Keep same Prasa Operations account IDs
@@ -140,14 +140,14 @@ The implementation follows a phased approach:
     - Update tags: `Environment = "dev"`
     - _Requirements: 12.1, 12.2, 18.7_
   
-  - [~] 5.2 Update dev variables file
+  - [ ] 5.2 Update dev variables file
     - Edit `environments/dev/variables.tf`
     - Ensure variables exist for dev target OUs
     - Add descriptions for each variable
     - Document which OUs are used for testing
     - _Requirements: 7.1, 7.2, 7.3_
   
-  - [~] 5.3 Add dev-specific documentation
+  - [ ] 5.3 Add dev-specific documentation
     - Add comment block at top of dev/main.tf
     - Explain this is for testing before production rollout
     - Document differences from production (target OUs)
@@ -155,21 +155,21 @@ The implementation follows a phased approach:
     - _Requirements: 12.1, 12.4_
 
 - [ ] 6. Validate Terraform configuration
-  - [~] 6.1 Validate syntax and structure
+  - [ ] 6.1 Validate syntax and structure
     - Run `terraform init` in environments/dev
     - Run `terraform validate` in environments/dev
     - Fix any syntax errors or validation issues
     - Verify provider versions meet requirements (AWS >= 5.0)
     - _Requirements: 9.1, 9.2, 20.1, 20.2, 20.3_
   
-  - [~] 6.2 Validate policy JSON templates
+  - [ ] 6.2 Validate policy JSON templates
     - Run `terraform plan` in environments/dev
     - Verify templatefile() successfully loads JSON files
     - Verify jsondecode() parses templates without errors
     - Check that policy_vars are correctly injected
     - _Requirements: 9.3, 9.4_
   
-  - [~] 6.3 Review planned changes
+  - [ ] 6.3 Review planned changes
     - Examine terraform plan output
     - Verify two policies will be created (declarative + SCP)
     - Verify policy attachments for each target_id
@@ -178,14 +178,14 @@ The implementation follows a phased approach:
     - _Requirements: 9.7, 9.8_
 
 - [ ] 7. Deploy and validate in dev environment
-  - [~] 7.1 Deploy policies to dev
+  - [ ] 7.1 Deploy policies to dev
     - Run `terraform apply` in environments/dev
     - Confirm creation of both policies
     - Confirm policy attachments to target OUs
     - Save policy IDs from terraform output
     - _Requirements: 9.7, 9.8, 16.1, 16.2_
   
-  - [~] 7.2 Verify policy content in AWS console
+  - [ ] 7.2 Verify policy content in AWS console
     - Open AWS Organizations console
     - Navigate to Policies → Declarative policies
     - Verify declarative-policy-ec2 exists with correct content
@@ -194,7 +194,7 @@ The implementation follows a phased approach:
     - Check that account IDs match configuration (565656565656, 666363636363)
     - _Requirements: 1.1, 1.2, 10.4_
   
-  - [~] 7.3 Check effective policies on dev accounts
+  - [ ] 7.3 Check effective policies on dev accounts
     - Run: `aws organizations describe-effective-policy --policy-type DECLARATIVE_POLICY_EC2 --target-id <dev-account-id>`
     - Verify effective policy includes AMI governance rules
     - Verify allowed_image_providers contains Prasa Operations accounts
@@ -202,7 +202,7 @@ The implementation follows a phased approach:
     - Run same check for SERVICE_CONTROL_POLICY type
     - _Requirements: 11.1, 11.2, 11.3, 11.4_
   
-  - [~] 7.4 Verify policy attachments
+  - [ ] 7.4 Verify policy attachments
     - Run: `aws organizations list-policies-for-target --target-id <dev-ou-id> --filter DECLARATIVE_POLICY_EC2`
     - Verify declarative policy is attached
     - Run: `aws organizations list-policies-for-target --target-id <dev-ou-id> --filter SERVICE_CONTROL_POLICY`
@@ -211,7 +211,7 @@ The implementation follows a phased approach:
     - _Requirements: 7.5, 18.1_
 
 - [ ] 8. Test enforcement scenarios in dev
-  - [~] 8.1 Test approved AMI launch (should succeed)
+  - [ ] 8.1 Test approved AMI launch (should succeed)
     - Launch EC2 instance in dev account using AMI from 565656565656
     - Verify launch succeeds without errors
     - Launch EC2 instance using AMI from 666363636363
@@ -219,7 +219,7 @@ The implementation follows a phased approach:
     - Check CloudTrail logs for successful RunInstances events
     - _Requirements: 1.3, 13.1_
   
-  - [~] 8.2 Test non-approved AMI launch in audit mode (should succeed but log)
+  - [ ] 8.2 Test non-approved AMI launch in audit mode (should succeed but log)
     - Launch EC2 instance using public AWS AMI (e.g., Amazon Linux 2)
     - Verify launch succeeds (audit mode allows it)
     - Query CloudTrail: `aws cloudtrail lookup-events --lookup-attributes AttributeKey=EventName,AttributeValue=RunInstances`
@@ -227,21 +227,21 @@ The implementation follows a phased approach:
     - Verify SCP does not block (only declarative policy in audit mode)
     - _Requirements: 5.2, 5.4, 13.2_
   
-  - [~] 8.3 Test AMI creation attempt (should be denied by SCP)
+  - [ ] 8.3 Test AMI creation attempt (should be denied by SCP)
     - Attempt to create custom AMI: `aws ec2 create-image --instance-id <id> --name test-ami`
     - Verify action is denied with AccessDenied error
     - Verify error message references SCP
     - Check CloudTrail for denied CreateImage event
     - _Requirements: 4.6, 13.3_
   
-  - [~] 8.4 Test public AMI sharing attempt (should be denied)
+  - [ ] 8.4 Test public AMI sharing attempt (should be denied)
     - Create or use existing AMI in dev account
     - Attempt to make it public: `aws ec2 modify-image-attribute --image-id <ami-id> --launch-permission "Add=[{Group=all}]"`
     - Verify action is denied
     - Verify error message indicates policy violation
     - _Requirements: 4.7, 6.1, 6.2, 13.4_
   
-  - [~] 8.5 Verify custom error message
+  - [ ] 8.5 Verify custom error message
     - Attempt non-approved AMI launch in dev account
     - Capture error message from AWS console or CLI
     - Verify message includes approved AMI name patterns
@@ -250,7 +250,7 @@ The implementation follows a phased approach:
     - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5, 8.6_
 
 - [ ] 9. Test exception expiry functionality
-  - [~] 9.1 Add test exception with future expiry
+  - [ ] 9.1 Add test exception with future expiry
     - Edit `environments/dev/main.tf`
     - Add test exception account to both module invocations:
       ```hcl
@@ -262,14 +262,14 @@ The implementation follows a phased approach:
     - Verify plan shows policy updates with new account in allowlist
     - _Requirements: 3.1, 3.2_
   
-  - [~] 9.2 Apply and verify active exception
+  - [ ] 9.2 Apply and verify active exception
     - Run `terraform apply`
     - Verify policies updated with exception account
     - Check policy content includes 999999999999 in allowed_image_providers
     - Verify no errors about expired exceptions
     - _Requirements: 3.2, 3.6_
   
-  - [~] 9.3 Test expired exception detection
+  - [ ] 9.3 Test expired exception detection
     - Edit `environments/dev/main.tf`
     - Change exception date to past: `"999999999999" = "2025-01-01"`
     - Run `terraform plan`
@@ -277,14 +277,14 @@ The implementation follows a phased approach:
     - Verify error message lists account ID and expiry date
     - _Requirements: 3.3, 3.4, 17.1, 17.2, 17.3, 17.4, 17.5_
   
-  - [~] 9.4 Remove test exception
+  - [ ] 9.4 Remove test exception
     - Edit `environments/dev/main.tf`
     - Remove test exception from exception_accounts map
     - Run `terraform apply`
     - Verify policies updated to remove exception account
     - _Requirements: 16.4, 30.1_
 
-- [~] 10. Checkpoint - Dev environment validation complete
+- [ ] 10. Checkpoint - Dev environment validation complete
   - Verify all dev tests passed
   - Verify policies deployed correctly
   - Verify enforcement scenarios work as expected
@@ -293,7 +293,7 @@ The implementation follows a phased approach:
   - Ensure all tests pass, ask the user if questions arise.
 
 - [ ] 11. Create operational documentation
-  - [~] 11.1 Create exception request process document
+  - [ ] 11.1 Create exception request process document
     - Create `aws-service-control-policies/docs/AMI-EXCEPTION-PROCESS.md`
     - Document who can request exceptions (developers, project teams)
     - Document what information is required (business justification, security approval)
@@ -303,7 +303,7 @@ The implementation follows a phased approach:
     - Provide example exception request
     - _Requirements: 15.1, 15.2, 15.3, 15.4, 15.5, 15.6, 15.7_
   
-  - [~] 11.2 Create deployment guide
+  - [ ] 11.2 Create deployment guide
     - Create `aws-service-control-policies/docs/AMI-GOVERNANCE-DEPLOYMENT.md`
     - Document pre-deployment checklist
     - Document deployment steps for each environment
@@ -312,7 +312,7 @@ The implementation follows a phased approach:
     - Include troubleshooting section
     - _Requirements: 12.1, 12.2_
   
-  - [~] 11.3 Create monitoring and operations guide
+  - [ ] 11.3 Create monitoring and operations guide
     - Create `aws-service-control-policies/docs/AMI-GOVERNANCE-MONITORING.md`
     - Document CloudTrail log queries for policy evaluations
     - Document how to check imageAllowed indicators in audit mode
@@ -321,7 +321,7 @@ The implementation follows a phased approach:
     - Document alerting recommendations
     - _Requirements: 13.1, 13.2, 13.3, 13.4, 13.5_
   
-  - [~] 11.4 Create operational runbook
+  - [ ] 11.4 Create operational runbook
     - Create `aws-service-control-policies/docs/AMI-GOVERNANCE-RUNBOOK.md`
     - Document how to add new exception account
     - Document how to remove expired exception
@@ -331,7 +331,7 @@ The implementation follows a phased approach:
     - Include common error scenarios and resolutions
     - _Requirements: 3.1, 3.2, 3.3, 3.4, 5.5_
   
-  - [~] 11.5 Update main repository README
+  - [ ] 11.5 Update main repository README
     - Edit `aws-service-control-policies/README.md`
     - Add section on AMI Governance policies
     - Link to detailed documentation files
@@ -340,7 +340,7 @@ The implementation follows a phased approach:
     - _Requirements: 15.1_
 
 - [ ] 12. Create validation and testing scripts
-  - [~] 12.1 Create policy structure validation script
+  - [ ] 12.1 Create policy structure validation script
     - Create `aws-service-control-policies/scripts/validate-policy-structure.sh`
     - Script validates JSON structure of policy template files
     - Check for required fields (ec2_attributes, allowed_images_settings)
@@ -349,7 +349,7 @@ The implementation follows a phased approach:
     - Make script executable
     - _Requirements: 4.1_
   
-  - [~] 12.2 Create effective policy check script
+  - [ ] 12.2 Create effective policy check script
     - Create `aws-service-control-policies/scripts/check-effective-policy.sh`
     - Accept account ID as parameter
     - Run describe-effective-policy for both policy types
@@ -358,7 +358,7 @@ The implementation follows a phased approach:
     - Make script executable
     - _Requirements: 11.1, 11.2, 11.3_
   
-  - [~] 12.3 Create exception expiry check script
+  - [ ] 12.3 Create exception expiry check script
     - Create `aws-service-control-policies/scripts/check-exception-expiry.sh`
     - Parse exception_accounts from environment configurations
     - Calculate days until expiry for each exception
@@ -368,7 +368,7 @@ The implementation follows a phased approach:
     - Make script executable
     - _Requirements: 17.1, 17.2, 17.3_
   
-  - [~] 12.4 Create CloudTrail query helper script
+  - [ ] 12.4 Create CloudTrail query helper script
     - Create `aws-service-control-policies/scripts/query-ami-governance-events.sh`
     - Query CloudTrail for RunInstances events
     - Filter for AMI governance policy evaluations
@@ -379,7 +379,7 @@ The implementation follows a phased approach:
     - _Requirements: 13.1, 13.2, 13.3, 13.5_
 
 - [ ] 13. Prepare for production deployment
-  - [~] 13.1 Review production configuration
+  - [ ] 13.1 Review production configuration
     - Review `environments/prd/main.tf` for correctness
     - Verify Prasa Operations account IDs: 565656565656, 666363636363
     - Verify target_ids point to correct production OUs (workloads, sandbox)
@@ -388,7 +388,7 @@ The implementation follows a phased approach:
     - Verify tags are correct for production
     - _Requirements: 1.1, 1.2, 5.1, 7.2, 7.3, 12.1_
   
-  - [~] 13.2 Run pre-deployment validation
+  - [ ] 13.2 Run pre-deployment validation
     - Run `terraform init` in environments/prd
     - Run `terraform validate` to check syntax
     - Run `terraform plan` and save output
@@ -397,7 +397,7 @@ The implementation follows a phased approach:
     - Run policy structure validation script
     - _Requirements: 9.1, 9.2, 9.7_
   
-  - [~] 13.3 Create deployment checklist
+  - [ ] 13.3 Create deployment checklist
     - Document all pre-deployment validation steps
     - Document deployment command sequence
     - Document post-deployment validation steps
@@ -407,7 +407,7 @@ The implementation follows a phased approach:
     - _Requirements: 12.1, 12.2_
 
 - [ ] 14. Deploy to production in audit mode
-  - [~] 14.1 Execute production deployment
+  - [ ] 14.1 Execute production deployment
     - Run `terraform apply` in environments/prd
     - Verify both policies created successfully
     - Verify policy attachments created for all target OUs
@@ -415,7 +415,7 @@ The implementation follows a phased approach:
     - Document deployment timestamp
     - _Requirements: 9.7, 9.8, 12.1_
   
-  - [~] 14.2 Validate production deployment
+  - [ ] 14.2 Validate production deployment
     - Verify policies exist in AWS Organizations console
     - Check policy content matches expected configuration
     - Run describe-effective-policy for sample production accounts
@@ -424,14 +424,14 @@ The implementation follows a phased approach:
     - Run effective policy check script on multiple accounts
     - _Requirements: 11.1, 11.2, 11.3, 11.4_
   
-  - [~] 14.3 Set up CloudTrail monitoring
+  - [ ] 14.3 Set up CloudTrail monitoring
     - Configure CloudTrail log query for RunInstances events
     - Set up daily monitoring for imageAllowed indicators
     - Create dashboard or report for non-compliant AMI usage
     - Document monitoring process
     - _Requirements: 13.1, 13.2, 13.4_
   
-  - [~] 14.4 Monitor audit mode for 2-4 weeks
+  - [ ] 14.4 Monitor audit mode for 2-4 weeks
     - Query CloudTrail logs daily using query helper script
     - Identify any non-compliant AMI usage (imageAllowed=false)
     - Document impacted workloads and teams
@@ -440,21 +440,21 @@ The implementation follows a phased approach:
     - _Requirements: 5.2, 5.4, 12.3, 13.2_
 
 - [ ] 15. Process exception requests (if needed)
-  - [~] 15.1 Review exception requests
+  - [ ] 15.1 Review exception requests
     - Check Jira for submitted exception requests
     - Verify business justification is provided
     - Verify security approval is obtained
     - Verify requested duration is within limits (365 days for exception AMIs, 90 days for others)
     - _Requirements: 15.2, 15.3, 15.4, 15.5_
   
-  - [~] 15.2 Add approved exceptions to configuration
+  - [ ] 15.2 Add approved exceptions to configuration
     - Edit `environments/prd/main.tf`
     - Add exception account to exception_accounts map in both module invocations
     - Use format: `"<account-id>" = "<YYYY-MM-DD>"`
     - Add comment with exception reason and ticket number
     - _Requirements: 3.1, 3.2_
   
-  - [~] 15.3 Deploy exception updates
+  - [ ] 15.3 Deploy exception updates
     - Run `terraform plan` and verify exception account added to allowlist
     - Run `terraform apply` to update policies
     - Verify policies updated with new exception account
@@ -462,28 +462,28 @@ The implementation follows a phased approach:
     - _Requirements: 3.2, 3.6, 10.3_
 
 - [ ] 16. Switch to enforcement mode
-  - [~] 16.1 Verify compliance readiness
+  - [ ] 16.1 Verify compliance readiness
     - Review CloudTrail logs from audit mode period
     - Confirm all non-compliant usage has been addressed
     - Confirm all necessary exceptions have been granted
     - Get approval from Cloud Platform Team to enable enforcement
     - _Requirements: 5.2, 5.4, 12.4_
   
-  - [~] 16.2 Update enforcement mode in production
+  - [ ] 16.2 Update enforcement mode in production
     - Edit `environments/prd/main.tf`
     - Change `enforcement_mode` from "audit_mode" to "enabled" in declarative policy policy_vars
     - Add comment documenting enforcement mode change and date
     - Run `terraform plan` and verify only policy content changes (no resource recreation)
     - _Requirements: 5.3, 5.5_
   
-  - [~] 16.3 Apply enforcement mode change
+  - [ ] 16.3 Apply enforcement mode change
     - Run `terraform apply` to update declarative policy
     - Verify policy state field changed to "enabled"
     - Verify no errors during apply
     - Document enforcement mode activation timestamp
     - _Requirements: 5.3, 9.7_
   
-  - [~] 16.4 Validate enforcement mode
+  - [ ] 16.4 Validate enforcement mode
     - Attempt to launch EC2 instance with approved AMI (should succeed)
     - Attempt to launch EC2 instance with non-approved AMI (should be denied)
     - Verify error message shows custom exception_message
@@ -491,14 +491,14 @@ The implementation follows a phased approach:
     - Run enforcement validation on multiple accounts
     - _Requirements: 1.3, 1.4, 5.3, 8.2, 13.3_
   
-  - [~] 16.5 Monitor enforcement mode
+  - [ ] 16.5 Monitor enforcement mode
     - Monitor CloudTrail for AccessDenied events
     - Track blocked launch attempts
     - Respond to user questions about blocked launches
     - Process additional exception requests as needed
     - _Requirements: 13.3, 13.5_
 
-- [~] 17. Checkpoint - Production deployment complete
+- [ ] 17. Checkpoint - Production deployment complete
   - Verify policies deployed to production
   - Verify audit mode monitoring completed
   - Verify enforcement mode activated
