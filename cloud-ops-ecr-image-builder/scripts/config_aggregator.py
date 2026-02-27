@@ -472,163 +472,165 @@ if __name__ == '__main__':
             )
 
             if 'Items' in response and response['Items']:
-                ingest_policy = response['Items'][0].get('ingest_policy', '{}')
-                rule_id = response['Items'][0].get('id', 1)
-                ingest = json.loads(ingest_policy)
-                res_types = ingest.get('ResourceTypes', {})
-                rule_ann = ingest.get('Annotations', {})
-                rule_type = ingest.get('Rules', {})
-                comp_type = ingest.get('ComplianceType', 'NON_COMPLIANT')
+                for rule_item in response['Items']:  # Iterate over ALL enabled rules
+                    ingest_policy = rule_item.get('ingest_policy', '{}')
+                    rule_id = rule_item.get('id', 1)
+                    ingest = json.loads(ingest_policy)
+                    res_types = ingest.get('ResourceTypes', {})
+                    rule_ann = ingest.get('Annotations', {})
+                    rule_type = ingest.get('Rules', {})
+                    comp_type = ingest.get('ComplianceType', 'NON_COMPLIANT')
 
-                logger.info(f"res types: {res_types}")
-                logger.info(f"rann {rule_ann}")
-                logger.info(f"rtype {rule_type}")
-                logger.info(f"comp {comp_type}")
+                    logger.info(f"Processing rule_id={rule_id}")
+                    logger.info(f"res types: {res_types}")
+                    logger.info(f"rann {rule_ann}")
+                    logger.info(f"rtype {rule_type}")
+                    logger.info(f"comp {comp_type}")
 
-                # Write to CSV in memory
-                csv_buffer = io.StringIO()
-                fieldnames = ['resourceId', 'resourceType', 'resourceName', 'targetResourceType', 'complianceType', 'configRuleName',
-                              'configurationItemCaptureTime', 'configurationItemStatus', 'accountId', 'accountName', 'awsRegion', 'description']
-                writer = csv.DictWriter(csv_buffer, fieldnames=fieldnames)
-                writer.writeheader()
+                    # Write to CSV in memory (fresh buffer per rule)
+                    csv_buffer = io.StringIO()
+                    fieldnames = ['resourceId', 'resourceType', 'resourceName', 'targetResourceType', 'complianceType', 'configRuleName',
+                                  'configurationItemCaptureTime', 'configurationItemStatus', 'accountId', 'accountName', 'awsRegion', 'description']
+                    writer = csv.DictWriter(csv_buffer, fieldnames=fieldnames)
+                    writer.writeheader()
 
-                # Track accounts we've already logged a skip message for, so each
-                # message fires at most once per account regardless of how many
-                # non-compliant resources that account has.
-                _logged_suspended: set = set()
-                _logged_1dot0: set = set()
-                _logged_no_annotations: set = set()
+                    # Track accounts we've already logged a skip message for, so each
+                    # message fires at most once per account regardless of how many
+                    # non-compliant resources that account has.
+                    _logged_suspended: set = set()
+                    _logged_1dot0: set = set()
+                    _logged_no_annotations: set = set()
 
-                for item in res_types:
-                    logger.info(item)
-                    results = main(item)
+                    for item in res_types:
+                        logger.info(item)
+                        results = main(item)
 
-                    n1 = datetime.now()
-                    t1 = n1.strftime("%H:%M:%S")
-                    logger.info(f"After res {t1}")
+                        n1 = datetime.now()
+                        t1 = n1.strftime("%H:%M:%S")
+                        logger.info(f"After res {t1}")
 
-                    for item in results:
-                        parsed_results = json.loads(item)
-                        resource_id = parsed_results.get('resourceId')
-                        resource_name = parsed_results.get('resourceName')
-                        resource_type = parsed_results.get('resourceType')
-                        target_res_type = parsed_results.get('configuration', {}).get('targetResourceType')
-                        compliance_type = parsed_results.get('configuration', {}).get('complianceType')
-                        capture_time = parsed_results.get('configurationItemCaptureTime')
-                        status = parsed_results.get('configurationItemStatus')
-                        account_id = parsed_results.get('accountId')
-                        account_name = get_account_name_cached(account_id)
-                        
-                        # ================================================================
-                        # SUSPENDED OU CHECK: Exclude accounts from Suspended OU
-                        # If account is in a Suspended OU, skip it entirely from reporting
-                        # ================================================================
-                        if is_account_in_suspended_ou(account_id):
-                            if account_id not in _logged_suspended:
-                                logger.warning(f"[SUSPENDED OU] Skipping account: {account_id} ({account_name})")
-                                _logged_suspended.add(account_id)
-                            continue
-                        # ================================================================
-                        
-                        region = parsed_results.get('awsRegion')
-                        config_rule_name = []
-                        config_annotation = []
+                        for item in results:
+                            parsed_results = json.loads(item)
+                            resource_id = parsed_results.get('resourceId')
+                            resource_name = parsed_results.get('resourceName')
+                            resource_type = parsed_results.get('resourceType')
+                            target_res_type = parsed_results.get('configuration', {}).get('targetResourceType')
+                            compliance_type = parsed_results.get('configuration', {}).get('complianceType')
+                            capture_time = parsed_results.get('configurationItemCaptureTime')
+                            status = parsed_results.get('configurationItemStatus')
+                            account_id = parsed_results.get('accountId')
+                            account_name = get_account_name_cached(account_id)
 
-                        for rule in parsed_results.get('configuration', {}).get('configRuleList', []):
-                            if "*" in rule_type:
-                                rule_check = True
-                            else:
-                                rule_check = any(item in rule.get('configRuleName') for item in rule_type)
-                            if rule.get('complianceType') == comp_type and rule_check:
-                                annotation = get_rule_description(rule.get('configRuleName'), account_id, region, rule_ann)
-                                config_rule_name.append(rule.get('configRuleName'))
-                                config_annotation.append(annotation)
-                            else:
+                            # ================================================================
+                            # SUSPENDED OU CHECK: Exclude accounts from Suspended OU
+                            # If account is in a Suspended OU, skip it entirely from reporting
+                            # ================================================================
+                            if is_account_in_suspended_ou(account_id):
+                                if account_id not in _logged_suspended:
+                                    logger.warning(f"[SUSPENDED OU] Skipping account: {account_id} ({account_name})")
+                                    _logged_suspended.add(account_id)
                                 continue
+                            # ================================================================
 
-                        #check if its 2.0 and then insert into list
-                        is_one_dot_zero = check_account_cached(account_name)
-                        if not is_one_dot_zero and config_annotation:
-                            # not 1.0 account
-                            writer.writerow({
-                                'resourceId': resource_id, 'resourceType': resource_type, 'resourceName': resource_name,
-                                'targetResourceType': target_res_type, 'complianceType': compliance_type, 'configRuleName': config_rule_name,
-                                'configurationItemCaptureTime': capture_time, 'configurationItemStatus': status,
-                                'accountId': account_id, 'accountName': account_name, 'awsRegion': region, 'description': config_annotation
-                            })
-                        elif is_one_dot_zero:
-                            if account_id not in _logged_1dot0:
-                                logger.info(f"Account {account_id} & {account_name} is 1.0 - skipping")
-                                _logged_1dot0.add(account_id)
-                        else:
-                            if account_id not in _logged_no_annotations:
-                                logger.info(f"Account {account_id} & {account_name} - skipped (no matching annotations)")
-                                _logged_no_annotations.add(account_id)
+                            region = parsed_results.get('awsRegion')
+                            config_rule_name = []
+                            config_annotation = []
 
-                n = datetime.now()
-                current_time_str = n.strftime("%H:%M:%S")
-                logger.info(f"After csv: {current_time_str}")
+                            for rule in parsed_results.get('configuration', {}).get('configRuleList', []):
+                                if "*" in rule_type:
+                                    rule_check = True
+                                else:
+                                    rule_check = any(item in rule.get('configRuleName') for item in rule_type)
+                                if rule.get('complianceType') == comp_type and rule_check:
+                                    annotation = get_rule_description(rule.get('configRuleName'), account_id, region, rule_ann)
+                                    config_rule_name.append(rule.get('configRuleName'))
+                                    config_annotation.append(annotation)
+                                else:
+                                    continue
 
-                # Read the CSV buffer into a pandas DataFrame
-                try:
-                    logger.info("Reading csv to df")
-                    csv_buffer.seek(0)
-                    df = pd.read_csv(csv_buffer)
-                except pd.errors.EmptyDataError:
-                    logger.error("Input CSV buffer is empty.")
-                except Exception as e:
-                    logger.error(f"Error reading CSV buffer: {e}")
+                            #check if its 2.0 and then insert into list
+                            is_one_dot_zero = check_account_cached(account_name)
+                            if not is_one_dot_zero and config_annotation:
+                                # not 1.0 account
+                                writer.writerow({
+                                    'resourceId': resource_id, 'resourceType': resource_type, 'resourceName': resource_name,
+                                    'targetResourceType': target_res_type, 'complianceType': compliance_type, 'configRuleName': config_rule_name,
+                                    'configurationItemCaptureTime': capture_time, 'configurationItemStatus': status,
+                                    'accountId': account_id, 'accountName': account_name, 'awsRegion': region, 'description': config_annotation
+                                })
+                            elif is_one_dot_zero:
+                                if account_id not in _logged_1dot0:
+                                    logger.info(f"Account {account_id} & {account_name} is 1.0 - skipping")
+                                    _logged_1dot0.add(account_id)
+                            else:
+                                if account_id not in _logged_no_annotations:
+                                    logger.info(f"Account {account_id} & {account_name} - skipped (no matching annotations)")
+                                    _logged_no_annotations.add(account_id)
 
-                # Group the DataFrame by the specified columns
-                logger.info("Grouping data")
-                logger.info(df)
-                grouped_data = df.groupby(['accountId', 'accountName'])
-                logger.info(f"Grouped data {grouped_data}")
+                    n = datetime.now()
+                    current_time_str = n.strftime("%H:%M:%S")
+                    logger.info(f"After csv: {current_time_str}")
 
-                logger.info(f"Found {len(grouped_data)} unique account groups.")
-
-                # Get S3 client once before loop (instead of creating new client per iteration)
-                s3 = get_s3_client()
-
-                # Iterate over each group and upload to S3
-                for group_keys, group_df in grouped_data:
-                    # Create a safe file name from the grouping keys
-                    # Convert tuple to string, e.g., (101, 'John Doe') -> '101_John Doe'
-                    if isinstance(group_keys, tuple):
-                        group_account_id = str(group_keys[0])
-                        group_key_str = '-'.join(str(key) for key in group_keys)
-                    else:
-                        group_account_id = str(group_keys)
-                        group_key_str = str(group_keys)
-
-                    # Skip CSV creation for accounts in Suspended OU
-                    if is_account_in_suspended_ou(group_account_id):
-                        logger.warning(f"[SUSPENDED OU] Skipping CSV creation for suspended account: {group_account_id}")
-                        continue
-
-                    # Create an in-memory buffer for the group's CSV data
-                    csv_out_buffer = io.StringIO()
-                    group_df.to_csv(csv_out_buffer, index=False)
-                    csv_out_buffer.seek(0)
-
-                    # Upload to S3
+                    # Read the CSV buffer into a pandas DataFrame
                     try:
-                        now = datetime.now()
-                        timestamp = now.timestamp()
-                        logger.info(timestamp)
-                        object_key = f'{bucket_prefix}/{group_key_str}_{rule_id}.csv'
+                        logger.info("Reading csv to df")
+                        csv_buffer.seek(0)
+                        df = pd.read_csv(csv_buffer)
+                    except pd.errors.EmptyDataError:
+                        logger.error("Input CSV buffer is empty.")
+                    except Exception as e:
+                        logger.error(f"Error reading CSV buffer: {e}")
 
-                        # Use cached S3 client from outside the loop
-                        s3.put_object(
-                            Bucket=bucket_name,
-                            Key=object_key,
-                            Body=csv_out_buffer.getvalue()
-                        )
+                    # Group the DataFrame by the specified columns
+                    logger.info("Grouping data")
+                    logger.info(df)
+                    grouped_data = df.groupby(['accountId', 'accountName'])
+                    logger.info(f"Grouped data {grouped_data}")
 
-                        logger.info(f"CSV saved to s3://{bucket_name}/{object_key}")
+                    logger.info(f"Found {len(grouped_data)} unique account groups.")
 
-                    except ClientError as e:
-                        logger.error(f"Error uploading to s3 with key {key}: {e}")
+                    # Get S3 client once before loop (instead of creating new client per iteration)
+                    s3 = get_s3_client()
+
+                    # Iterate over each group and upload to S3
+                    for group_keys, group_df in grouped_data:
+                        # Create a safe file name from the grouping keys
+                        # Convert tuple to string, e.g., (101, 'John Doe') -> '101_John Doe'
+                        if isinstance(group_keys, tuple):
+                            group_account_id = str(group_keys[0])
+                            group_key_str = '-'.join(str(key) for key in group_keys)
+                        else:
+                            group_account_id = str(group_keys)
+                            group_key_str = str(group_keys)
+
+                        # Skip CSV creation for accounts in Suspended OU
+                        if is_account_in_suspended_ou(group_account_id):
+                            logger.warning(f"[SUSPENDED OU] Skipping CSV creation for suspended account: {group_account_id}")
+                            continue
+
+                        # Create an in-memory buffer for the group's CSV data
+                        csv_out_buffer = io.StringIO()
+                        group_df.to_csv(csv_out_buffer, index=False)
+                        csv_out_buffer.seek(0)
+
+                        # Upload to S3
+                        try:
+                            now = datetime.now()
+                            timestamp = now.timestamp()
+                            logger.info(timestamp)
+                            object_key = f'{bucket_prefix}/{group_key_str}_{rule_id}.csv'
+
+                            # Use cached S3 client from outside the loop
+                            s3.put_object(
+                                Bucket=bucket_name,
+                                Key=object_key,
+                                Body=csv_out_buffer.getvalue()
+                            )
+
+                            logger.info(f"CSV saved to s3://{bucket_name}/{object_key}")
+
+                        except ClientError as e:
+                            logger.error(f"Error uploading to s3 with key {object_key}: {e}")
 
             else:
                 logger.info("No enabled rules")
