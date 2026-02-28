@@ -1,0 +1,15 @@
+#create database user
+CREATE USER 'ccopsrw' IDENTIFIED WITH AWSAuthenticationPlugin AS 'RDS';
+
+#grant read write access to ccops database
+GRANT SELECT, INSERT, UPDATE, DELETE ON ccops.* TO 'ccopsrw'@'%';
+
+#force privilege update
+flush privileges;
+
+#create tables;
+CREATE TABLE ingest (source varchar(24),id int,accountId varchar(24),accountName varchar(64),cloudVersion varchar(8),awsRegion varchar(16),resourceType varchar(32),targetResourceType varchar(32),resourceId varchar(64),resourceName varchar(64),complianceType varchar(64),configRuleName varchar(300),itemCaptureTime varchar(16),description varchar(300),itemStatus varchar(64),CONSTRAINT pkey PRIMARY KEY (source, accountId, resourceId))
+
+CREATE TABLE actions (source varchar(24),ruleId int,accountId varchar(24),hash varchar(65),executed bool,artifact varchar(256),timestamp DATETIME,state JSON,CONSTRAINT pkey PRIMARY KEY (accountId, ruleId, hash))
+
+commit;

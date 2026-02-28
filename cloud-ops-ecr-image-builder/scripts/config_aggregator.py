@@ -598,7 +598,7 @@ if __name__ == '__main__':
                         # Convert tuple to string, e.g., (101, 'John Doe') -> '101_John Doe'
                         if isinstance(group_keys, tuple):
                             group_account_id = str(group_keys[0])
-                            group_key_str = '-'.join(str(key) for key in group_keys)
+                            group_key_str = '_'.join(str(key) for key in group_keys)
                         else:
                             group_account_id = str(group_keys)
                             group_key_str = str(group_keys)
