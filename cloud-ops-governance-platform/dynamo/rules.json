@@ -2,43 +2,41 @@
   "item1": {
     "source": "aws_config",
     "id": 1,
-    "enabled": true,
+    "enabled": false,
     "description": "match on missing backup or patch tags",
-    "actions_policy": "{\\\"Action\\\":{\\\"Target\\\":\\\"servicenow\\\",\\\"Type\\\":\\\"incident\\\",\\\"CallerId\\\":\\\"ccops\\\",\\\"AssignmentGroup\\\":\\\"cmdb:assignment_group\\\",\\\"ConfigurationItem\\\":\\\"aws_account\\\",\\\"Impact\\\":3,\\\"Urgency\\\":3,\\\"Priority\\\":3,\\\"ShortDescription\\\":\\\"Backup Tag Violations for AWS Account ${ACCOUNT_NAMES} ${ACCOUNT_NUMBERS}\\\",\\\"Description\\\":\\\"Backup tag compliance violations have been detected in AWS account ${ACCOUNT_NAMES}. See attachment for a list of non-compliant resources.\\\"}}",
-    "ingest_policy": "{\\\"ResourceTypes\\\":[\\\"AWS::EC2::Instance\\\",\\\"AWS::S3::Bucket\\\",\\\"AWS::RDS::Instance\\\",\\\"AWS::DynamoDB::Table\\\",\\\"AWS::EC2::Volume\\\",\\\"AWS::EFS::FileSystem\\\"],\\\"ComplianceType\\\":\\\"NON_COMPLIANT\\\",\\\"Rules\\\":[\\\"backuptags\\\",\\\"patchingtags\\\"],\\\"Annotations\\\":[\\\"backup tag keys are missing\\\",\\\"patch solution tag keys are missing\\\"],\\\"Exclusions\\\":[{\\\"Accounts\\\":[],\\\"Regions\\\":[],\\\"ResourceTypes\\\":[],\\\"ResourceIds\\\":[],\\\"ARNs\\\":[]}]}"
+    "actions_policy": "{\"Action\": {\"Target\": \"servicenow\",\"Type\": \"incident\",\"CallerId\": \"ccops\",\"AssignmentGroup\": \"cmdb:assignment_group\",\"ConfigurationItem\": \"aws_account\",\"Impact\": 3,\"Urgency\": 3}}",
+    "ingest_policy": "{\"ResourceTypes\": [\"AWS::EC2::Instance\",\"AWS::S3::Bucket\",\"AWS::RDS::Instance\",\"AWS::DynamoDB::Table\",\"AWS::EC2::Volume\",\"AWS::EFS::FileSystem\"],\"ComplianceType\": \"NON_COMPLIANT\"}"
   },
-
   "item2": {
     "source": "aws_config",
     "id": 2,
     "enabled": false,
     "description": "match on missing finops tags",
-    "actions_policy": "__TRUNCATED_IN_SCREENSHOT__",
-    "ingest_policy": "{\\\"ResourceTypes\\\":[\\\"AWS::EC2::Instance\\\",\\\"AWS::S3::Bucket\\\",\\\"AWS::RDS::Instance\\\"],\\\"ComplianceType\\\":\\\"NON_COMPLIANT\\\",\\\"Rules\\\":[\\\"finopstags\\\"],\\\"Annotations\\\": __TRUNCATED_IN_SCREENSHOT__ }"
+    "actions_policy": "{\"Action\": {\"Target\": \"servicenow\",\"Type\": \"incident\",\"CallerId\": \"ccops\",\"AssignmentGroup\": \"cmdb:assignment_group\",\"ConfigurationItem\": \"aws_account\",\"Impact\": 3,\"Urgency\": 3}}",
+    "ingest_policy": "{\"ResourceTypes\": [\"AWS::EC2::Instance\",\"AWS::S3::Bucket\",\"AWS::RDS::Instance\"],\"ComplianceType\": \"NON_COMPLIANT\",\"Rules\": [\"finopstags\"],\"Annotations\": [\"finops tag keys are missing\"]}"
   },
-
   "item3": {
     "source": "aws_config",
     "id": 3,
-    "enabled": true,
+    "enabled": false,
     "description": "Matching on EBS Encryption",
-    "actions_policy": "{\\\"Action\\\":{\\\"Target\\\":\\\"servicenow\\\",\\\"Type\\\":\\\"incident\\\",\\\"CallerId\\\":\\\"ccops\\\",\,\\\"ConfigurationItem\\\":\\\"aws_account\\\",\\\"Impact\\\":3,\\\"Urgency\\\":3,\\\"Priority\\\":3,\\\"ShortDescription\\\":\\\"EBS Violations for AWS Account ${ACCOUNT_NAMES} ${ACCOUNT_NUMBERS}\\\",\\\"Description\\\":\\\"EBS encryptionviolations have been detected in AWS account ${ACCOUNT_NAMES}. See attachment for a list of non-compliant resources.\\\"}}",
-    "ingest_policy": "{\\\"ResourceTypes\\\":[\\\""AWS::EC2::Volume\\\""],\\\"ComplianceType\\\":\\\"NON_COMPLIANT\\\",\\\"Rules\\\":[\\\"ebs-is-encrypted\\\"],\\\"Annotations\\\":[\\\"EBS encryption is missing\\",],\\\"Exclusions\\\":[{\\\"Accounts\\\":[],\\\"Regions\\\":[],\\\"ResourceTypes\\\":[],\\\"ResourceIds\\\":[],\\\"ARNs\\\":[]}]}"
+    "actions_policy": "{\"Action\": {\"Target\": \"servicenow\",\"Type\": \"incident\",\"CallerId\": \"ccops\",\"AssignmentGroup\": \"cmdb:assignment_group\",\"ConfigurationItem\": \"aws_account\",\"Impact\": 2,\"Urgency\": 3}}",
+    "ingest_policy": "{\"ResourceTypes\": [\"AWS::EC2::Volume\"],\"ComplianceType\": \"NON_COMPLIANT\",\"Rules\": [\"ebs-is-encrypted-conformance-pack\"],\"Annotations\": [\"EBS Volumes must be encrypted\"],\"Exclusions\": []}"
   },
-
-    "item4": {
+  "item4": {
     "source": "aws_config",
     "id": 4,
     "enabled": false,
-    "description": "Matching on SQS Encryption",
-    "actions_policy": "{\\\"Action\\\":{\\\"Target\\\":\\\"servicenow\\\",\\\"Type\\\":\\\"incident\\\",\\\"CallerId\\\":\\\"ccops\\\",\,\\\"ConfigurationItem\\\":\\\"aws_account\\\",\\\"Impact\\\":3,\\\"Urgency\\\":3,\\\"Priority\\\":3,\\\"ShortDescription\\\":\\\"SQS Violations for AWS Account ${ACCOUNT_NAMES} ${ACCOUNT_NUMBERS}\\\",\\\"Description\\\":\\\"SQS encryptionviolations have been detected in AWS account ${ACCOUNT_NAMES}. See attachment for a list of non-compliant resources.\\\"}}",
-    "ingest_policy": "{\\\"ResourceTypes\\\":[\\\""AWS::SQS::Quew\\\""],\\\"ComplianceType\\\":\\\"NON_COMPLIANT\\\",\\\"Rules\\\":[\\\"ebs-is-encrypted\\\"],\\\"Annotations\\\":[\\\"SQSshould be  encryption vis see or (KMS)\\",],\\\"Exclusions\\\":[{\\\"Accounts\\\":[],\\\"Regions\\\":[],\\\"ResourceTypes\\\":[],\\\"ResourceIds\\\":[],\\\"ARNs\\\":[]}]}"
-  },   
- "item5": {
-    "source": "aws_config",
-    "id": 4,
-    "enabled": true,
-    "description": "Matching on SQS Encryption",
-    "actions_policy": "{\\\"Action\\\":{\\\"Target\\\":\\\"servicenow\\\",\\\"Type\\\":\\\"incident\\\",\\\"CallerId\\\":\\\"ccops\\\",\,\\\"ConfigurationItem\\\":\\\"aws_account\\\",\\\"Impact\\\":3,\\\"Urgency\\\":3,\\\"Priority\\\":3,\\\"ShortDescription\\\":\\\"SQS Violations for AWS Account ${ACCOUNT_NAMES} ${ACCOUNT_NUMBERS}\\\",\\\"Description\\\":\\\"SQS encryptionviolations have been detected in AWS account ${ACCOUNT_NAMES}. See attachment for a list of non-compliant resources.\\\"}}",
-    "ingest_policy": "{\\\"ResourceTypes\\\":[\\\""AWS::EFS::FileSystem\\\""],\\\"ComplianceType\\\":\\\"NON_COMPLIANT\\\",\\\"Rules\\\":[\\\"ebs-is-encrypted\\\"],\\\"Annotations\\\":[\\\" Efs should be  encryption via (KMS)\\",EFS is missing the (ACess-Policy)\\\"],\\\"Exclusions\\\":[{\\\"Accounts\\\":[],\\\"Regions\\\":[],\\\"ResourceTypes\\\":[],\\\"ResourceIds\\\":[],\\\"ARNs\\\":[]}]}"
+    "description": "Matching on SQS in Rest Encryption",
+    "actions_policy": "{\"Action\": {\"Target\": \"servicenow\",\"Type\": \"incident\",\"CallerId\": \"ccops\",\"AssignmentGroup\": \"cmdb:assignment_group\",\"ConfigurationItem\": \"aws_account\",\"Impact\": 2,\"Urgency\": 3}}",
+    "ingest_policy": "{\"ResourceTypes\": [\"AWS::SQS::Queue\"],\"ComplianceType\": \"NON_COMPLIANT\",\"Rules\": [\"sqs-is-encrypted-conformance-pack\"],\"Annotations\": [\"SQS must be encrypted by SQS-managed (SSE-SQS) or KMS\"]}"
   },
+  "item5": {
+    "source": "aws_config",
+    "id": 5,
+    "enabled": true,
+    "description": "Matching on EFS in Rest and in-transit Encryption",
+    "actions_policy": "{\"Action\": {\"Target\": \"servicenow\",\"Type\": \"incident\",\"CallerId\": \"ccops\",\"AssignmentGroup\": \"cmdb:assignment_group\",\"ConfigurationItem\": \"aws_account\",\"Impact\": 2,\"Urgency\": 3,\"Priority\": 4,\"ShortDescription\": \"EFS in Rest Encryption Violations for AWS Account {$ACCOUNT_NAME$} {$ACCOUNT_NUMBER$}\",\"Description\": \"EFS encryption violations have been detected in AWS account {$ACCOUNT_NAME$}.\\nPlease refer to the attached CSV file for a detailed list of non-compliant resources. To remediate, ensure that all listed EFS resources are brought into compliance by enabling encryption in accordance with security standards.\\nFollow the step-by-step remediation guidance outlined in the following knowledge base article : https://sampleurl.com/23rtw4f/3rfwef\"}}",
+    "ingest_policy": "{\"ResourceTypes\": [\"AWS::EFS::FileSystem\"],\"ComplianceType\": \"NON_COMPLIANT\",\"Rules\": [\"efs-is-encrypted-conformance-pack\",\"efatlsenforcement\"],\"Annotations\": [\"EFS's must be encrypted\",\"EFS file system has no policy - TLS enforcement not configured\",\"EFS policy does not enforce TLS for EFS client actions (ClientMount/ClientWrite/ClientRootAccess)\"],\"Exclusions\": [{\"Accounts\": [],\"Regions\": [],\"ResourceTypes\": [],\"ResourceIds\": [],\"ARNs\": []}]}"
+  }
+}
