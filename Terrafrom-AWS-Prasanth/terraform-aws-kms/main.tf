@@ -167,3 +167,4 @@ resource "aws_kms_alias" "replica" {
   name          = "alias/${var.replica_key_name != "" ? var.replica_key_name : "${var.key_name}-replica"}"
   target_key_id = aws_kms_replica_key.this[0].key_id
 }
+

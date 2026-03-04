@@ -79,3 +79,4 @@ module "complete_multi_region_key" {
     example-tag = "example-value"
   }
 }
+

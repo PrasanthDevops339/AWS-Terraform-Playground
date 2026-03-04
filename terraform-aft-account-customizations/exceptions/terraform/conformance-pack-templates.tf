@@ -38,3 +38,4 @@ Resources:
       Type: AWS::Config::ConfigRule
 EOT
 }
+

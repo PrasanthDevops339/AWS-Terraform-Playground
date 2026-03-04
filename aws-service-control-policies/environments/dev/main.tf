@@ -157,3 +157,4 @@ module "declarative-policy-ec2" {
     enforcement_mode = "audit_mode"
   }
 }
+

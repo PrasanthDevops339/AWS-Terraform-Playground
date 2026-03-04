@@ -71,3 +71,4 @@ output "lambda_conformance_pack_yaml" {
   description = "Generated YAML for Lambda rules conformance pack - Review before applying"
   value       = local.lambda_rules_conformance_pack_template
 }
+

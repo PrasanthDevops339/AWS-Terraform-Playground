@@ -50,3 +50,4 @@ output "encryption_status" {
   description = "Encryption status of the EFS file system"
   value       = "ENCRYPTED AT REST (customer-managed KMS) - In-transit encryption is not enforced (mount without TLS)"
 }
+

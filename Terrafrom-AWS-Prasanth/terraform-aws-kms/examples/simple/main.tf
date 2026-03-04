@@ -14,3 +14,4 @@ module "simple_key" {
 
   key_name = "simple-test-${random_string.example_suffix.result}"
 }
+

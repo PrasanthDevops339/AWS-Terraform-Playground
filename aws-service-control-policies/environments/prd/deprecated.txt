@@ -27,3 +27,4 @@ module "scp-enforce-ec2-application" {
   file_date    = "2025-03-26"
   description  = "Service Control Policy to deny EC2 instances without Application"
 }
+

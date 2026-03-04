@@ -7,3 +7,4 @@ variable "environment" {
 variable "account_number" {
   type = string
 }
+

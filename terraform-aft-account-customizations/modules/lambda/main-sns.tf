@@ -37,3 +37,4 @@ resource "aws_lambda_permission" "sns_invoke" {
   principal     = "sns.amazonaws.com"
   source_arn    = local.sns_topic_arn
 }
+

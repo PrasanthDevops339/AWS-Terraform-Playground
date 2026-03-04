@@ -426,3 +426,4 @@ aws ec2 describe-images \
 > **Last Updated:** 2026-01-18  
 > **Maintained By:** Prasa Cloud Security Team  
 > **Review Cycle:** Quarterly
+

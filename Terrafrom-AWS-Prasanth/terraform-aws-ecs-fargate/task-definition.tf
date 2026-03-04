@@ -99,3 +99,4 @@ resource "aws_ecs_task_definition" "main" {
 
   tags = merge(var.tags, { "Name" = "${local.account_alias}-${each.key}" })
 }
+

@@ -278,3 +278,4 @@ These automated tests cover the same ground as the manual steps in `CONSOLE-TEST
 
 **Last Updated**: 2026-02-17
 **Status**: Phase 1 — Baseline
+

@@ -56,3 +56,4 @@ resource "aws_iam_role_policy" "lambda_iam_role" {
   role   = aws_iam_role.lambda[0].name
   policy = var.policy_document
 }
+

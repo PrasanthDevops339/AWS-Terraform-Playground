@@ -63,3 +63,4 @@ resource "aws_kms_key_policy" "main" {
   key_id = var.enable_replica != true ? aws_kms_key.main[0].id : aws_kms_replica_key.main[0].key_id
   policy = local.kms_policy
 }
+

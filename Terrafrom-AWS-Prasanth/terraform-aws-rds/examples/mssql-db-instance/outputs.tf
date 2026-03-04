@@ -38,3 +38,4 @@ output "db_instance_password_secret_arn" {
   description = "Secrets Manager secret or master user secret arn"
   value       = try(module.mssql-db-instance.db_instance_password_secret_arn, module.mssql-db-instance.db_instance_master_user_secret_arn, null)
 }
+

@@ -36,3 +36,4 @@ module "simple_key" {
   enable_region_argument = true
   key_name               = "simple-test-${random_string.example_suffix.result}"
 }
+

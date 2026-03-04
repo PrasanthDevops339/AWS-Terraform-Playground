@@ -22,3 +22,4 @@ resource "aws_config_config_rule" "main" {
     aws_lambda_permission.lambda_perm
   ]
 }
+

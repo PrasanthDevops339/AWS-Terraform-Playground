@@ -76,3 +76,4 @@ resource "aws_iam_role_policy_attachment" "additional_policies_attachments" {
   role       = module.lambda_role.iam_role_name
   policy_arn  = module.additional_policies[count.index].iam_policy_arn
 }
+

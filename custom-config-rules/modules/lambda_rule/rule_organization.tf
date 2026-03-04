@@ -14,3 +14,4 @@ resource "aws_config_organization_custom_rule" "main" {
     aws_lambda_permission.lambda_perm
   ]
 }
+

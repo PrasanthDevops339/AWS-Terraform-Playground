@@ -143,3 +143,4 @@ resource "aws_lambda_event_source_mapping" "main" {
     }
   }
 }
+

@@ -398,3 +398,4 @@ Decouple remediation from initial deployment:
 | Ongoing cost risk | **High** | `check_account()` fix applied — remaining risk from ECS timeout gap + Insights events |
 | Security risk | Low | CloudTrail logging is functioning correctly |
 | Compliance risk | Low | No data loss or rule misconfiguration |
+

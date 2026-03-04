@@ -17,3 +17,4 @@ output "config_rule_name" {
   description = "Name of the Config rule"
   value       = var.config_rule_name
 }
+

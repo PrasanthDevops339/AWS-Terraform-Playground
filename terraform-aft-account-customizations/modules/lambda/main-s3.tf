@@ -27,3 +27,4 @@ resource "aws_lambda_permission" "s3invoke" {
   principal     = "s3.amazonaws.com"
   source_arn    = var.lambda_trigger_bucket_arn
 }
+

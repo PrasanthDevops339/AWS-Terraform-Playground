@@ -371,3 +371,4 @@ module "iam" {
   description      = "ec2 policy which will be assume by deployment account"
   policy           = data.aws_iam_policy_document.policy_doc.json
 }
+

@@ -63,3 +63,4 @@ variable "add_random_characters" {
   type        = bool
   default     = false
 }
+

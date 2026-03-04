@@ -509,3 +509,4 @@ if __name__ == '__main__':
 
         logger.info(f"CSV saved to s3://{bucket_name}/{object_key}")
         trace.get_tracer_provider().shutdown()
+

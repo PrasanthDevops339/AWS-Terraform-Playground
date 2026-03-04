@@ -70,3 +70,4 @@ ecr_deploy_prd:
   tags:
     - docker
   allow_failure: false
+

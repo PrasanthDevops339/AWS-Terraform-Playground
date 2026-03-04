@@ -3,3 +3,4 @@
 - SQS queue with optional KMS encryption at rest
 - Optional dead letter queue (DLQ) with redrive policy
 - Optional SecureTransport enforce policy (aws:SecureTransport deny)
+

@@ -5,3 +5,4 @@ resource "aws_config_organization_conformance_pack" "organization_main" {
   template_body     = local.cpack_yml
   excluded_accounts = var.excluded_accounts
 }
+

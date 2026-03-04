@@ -6,3 +6,4 @@ locals {
     "platform:servicemoduleversion" = local.module_version
   }
 }
+

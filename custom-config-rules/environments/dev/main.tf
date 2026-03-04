@@ -36,3 +36,4 @@ module "ebs_rules_test_use1" {
   resource_types_scope = ["AWS::EC2::Volume", "AWS::EC2::Snapshot"]
   random_id            = local.random_id
 }
+

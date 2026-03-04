@@ -140,3 +140,4 @@ module "cloudwatch" {
   log_group_name = "ecs-complete-logs"
   kms_key_id     = module.kms.key_arn
 }
+

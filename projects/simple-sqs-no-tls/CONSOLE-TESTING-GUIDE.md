@@ -367,3 +367,4 @@ Then follow: `simple-sqs-with-tls/CONSOLE-TESTING-GUIDE.md`
 
 **Last Updated**: 2026-02-17
 **Status**: Phase 1 — Baseline (no SecureTransport policy)
+

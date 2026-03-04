@@ -9,3 +9,4 @@ lint:
   image: alpine:3.19
   script:
     - echo "placeholder pipeline"
+

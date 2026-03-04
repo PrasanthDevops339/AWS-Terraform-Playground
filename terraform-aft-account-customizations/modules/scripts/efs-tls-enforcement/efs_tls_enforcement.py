@@ -504,3 +504,4 @@ def build_error_response(error_message: str) -> Dict[str, Any]:
             'error': error_message
         })
     }
+

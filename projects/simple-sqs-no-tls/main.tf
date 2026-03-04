@@ -96,3 +96,4 @@ module "sqs" {
 
   tags = local.common_tags
 }
+

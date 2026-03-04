@@ -103,3 +103,4 @@ resource "aws_sqs_queue_policy" "main" {
   queue_url = aws_sqs_queue.main.id
   policy    = data.aws_iam_policy_document.secure_transport[0].json
 }
+

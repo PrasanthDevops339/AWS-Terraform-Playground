@@ -32,3 +32,4 @@ resource "aws_db_option_group" "main" {
 
   lifecycle { create_before_destroy = true }
 }
+

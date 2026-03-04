@@ -32,3 +32,4 @@ output "replication_configuration_destination_file_system_id" {
   description = "The file system ID of the replica"
   value       = module.efs.replication_configuration_destination_file_system_id
 }
+

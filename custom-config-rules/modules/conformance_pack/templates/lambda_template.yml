@@ -12,3 +12,4 @@ ${block_name}:
         - EventSource: aws.config
           MessageType: ${message_type}
       SourceIdentifier: ${lambda_function_arn}
+

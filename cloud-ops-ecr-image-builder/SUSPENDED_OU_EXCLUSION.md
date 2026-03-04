@@ -559,3 +559,4 @@ CSV saved to s3://my-bucket/config-reports/222233334444-dev-test-account_1.csv
 |-------|----------|-------------|------------|-------------|
 | Suspended OU | `is_account_in_suspended_ou()` | AWS Organizations | Skip (suspended) | Continue processing |
 | 1.0 Account | `check_account()` | DynamoDB table | Skip (legacy 1.0) | Include (2.0 account) |
+

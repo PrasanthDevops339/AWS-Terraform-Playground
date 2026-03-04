@@ -33,3 +33,4 @@ resource "aws_s3_object" "lambda_package_object" {
 
   tags = var.tags
 }
+

@@ -7,3 +7,4 @@ variable "replicate_source_db" {
   type        = string
   description = "(Required) The source DB instance identifier/ARN to replicate from."
 }
+

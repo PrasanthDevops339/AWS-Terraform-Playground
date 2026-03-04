@@ -132,3 +132,4 @@ resource "aws_secretsmanager_secret_rotation" "main" {
     automatically_after_days = var.master_user_password_rotation_automatically_after_days
   }
 }
+

@@ -351,3 +351,4 @@ if [[ ${FAILURE_COUNT} -gt 0 ]]; then
 else
     exit 0
 fi
+

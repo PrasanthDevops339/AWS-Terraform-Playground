@@ -7,3 +7,4 @@ when resourceType == "AWS::EC2::SecurityGroup"
     ]
     %my_rules !empty
 }
+

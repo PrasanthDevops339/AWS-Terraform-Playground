@@ -114,3 +114,4 @@ terraform destroy
 ```
 
 **Note**: The KMS key has a 7-day deletion window by default.
+

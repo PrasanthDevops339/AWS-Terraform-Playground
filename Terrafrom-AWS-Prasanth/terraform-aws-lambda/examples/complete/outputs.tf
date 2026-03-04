@@ -9,3 +9,4 @@ output "lambda_function_name" {
   description = "The name of the lambda function"
   value       = module.lambda-complete.lambda_function_name
 }
+

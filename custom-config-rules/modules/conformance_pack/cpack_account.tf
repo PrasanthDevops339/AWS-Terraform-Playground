@@ -4,3 +4,4 @@ resource "aws_config_conformance_pack" "account_main" {
 
   template_body = local.cpack_yml
 }
+

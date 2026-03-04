@@ -43,3 +43,4 @@ resource "aws_s3_object" "main" {
     }
   }
 }
+

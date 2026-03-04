@@ -44,3 +44,4 @@ output "secure_transport_policy_enabled" {
   description = "Whether the SecureTransport deny policy is attached to the queue."
   value       = var.enable_secure_transport
 }
+

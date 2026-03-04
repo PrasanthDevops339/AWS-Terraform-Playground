@@ -584,3 +584,4 @@ For issues, questions, or contributions:
 - **2026-01-26**: Initial implementation with Guard, Managed, and Lambda rules
 - **2025-10-30**: Original EFS encryption Guard policy
 - **2026-01-09**: Updated EBS encryption policy to 2026-01-09
+

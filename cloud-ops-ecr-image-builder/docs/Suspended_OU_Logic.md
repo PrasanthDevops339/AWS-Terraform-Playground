@@ -210,3 +210,4 @@ This is a **safety net**. Even if a suspended account's resource somehow made it
 - **Error handling**: If the Organizations API call fails, the function returns an empty set, so no valid accounts are accidentally skipped.
 - **Execution order**: The Suspended OU check runs before the DynamoDB 1.0 check. This is intentional -- the in-memory set lookup (O(1)) is faster than a DynamoDB network call, saving time and reducing costs.
 - **Required IAM permission**: The script needs `organizations:ListAccountsForParent` to fetch accounts from the Suspended OU.
+

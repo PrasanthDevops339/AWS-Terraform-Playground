@@ -40,3 +40,4 @@
     "ingest_policy": "{\"ResourceTypes\": [\"AWS::EFS::FileSystem\"],\"ComplianceType\": \"NON_COMPLIANT\",\"Rules\": [\"efs-is-encrypted-conformance-pack\",\"efatlsenforcement\"],\"Annotations\": [\"EFS's must be encrypted\",\"EFS file system has no policy - TLS enforcement not configured\",\"EFS policy does not enforce TLS for EFS client actions (ClientMount/ClientWrite/ClientRootAccess)\"],\"Exclusions\": [{\"Accounts\": [],\"Regions\": [],\"ResourceTypes\": [],\"ResourceIds\": [],\"ARNs\": []}]}"
   }
 }
+

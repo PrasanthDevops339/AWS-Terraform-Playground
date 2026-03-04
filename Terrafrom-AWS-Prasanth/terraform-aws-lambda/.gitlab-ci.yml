@@ -6,3 +6,4 @@ terraform:validate:
     - terraform -version
     - terraform init -backend=false
     - terraform validate
+

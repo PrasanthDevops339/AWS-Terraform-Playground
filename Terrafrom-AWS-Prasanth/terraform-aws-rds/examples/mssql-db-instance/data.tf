@@ -16,3 +16,4 @@ data "aws_subnets" "data" {
     values = [data.aws_vpc.main.id]
   }
 }
+

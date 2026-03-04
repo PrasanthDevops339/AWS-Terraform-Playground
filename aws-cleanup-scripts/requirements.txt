@@ -6,3 +6,4 @@ boto3>=1.26.0
 
 # AWS CLI (optional but recommended)
 # Install separately: pip install awscli
+

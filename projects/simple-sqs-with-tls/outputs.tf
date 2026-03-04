@@ -56,3 +56,4 @@ output "verify_policy" {
   description = "AWS CLI command to inspect the attached queue policy"
   value       = "aws sqs get-queue-attributes --queue-url ${module.sqs.queue_url} --attribute-names Policy --region ${data.aws_region.current.name}"
 }
+

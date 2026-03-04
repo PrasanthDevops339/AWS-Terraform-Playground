@@ -38,3 +38,4 @@ output "db_instance_password_secret_arn" {
   description = "The Secrets manager secret name of the db instance password"
   value       = try(module.postgres-db-instance.db_instance_password_secret_arn, module.postgres-db-instance.db_instance_master_user_secret_arn, null)
 }
+

@@ -107,3 +107,4 @@ output "autoscaling_target_resource_id" {
   description = "Application AutoScaling resource IDs"
   value       = { for k, v in aws_appautoscaling_target.main : k => v.resource_id }
 }
+

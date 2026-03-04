@@ -30,3 +30,4 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2
     touch ~/.aws/credentials
 
 #CMD ["opentelemetry-instrument", "python3", "config_aggregator.py"]
+

@@ -9,3 +9,4 @@ resource "aws_config_organization_custom_policy_rule" "main" {
   excluded_accounts   = var.excluded_accounts
   resource_types_scope = var.resource_types_scope
 }
+

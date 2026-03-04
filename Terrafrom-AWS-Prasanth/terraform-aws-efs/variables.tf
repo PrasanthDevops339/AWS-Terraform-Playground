@@ -136,3 +136,4 @@ variable "replication_configuration_destination" {
   }))
   default = []
 }
+

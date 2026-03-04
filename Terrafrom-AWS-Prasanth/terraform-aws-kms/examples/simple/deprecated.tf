@@ -5,3 +5,4 @@ module "deprecated_simple_key" {
 
   key_name = "deprecated-simple-test-${random_string.example_suffix.result}"
 }
+

@@ -41,3 +41,4 @@ output "replication_configuration_destination_file_system_id" {
   description = "The file system ID of the replica"
   value       = try(aws_efs_replication_configuration.main[0].destination[0].file_system_id, null)
 }
+

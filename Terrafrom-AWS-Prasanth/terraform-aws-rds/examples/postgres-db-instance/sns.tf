@@ -8,3 +8,4 @@ resource "aws_sns_topic_subscription" "db_instance_alert" {
   protocol  = "email"
   endpoint  = "cloud_ops_dl@test-placeholder.com"
 }
+

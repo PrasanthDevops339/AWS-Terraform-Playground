@@ -70,3 +70,4 @@ locals {
     local.managed_blocks
   ])))
 }
+

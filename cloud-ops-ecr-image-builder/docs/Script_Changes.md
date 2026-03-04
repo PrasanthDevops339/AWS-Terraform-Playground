@@ -403,3 +403,4 @@ save_annotation_cache_to_s3()
 | Before any changes | ~$15 | — |
 | After B1, B2 + O1-O5 | ~$7.50 | $7.50 (50%) |
 | + P1 or P2 (cache) | ~$1.00 | $14.00 (93%) |
+

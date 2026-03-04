@@ -245,3 +245,4 @@ Cross-reference with ECS task CloudWatch logs to identify whether the delay was 
 | During spike (Feb 5–17) | ~$900-1,500 | +600% |
 | After RC1 fix only ✅ | ~$450-900 | -40% |
 | After all fixes | ~$90-200 | Back to baseline |
+

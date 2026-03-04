@@ -10,3 +10,4 @@ ${block_name}:
       ComplianceResourceTypes:
 ${resource_types_scope}
     ${input_parameters}
+

@@ -22,3 +22,4 @@ data "aws_subnets" "subnets" {
 data "aws_s3_bucket" "bootstrap" {
   bucket = "${data.aws_iam_account_alias.current.account_alias}-bootstrap-use2"
 }
+

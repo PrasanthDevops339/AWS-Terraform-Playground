@@ -360,3 +360,4 @@ elif self.scenario == "your_new_scenario":
 | Date | Changes |
 |------|---------|
 | 2026-01-29 | Initial test matrix with 8 scenarios |
+

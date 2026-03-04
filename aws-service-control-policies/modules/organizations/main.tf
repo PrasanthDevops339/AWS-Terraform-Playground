@@ -31,3 +31,4 @@ resource "aws_organizations_policy_attachment" "main" {
   target_id    = each.value
   skip_destroy = var.skip_destroy
 }
+

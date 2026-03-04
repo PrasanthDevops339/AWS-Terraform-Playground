@@ -101,3 +101,4 @@ resource "aws_appautoscaling_policy" "step_policy" {
     }
   }
 }
+

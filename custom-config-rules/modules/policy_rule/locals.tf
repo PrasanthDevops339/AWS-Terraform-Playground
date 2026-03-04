@@ -3,3 +3,4 @@ locals {
   account_alias = data.aws_iam_account_alias.current.account_alias
   random_id    = var.random_id != null ? "-${var.random_id}" : ""
 }
+

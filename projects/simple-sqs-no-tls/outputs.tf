@@ -51,3 +51,4 @@ output "test_receive_message" {
   description = "AWS CLI command to receive a message"
   value       = "aws sqs receive-message --queue-url ${module.sqs.queue_url} --region ${data.aws_region.current.name}"
 }
+

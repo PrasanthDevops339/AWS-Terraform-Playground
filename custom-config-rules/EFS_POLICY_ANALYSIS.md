@@ -326,3 +326,4 @@ def _validates_principal_is_universal(statement: Dict[str, Any]) -> bool:
 - [AWS EFS Resource-Based Policies](https://docs.aws.amazon.com/efs/latest/ug/efs-resource-based-policies.html)
 - [AWS Policy Principal Element](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_principal.html)
 - [Encrypting Data in Transit with EFS](https://docs.aws.amazon.com/efs/latest/ug/encryption-in-transit.html)
+

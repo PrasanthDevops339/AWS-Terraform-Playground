@@ -9,3 +9,4 @@ This zip contains:
 Note:
 - Update `backup_tags.json` to your full allowed tag lists as needed.
 - Ensure AWS Config recorder is enabled in the target account/region.
+

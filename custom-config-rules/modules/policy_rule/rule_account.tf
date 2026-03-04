@@ -21,3 +21,4 @@ resource "aws_config_config_rule" "main" {
     }
   }
 }
+

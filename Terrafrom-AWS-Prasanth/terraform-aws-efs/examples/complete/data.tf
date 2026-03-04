@@ -51,3 +51,4 @@ data "aws_iam_policy_document" "policy_doc" {
     resources = [module.kms.key_arn]
   }
 }
+

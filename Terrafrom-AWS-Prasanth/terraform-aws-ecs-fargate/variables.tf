@@ -179,3 +179,4 @@ variable "default_capacity_provider_strategy" {
 }
 
 // Removed TG creation support: protocol/health_check are no longer used here.
+

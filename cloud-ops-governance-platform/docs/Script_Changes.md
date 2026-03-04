@@ -238,3 +238,4 @@ Result: 1 ticket, 10-resource CSV attached ✓
 | Tickets created for wrong rules | SELECT had no `ruleId` filter | F2: add `AND ruleId=%s LIMIT 1` |
 | Other rules' actions marked done | UPDATE had no `ruleId` filter | F3: add `AND ruleId=%s` |
 | No CSV attached to ticket | `.split('-')[1]` IndexError on filename without hyphens | F4: use basename directly |
+

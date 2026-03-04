@@ -10,3 +10,4 @@
 - Tightened `target_groups` validation: when `load_balanced=true`, each entry must include a non-empty `target_group_arn`.
 - Updated README and `examples/complete` to reflect the new requirement and usage.
 
+

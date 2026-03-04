@@ -656,3 +656,4 @@ if __name__ == '__main__':
         logger.info("=" * 80)
 
         trace.get_tracer_provider().shutdown()
+

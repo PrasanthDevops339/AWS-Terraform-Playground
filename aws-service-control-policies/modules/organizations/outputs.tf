@@ -7,3 +7,4 @@ output "arn" {
   description = "Amazon Resource Name (ARN) of the policy"
   value       = try(aws_organizations_policy.main[0].arn, "")
 }
+

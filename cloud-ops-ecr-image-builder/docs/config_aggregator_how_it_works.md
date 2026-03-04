@@ -266,3 +266,4 @@ The ECS task role must have the following permissions:
 | `organizations:DescribeAccount` | `get_account_name()` |
 | `organizations:ListAccountsForParent` | `get_suspended_account_ids()` |
 | `s3:PutObject` | S3 CSV upload |
+

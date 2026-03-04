@@ -240,3 +240,4 @@ resource "aws_efs_backup_policy" "main" {
     status = var.enable_backup ? "ENABLED" : "DISABLED"
   }
 }
+

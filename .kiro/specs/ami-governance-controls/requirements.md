@@ -271,3 +271,4 @@ The solution addresses the need for centralized AMI governance across multiple A
 3. THE AMI_Governance_System SHALL require null provider version >= 3.0
 4. WHEN an incompatible provider version is used, THE Terraform init SHALL fail with a clear error message
 5. THE AMI_Governance_System SHALL configure the AWS provider with a default region variable
+

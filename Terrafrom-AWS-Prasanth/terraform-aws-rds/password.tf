@@ -10,3 +10,4 @@ resource "aws_secretsmanager_secret_version" "db_password" {
   secret_id     = aws_secretsmanager_secret.db_password[0].id
   secret_string = local.password
 }
+

@@ -225,3 +225,4 @@ data "aws_iam_policy_document" "replica_combined" {
     var.replica_policy_file
   ]
 }
+

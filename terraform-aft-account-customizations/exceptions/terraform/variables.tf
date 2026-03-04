@@ -66,3 +66,4 @@ variable "scp_target_id" {
   description = "The organizational unit ID or account ID to attach SCPs to"
   default     = null
 }
+

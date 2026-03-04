@@ -24,3 +24,4 @@ variable "is_pre_dev" {
 locals {
   random_id = var.is_pre_dev ? random_string.random_id.result : null
 }
+
