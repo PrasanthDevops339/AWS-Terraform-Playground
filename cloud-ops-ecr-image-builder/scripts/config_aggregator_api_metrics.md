@@ -82,7 +82,9 @@ A single account in a single region may have **thousands of non-compliant resour
 - **First resource** → cache miss → real API call → result stored in `annotation_cache`
 - **2nd through Nth resource** → cache hit → return immediately, no API call
 
-### Example Metrics Breakdown
+### Metrics Breakdown
+
+#### Previous Run (limited scope)
 
 | Metric | Value |
 |---|---|
@@ -93,7 +95,22 @@ A single account in a single region may have **thousands of non-compliant resour
 | **Total Config API Calls** | **421** |
 | **Cache Hit Rate** | **99.8%** |
 
-The 99.8% cache hit rate means each unique `(rule, account, region)` combination appeared on average ~637 times across all non-compliant resources processed. The annotation was fetched once and reused 636 times from cache.
+#### Full Production Run
+
+| Metric | Value |
+|---|---|
+| Config Query API Calls | 8,311 |
+| Rule Description API Calls | 1,073 |
+| Rule Description Cache Hits | 226,133 |
+| Rule Description Wildcard Skips | 0 |
+| **Total Config API Calls** | **9,384** |
+| **Cache Hit Rate** | **99.5%** |
+
+**Key observations from the full run:**
+- Config query calls jumped from 404 → 8,311 (~20x), indicating a much larger number of rules × resource type prefixes × result pages being processed across all accounts
+- Rule description calls went from 17 → 1,073, reflecting more unique `(rule, account, region)` combinations across the full account set
+- Cache hits went from 10,835 → 226,133, showing each unique combination was reused on average ~211 times
+- Cache hit rate held strong at 99.5%, confirming the cache is working effectively at scale — without it, total API calls would have been ~227,206 instead of 9,384
 
 ---
 
