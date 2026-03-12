@@ -3,6 +3,7 @@
 > **Script location:** `scripts/config_aggregator.py`
 > **Runtime:** AWS ECS (Fargate scheduled task)
 > **Purpose:** Query AWS Config across all org accounts for non-compliant resources, filter and enrich the results, and upload per-account CSV reports to S3.
+> **Last Updated:** 2026-03-11
 
 ---
 
@@ -266,4 +267,55 @@ The ECS task role must have the following permissions:
 | `organizations:DescribeAccount` | `get_account_name()` |
 | `organizations:ListAccountsForParent` | `get_suspended_account_ids()` |
 | `s3:PutObject` | S3 CSV upload |
+
+---
+
+## 12. Log Output Walkthrough — What Is the Script Doing?
+
+> **Question asked (2026-03-11):** When running `config_aggregator.py`, what part of the script produces the log output seen at runtime, and what do the API call metrics mean?
+
+### 12.1 Per-Resource Processing Logs
+
+These log lines are produced during the **per-resource enrichment loop** (the `for item in results` block inside `__main__`).
+
+| Log Message | Script Location | What It Means |
+| --- | --- | --- |
+| `In subset desc EFS policy does not enforce TLS for EFS client` | `get_rule_description()` line 294 | The annotation for this EFS resource matched one of the configured `Annotations` filters from `rules.json`. The script confirmed this resource is genuinely non-compliant under the active rule. |
+| `After csv: HH:MM:SS` | `__main__` line 572 | All resources for the current rule have been processed and written to the in-memory CSV buffer. Timestamp shows when the loop finished. |
+| `Reading csv to df` | `__main__` line 576 | The in-memory CSV buffer is being loaded into a pandas DataFrame for grouping. |
+| `Grouping data` | `__main__` line 585 | The DataFrame is being grouped by `(accountId, accountName)` so one CSV file per account can be uploaded to S3. |
+| DataFrame table output (3 rows) | `__main__` line 586 (`logger.info(df)`) | Shows all non-compliant resources collected for this rule. 3 EFS filesystems were found to be non-compliant in this run. |
+| `Grouped data <DataFrameGroupBy object>` | `__main__` line 588 | Confirms the grouping object was created. The raw object reference prints because `DataFrameGroupBy` has no human-readable `__str__`. |
+
+### 12.2 API Call Metrics Explained
+
+These are printed at the very end of every run by the metrics summary block (lines 642–656).
+
+```text
+Config Query API Calls:          12
+Rule Description API Calls:       6
+Rule Description Cache Hits:      1
+Rule Description Wildcard Skips:  0
+Cache Hit Rate:                14.3%
+Total Config API Calls:          18
+```
+
+| Metric | Value | What It Means |
+| --- | --- | --- |
+| **Config Query API Calls: 12** | 12 | `main()` called `select_aggregate_resource_config` 12 times. Each call = one page of results. 12 pages means the Config aggregator returned a large result set that required 12 pagination loops before `NextToken` was exhausted. |
+| **Rule Description API Calls: 6** | 6 | `get_rule_description()` made 6 fresh calls to `GetAggregateComplianceDetailsByConfigRule` — one per unique `(rule_name, account_id, region)` combination not already in the in-memory cache. |
+| **Rule Description Cache Hits: 1** | 1 | 1 annotation lookup was served from `annotation_cache` without any API call — the same `(rule, account, region)` combination had already been fetched earlier in this run. |
+| **Rule Description Wildcard Skips: 0** | 0 | No rules in this run used `"Annotations": ["*"]`, so no API calls were bypassed via the wildcard shortcut. |
+| **Cache Hit Rate: 14.3%** | 1 / 7 | Calculated as `cache_hits / (rule_description_calls + cache_hits + wildcard_skips)` = `1 / (6+1+0)`. A low rate is expected early in a run when the cache is still cold. Subsequent rules or resource types reusing the same accounts/regions will push this higher. |
+| **Total Config API Calls: 18** | 12 + 6 | Sum of `config_query_calls` and `rule_description_calls`. This is the figure used to monitor AWS Config API cost. |
+
+### 12.3 Why Is the Cache Hit Rate Low?
+
+A 14.3% cache hit rate is normal behaviour for this run because:
+
+1. The `annotation_cache` is **in-memory only** — it starts empty on every ECS task launch.
+2. Only 1 enabled rule (`item5` — EFS) ran in this execution, so there were few opportunities for the same `(rule, account, region)` to repeat within a single pass.
+3. Each unique account/region combination requires its own fresh API call on first encounter.
+
+To improve the cache hit rate across runs, see **P1 (DynamoDB annotation cache)** or **P2 (S3 annotation cache)** in `Script_Changes.md`.
 
