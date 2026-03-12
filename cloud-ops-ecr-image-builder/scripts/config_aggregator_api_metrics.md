@@ -136,6 +136,41 @@ To further reduce API calls, consider:
 
 ---
 
+## Business Impact of Caching
+
+### Without Cache vs With Cache (Full Production Run)
+
+| Metric | Without Cache | With Cache | Savings |
+|---|---|---|---|
+| Config Query API Calls | 8,311 | 8,311 | — |
+| Rule Description API Calls | **227,206** | **1,073** | **226,133 calls saved** |
+| **Total Config API Calls** | **235,517** | **9,384** | **226,133 calls saved** |
+| **Reduction** | — | — | **96% fewer total API calls** |
+
+### What This Means
+
+> The annotation cache eliminated **226,133 unnecessary AWS API calls** in a single run — reducing total Config API usage by **96%** (from 235,517 down to 9,384).
+
+**Cost:** AWS Config charges per API call. Reducing calls by 96% directly translates to lower AWS spend at scale, and this saving compounds with every run.
+
+**Performance:** Fewer API calls means faster script execution. Without cache, the script would spend the majority of its time waiting on network round-trips for data it had already fetched.
+
+**Reliability:** AWS enforces API rate limits (throttling). At 235,517 calls per run, the script would be far more likely to hit `ThrottlingException` errors. At 9,384 calls, it stays well within safe limits.
+
+### Scale Projection
+
+As the number of accounts and non-compliant resources grows, the cache becomes even more valuable:
+
+| Scale | Est. Without Cache | Est. With Cache |
+|---|---|---|
+| Current (full run) | ~235,517 calls | ~9,384 calls |
+| 2x accounts | ~470,000 calls | ~10,457 calls |
+| 4x accounts | ~940,000 calls | ~12,603 calls |
+
+The cache savings scale near-linearly with resource growth while actual API calls grow only marginally (only new unique `rule + account + region` combinations need real calls).
+
+---
+
 ## Wildcard Annotation Shortcut
 
 If a rule's annotation filter contains `"*"`, the script skips the API call entirely:
