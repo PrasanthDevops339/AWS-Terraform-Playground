@@ -2,7 +2,7 @@
 AWS Config Custom Lambda Rule: EFS TLS Enforcement
 
 PURPOSE:
-This Lambda function validates that EFS file systems enforce TLS (aws:SecureTransport) 
+This Lambda function validates that EFS file systems enforce TLS (aws:SecureTransport)
 in their resource policies for encryption in-transit.
 
 WHY LAMBDA IS REQUIRED:
@@ -28,6 +28,22 @@ Valid action patterns for compliance:
 - "elasticfilesystem:*" (all EFS actions)
 - "elasticfilesystem:Client*" (all client actions)
 - Explicit list containing elasticfilesystem:ClientMount/ClientWrite/ClientRootAccess
+
+AWS BACKUP COPY EXCLUSION:
+When AWS Backup copies an EFS file system to another region, the backup copy:
+- Is read-only and cannot have a resource policy attached
+- Is automatically tagged with 'aws:backup:source-resource-arn' by AWS Backup
+- Should NOT be evaluated for TLS enforcement (policy attachment is not possible)
+
+This rule skips evaluation and returns NOT_APPLICABLE for any EFS tagged with
+AWS_BACKUP_TAG_KEY (default: 'aws:backup:source-resource-arn').
+To change the tag key, update the AWS_BACKUP_TAG_KEY constant.
+
+EVALUATION FLOW:
+1. Receive Config event for AWS::EFS::FileSystem resource
+2. If resource is deleted           → NOT_APPLICABLE
+3. If resource is an AWS Backup copy → NOT_APPLICABLE (skip TLS check)
+4. Otherwise                        → evaluate TLS policy enforcement
 
 COMPLEMENTS:
 - Guard policy (efs-validation) validates encryption-at-rest configuration
@@ -61,6 +77,12 @@ logger.setLevel(logging.INFO)
 # CONSTANTS
 # ============================================================================
 MAX_ANNOTATION_LENGTH = 256  # AWS Config annotation limit
+
+# AWS Backup automatically tags cross-region backup copies with this key.
+# EFS backup copies are read-only and cannot have resource policies, so TLS
+# enforcement is not applicable to them.
+# Change this value if your backup tag key is different.
+AWS_BACKUP_TAG_KEY = 'aws:backup:source-resource-arn'
 
 # ============================================================================
 # LAZY CLIENT INITIALIZATION
@@ -169,6 +191,11 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if configuration_item.get('configurationItemStatus') == 'ResourceDeleted':
             compliance_type = 'NOT_APPLICABLE'
             annotation = 'Resource has been deleted'
+        elif is_aws_backup_copy(resource_id):
+            # AWS Backup cross-region copies are read-only and cannot have resource
+            # policies - TLS enforcement does not apply to these EFS file systems
+            compliance_type = 'NOT_APPLICABLE'
+            annotation = f'EFS is an AWS Backup copy (read-only) - TLS enforcement not applicable'
         else:
             # Evaluate EFS file system policy
             compliance_type, annotation = evaluate_efs_tls_policy(resource_id)
@@ -288,6 +315,33 @@ def submit_not_applicable_evaluation(
         annotation=clip_annotation(annotation),
         ordering_timestamp=datetime.now(timezone.utc)
     )
+
+
+def is_aws_backup_copy(file_system_id: str) -> bool:
+    """
+    Check if EFS file system is an AWS Backup cross-region copy.
+
+    AWS Backup tags backup copies with 'aws:backup:source-resource-arn'.
+    These EFS copies are read-only and cannot have resource policies attached,
+    so TLS enforcement validation does not apply to them.
+
+    Args:
+        file_system_id: EFS file system ID
+
+    Returns:
+        True if EFS is an AWS Backup copy, False otherwise
+    """
+    try:
+        response = get_efs_client().list_tags_for_resource(ResourceId=file_system_id)
+        tags = response.get('Tags', [])
+        for tag in tags:
+            if tag.get('Key') == AWS_BACKUP_TAG_KEY:
+                logger.info(f"EFS {file_system_id} is an AWS Backup copy (tag '{AWS_BACKUP_TAG_KEY}' found) - skipping TLS evaluation")
+                return True
+        return False
+    except Exception as e:
+        logger.warning(f"Could not check backup tags for {file_system_id}: {str(e)} - proceeding with evaluation")
+        return False
 
 
 def evaluate_efs_tls_policy(file_system_id: str) -> Tuple[str, str]:

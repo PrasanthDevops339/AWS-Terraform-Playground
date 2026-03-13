@@ -60,6 +60,19 @@ The Lambda function produces the following annotations based on evaluation resul
 | `Resource was deleted or is not in scope` | Resource deleted during evaluation |
 | `Configuration item type is not AWS::EFS::FileSystem` | Wrong resource type passed to the rule |
 | `Unsupported configuration item status: <status>` | Config item has unsupported status (e.g., `ResourceNotRecorded`) |
+| `EFS is an AWS Backup copy (read-only) - TLS enforcement not applicable` | EFS is a cross-region AWS Backup copy tagged with `aws:backup:source-resource-arn` |
+
+## AWS Backup Copy Exclusion
+
+When AWS Backup replicates an EFS file system to another region, the backup copy:
+
+- Is **read-only** — resource policies cannot be attached to it
+- Is automatically tagged by AWS Backup with `aws:backup:source-resource-arn`
+- Will always appear `NON_COMPLIANT` without this exclusion (no policy = no TLS enforcement)
+
+This rule detects that tag via `elasticfilesystem:ListTagsForResource` and returns `NOT_APPLICABLE` instead of falsely marking the backup copy as non-compliant.
+
+To use a different tag key, update `AWS_BACKUP_TAG_KEY` in `efs_tls_enforcement.py`.
 
 ## Example Compliant Policy
 
@@ -143,13 +156,16 @@ The Lambda requires additional IAM permissions to call EFS APIs:
       "Effect": "Allow",
       "Action": [
         "elasticfilesystem:DescribeFileSystemPolicy",
-        "elasticfilesystem:DescribeFileSystems"
+        "elasticfilesystem:DescribeFileSystems",
+        "elasticfilesystem:ListTagsForResource"
       ],
       "Resource": "*"
     }
   ]
 }
 ```
+
+`elasticfilesystem:ListTagsForResource` is required to detect AWS Backup copies and skip their evaluation.
 
 This policy is provided via `iam/efs-tls-enforcement.json`.
 

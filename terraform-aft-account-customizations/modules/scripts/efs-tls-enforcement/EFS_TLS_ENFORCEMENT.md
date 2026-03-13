@@ -7,6 +7,7 @@ This document explains what `efs_tls_enforcement.py` does, the decision paths it
 - Receives an AWS Config custom rule event.
 - Extracts the configuration item and resource identity.
 - Ignores non-EFS resources and deleted resources with NOT_APPLICABLE.
+- Skips EFS file systems that are AWS Backup cross-region copies (tagged with `aws:backup:source-resource-arn`) — these are read-only and cannot have resource policies.
 - For EFS file systems, calls `DescribeFileSystemPolicy` and evaluates whether the policy denies EFS client actions when `aws:SecureTransport` is false.
 - Submits a single evaluation back to AWS Config with COMPLIANT, NON_COMPLIANT, or NOT_APPLICABLE.
 
@@ -17,12 +18,13 @@ This document explains what `efs_tls_enforcement.py` does, the decision paths it
 | 1 | Missing `configurationItem` or missing `resourceId` | NOT_APPLICABLE | Missing configuration item or resource ID in event | Event is malformed or incomplete. |
 | 2 | `resourceType` is not `AWS::EFS::FileSystem` | NOT_APPLICABLE | Resource type {resource_type} is not evaluated by this rule | Rule only targets EFS file systems. |
 | 3 | `configurationItemStatus` is `ResourceDeleted` | NOT_APPLICABLE | Resource has been deleted | Config item indicates deletion. |
-| 4 | `DescribeFileSystemPolicy` returns empty `Policy` | NON_COMPLIANT | EFS file system has no policy defined | No policy attached. |
-| 5 | `PolicyNotFound` exception | NON_COMPLIANT | EFS file system has no policy - TLS enforcement not configured | Explicit AWS API exception. |
-| 6 | `FileSystemNotFound` exception | NON_COMPLIANT | EFS file system not found: {file_system_id} | EFS removed or ID invalid at evaluation time. |
-| 7 | Policy found, but SecureTransport deny does not apply to EFS client actions | NON_COMPLIANT | EFS policy does not enforce TLS for EFS client actions (ClientMount/ClientWrite/ClientRootAccess) | Deny is missing or scoped incorrectly. |
-| 8 | Policy found, SecureTransport deny applies to EFS client actions | COMPLIANT | EFS file system policy enforces TLS (aws:SecureTransport) for client actions | Desired policy present. |
-| 9 | Any other error during evaluation | NON_COMPLIANT | Error evaluating EFS policy: {error} | Error message is clipped to Config limits. |
+| 4 | EFS is tagged with `aws:backup:source-resource-arn` | NOT_APPLICABLE | EFS is an AWS Backup copy (read-only) - TLS enforcement not applicable | AWS Backup cross-region copy — read-only, no policy can be attached. |
+| 5 | `DescribeFileSystemPolicy` returns empty `Policy` | NON_COMPLIANT | EFS file system has no policy defined | No policy attached. |
+| 6 | `PolicyNotFound` exception | NON_COMPLIANT | EFS file system has no policy - TLS enforcement not configured | Explicit AWS API exception. |
+| 7 | `FileSystemNotFound` exception | NON_COMPLIANT | EFS file system not found: {file_system_id} | EFS removed or ID invalid at evaluation time. |
+| 8 | Policy found, but SecureTransport deny does not apply to EFS client actions | NON_COMPLIANT | EFS policy does not enforce TLS for EFS client actions (ClientMount/ClientWrite/ClientRootAccess) | Deny is missing or scoped incorrectly. |
+| 9 | Policy found, SecureTransport deny applies to EFS client actions | COMPLIANT | EFS file system policy enforces TLS (aws:SecureTransport) for client actions | Desired policy present. |
+| 10 | Any other error during evaluation | NON_COMPLIANT | Error evaluating EFS policy: {error} | Error message is clipped to Config limits. |
 
 ## Dummy scenarios (examples)
 
@@ -41,7 +43,14 @@ This document explains what `efs_tls_enforcement.py` does, the decision paths it
 - Result: NOT_APPLICABLE
 - Annotation: "Resource has been deleted"
 
-4) EFS exists, no policy
+4) EFS is an AWS Backup cross-region copy
+
+- EFS has tag `aws:backup:source-resource-arn` set by AWS Backup during replication.
+- The backup copy is read-only — resource policies cannot be attached to it.
+- Result: NOT_APPLICABLE
+- Annotation: "EFS is an AWS Backup copy (read-only) - TLS enforcement not applicable"
+
+5) EFS exists, no policy
 - `DescribeFileSystemPolicy` returns no Policy field.
 - Result: NON_COMPLIANT
 - Annotation: "EFS file system has no policy defined"
