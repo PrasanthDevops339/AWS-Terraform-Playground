@@ -29,5 +29,9 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2
     mkdir ~/.aws/ &&\
     touch ~/.aws/credentials
 
-#CMD ["opentelemetry-instrument", "python3", "config_aggregator.py"]
+# Wrap every ECS task command with a 3-hour (10800s) timeout.
+# Each task definition passes its own `command`; this ENTRYPOINT prepends the
+# timeout automatically — no per-task changes needed.
+# Exit code 124 = timeout fired; 137 = SIGKILL after grace period.
+ENTRYPOINT ["timeout", "--kill-after=60s", "10800s"]
 
