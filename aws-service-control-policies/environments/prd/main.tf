@@ -76,7 +76,7 @@ module "imds-v2-policy" {
 
 # Single combined AMI governance SCP.
 # Replaces: scp-ami-guardrail (2026-01-18) + scp-ami-account-restrictions (2026-03-18).
-# Contains 5 statements -- see doc/scp-ami-governance-design.md for full details.
+# Contains 5 statements -- see policies/scp-ami-governance-design.md for full details.
 module "scp-ami-governance" {
   source = "../../modules/organizations"
 
@@ -214,97 +214,4 @@ module "declarative-policy-ec2-claimsdata" {
   }
 }
 
-# Per-app declarative policies for Amazon-owned exception AMIs.
-# Each policy is attached to the application's OU, allowing only that app's
-# exception AMIs on top of what the parent org-wide policy already allows.
-
-module "declarative-policy-ec2-datalake" {
-  source = "../../modules/organizations"
-
-  policy_name = "declarative-policy-ec2-datalake"
-  file_date   = "2026-03-18"
-  description = "EC2 Declarative Policy for Datalake OU: allows amazon-eks-node-al2023-x86_64-standard-* and UpsolverPrivateVpc-* exception AMIs"
-  type        = "DECLARATIVE_POLICY_EC2"
-
-  target_ids = [var.pras_datalake_ou]
-
-  policy_vars = {
-    enforcement_mode = "enabled"
-  }
-}
-
-module "declarative-policy-ec2-transit" {
-  source = "../../modules/organizations"
-
-  policy_name = "declarative-policy-ec2-transit"
-  file_date   = "2026-03-18"
-  description = "EC2 Declarative Policy for Transit OU: allows Gigamon and Cisco ftdv marketplace AMIs"
-  type        = "DECLARATIVE_POLICY_EC2"
-
-  target_ids = [var.pras_transit_ou]
-
-  policy_vars = {
-    enforcement_mode = "enabled"
-  }
-}
-
-module "declarative-policy-ec2-agcydshbrd" {
-  source = "../../modules/organizations"
-
-  policy_name = "declarative-policy-ec2-agcydshbrd"
-  file_date   = "2026-03-18"
-  description = "EC2 Declarative Policy for AgcyDshBrd OU: allows aws-datasync-* exception AMIs"
-  type        = "DECLARATIVE_POLICY_EC2"
-
-  target_ids = [var.pras_agcydshbrd_ou]
-
-  policy_vars = {
-    enforcement_mode = "enabled"
-  }
-}
-
-module "declarative-policy-ec2-termcond" {
-  source = "../../modules/organizations"
-
-  policy_name = "declarative-policy-ec2-termcond"
-  file_date   = "2026-03-18"
-  description = "EC2 Declarative Policy for TermCond OU: allows aws-storage-gateway-FILE_S3-* exception AMIs"
-  type        = "DECLARATIVE_POLICY_EC2"
-
-  target_ids = [var.pras_termcond_ou]
-
-  policy_vars = {
-    enforcement_mode = "enabled"
-  }
-}
-
-module "declarative-policy-ec2-datasync" {
-  source = "../../modules/organizations"
-
-  policy_name = "declarative-policy-ec2-datasync"
-  file_date   = "2026-03-18"
-  description = "EC2 Declarative Policy for DataSync OU: allows aws-datasync-* exception AMIs"
-  type        = "DECLARATIVE_POLICY_EC2"
-
-  target_ids = [var.pras_datasync_ou]
-
-  policy_vars = {
-    enforcement_mode = "enabled"
-  }
-}
-
-module "declarative-policy-ec2-claimsdata" {
-  source = "../../modules/organizations"
-
-  policy_name = "declarative-policy-ec2-claimsdata"
-  file_date   = "2026-03-18"
-  description = "EC2 Declarative Policy for ClaimsData OU: allows emr-* exception AMIs"
-  type        = "DECLARATIVE_POLICY_EC2"
-
-  target_ids = [var.pras_claimsdata_ou]
-
-  policy_vars = {
-    enforcement_mode = "enabled"
-  }
-}
 
