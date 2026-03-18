@@ -158,3 +158,136 @@ module "declarative-policy-ec2" {
   }
 }
 
+# ============================================================================
+# EXCEPTION AMI ACCOUNT RESTRICTIONS
+# ============================================================================
+# Each application has 3 accounts (dev, tst, prd). Exception AMIs may only
+# run in their owning application's accounts.
+#
+# Golden AMIs (pras-al2023-*, pras-al2-*, pras-rhel8-*, pras-rhel9-*,
+# pras-win22-*) are org-wide approved and NOT restricted here.
+#
+# Application-Specific AMIs from image 1 (pras-mlal2-*, pras-opsdir-mlal2-*)
+# are published from the ops accounts. AWS SCPs cannot filter by AMI name,
+# so those must be handled via per-OU declarative policies (not implemented
+# in this PR -- SCP approach is not viable for same-owner AMIs).
+#
+# Two enforcement mechanisms are used:
+#   1. SCP (scp-ami-account-restrictions): restricts third-party owner AMIs
+#      (Upsolver: ec2:Owner) and marketplace AMIs (ec2:ProductCode).
+#   2. Declarative Policy per app OU: restricts Amazon-owned service AMIs
+#      (eks, datasync, storage-gateway, emr) which share ec2:Owner="amazon"
+#      and therefore cannot be distinguished in an SCP.
+# ============================================================================
+
+# SCP: Restricts Upsolver AMIs to Datalake accounts only.
+# Restricts marketplace (Gigamon + Cisco ftdv) AMIs to Transit accounts only.
+# Attached at root OU so it applies to every account in the org.
+module "scp-ami-account-restrictions" {
+  source = "../../modules/organizations"
+
+  policy_name = "scp-ami-account-restrictions"
+  file_date   = "2026-03-18"
+  description = "SCP to restrict exception AMIs (Upsolver, Gigamon, Cisco ftdv) to their owning application accounts only"
+  type        = "SERVICE_CONTROL_POLICY"
+
+  target_ids = [var.root]
+}
+
+# Per-app declarative policies for Amazon-owned exception AMIs.
+# Each policy is attached to the application's OU. It allows the app-specific
+# AMIs in addition to whatever the parent (org-wide) declarative policy allows.
+# NOTE: The org-wide declarative-policy-ec2 must have image_criteria
+#       @@operators_allowed_for_child_policies set to ["@@append"] (not ["@@none"])
+#       for these per-OU policies to take additive effect.
+
+module "declarative-policy-ec2-datalake" {
+  source = "../../modules/organizations"
+
+  policy_name = "declarative-policy-ec2-datalake"
+  file_date   = "2026-03-18"
+  description = "EC2 Declarative Policy for Datalake OU: allows amazon-eks-node-al2023-x86_64-standard-* and UpsolverPrivateVpc-* exception AMIs"
+  type        = "DECLARATIVE_POLICY_EC2"
+
+  target_ids = [var.pras_datalake_ou]
+
+  policy_vars = {
+    enforcement_mode = "audit_mode"
+  }
+}
+
+module "declarative-policy-ec2-transit" {
+  source = "../../modules/organizations"
+
+  policy_name = "declarative-policy-ec2-transit"
+  file_date   = "2026-03-18"
+  description = "EC2 Declarative Policy for Transit OU: allows Gigamon and Cisco ftdv marketplace AMIs"
+  type        = "DECLARATIVE_POLICY_EC2"
+
+  target_ids = [var.pras_transit_ou]
+
+  policy_vars = {
+    enforcement_mode = "audit_mode"
+  }
+}
+
+module "declarative-policy-ec2-agcydshbrd" {
+  source = "../../modules/organizations"
+
+  policy_name = "declarative-policy-ec2-agcydshbrd"
+  file_date   = "2026-03-18"
+  description = "EC2 Declarative Policy for AgcyDshBrd OU: allows aws-datasync-* exception AMIs"
+  type        = "DECLARATIVE_POLICY_EC2"
+
+  target_ids = [var.pras_agcydshbrd_ou]
+
+  policy_vars = {
+    enforcement_mode = "audit_mode"
+  }
+}
+
+module "declarative-policy-ec2-termcond" {
+  source = "../../modules/organizations"
+
+  policy_name = "declarative-policy-ec2-termcond"
+  file_date   = "2026-03-18"
+  description = "EC2 Declarative Policy for TermCond OU: allows aws-storage-gateway-FILE_S3-* exception AMIs"
+  type        = "DECLARATIVE_POLICY_EC2"
+
+  target_ids = [var.pras_termcond_ou]
+
+  policy_vars = {
+    enforcement_mode = "audit_mode"
+  }
+}
+
+module "declarative-policy-ec2-datasync" {
+  source = "../../modules/organizations"
+
+  policy_name = "declarative-policy-ec2-datasync"
+  file_date   = "2026-03-18"
+  description = "EC2 Declarative Policy for DataSync OU: allows aws-datasync-* exception AMIs"
+  type        = "DECLARATIVE_POLICY_EC2"
+
+  target_ids = [var.pras_datasync_ou]
+
+  policy_vars = {
+    enforcement_mode = "audit_mode"
+  }
+}
+
+module "declarative-policy-ec2-claimsdata" {
+  source = "../../modules/organizations"
+
+  policy_name = "declarative-policy-ec2-claimsdata"
+  file_date   = "2026-03-18"
+  description = "EC2 Declarative Policy for ClaimsData OU: allows emr-* exception AMIs"
+  type        = "DECLARATIVE_POLICY_EC2"
+
+  target_ids = [var.pras_claimsdata_ou]
+
+  policy_vars = {
+    enforcement_mode = "audit_mode"
+  }
+}
+
