@@ -40,7 +40,44 @@ class MockEFSClient:
     def __init__(self, scenario):
         self.scenario = scenario
         self.exceptions = MockExceptions()
-    
+
+    def describe_replication_configurations(self, FileSystemId):
+        if self.scenario == "replication_destination":
+            # Simulate: queried FS is listed as the Destination → read-only
+            return {
+                'Replications': [
+                    {
+                        'SourceFileSystemId': 'fs-SOURCE1234',
+                        'Destinations': [
+                            {
+                                'FileSystemId': FileSystemId,
+                                'Status': 'ENABLED',
+                                'Region': 'us-east-1'
+                            }
+                        ]
+                    }
+                ]
+            }
+        elif self.scenario == "replication_source":
+            # Simulate: queried FS is the Source (writable), not the destination
+            return {
+                'Replications': [
+                    {
+                        'SourceFileSystemId': FileSystemId,
+                        'Destinations': [
+                            {
+                                'FileSystemId': 'fs-DEST5678',
+                                'Status': 'ENABLED',
+                                'Region': 'us-east-1'
+                            }
+                        ]
+                    }
+                ]
+            }
+        else:
+            # No replication configured
+            return {'Replications': []}
+
     def describe_file_system_policy(self, FileSystemId):
         if self.scenario == "no_policy":
             raise MockPolicyNotFoundException("Policy not found")
@@ -187,6 +224,9 @@ class MockEFSClient:
                     ]
                 })
             }
+        else:
+            # Unknown/unhandled scenario - simulate no policy
+            raise MockPolicyNotFoundException("Policy not found")
 
 
 class MockConfigClient:
@@ -317,6 +357,16 @@ def main():
         {
             'name': 'Non-Compliant Policy (SecureTransport but wrong actions)',
             'scenario': 'non_compliant_wrong_action',
+            'expected': 'NON_COMPLIANT'
+        },
+        {
+            'name': 'Replication Destination (Should be NOT_APPLICABLE)',
+            'scenario': 'replication_destination',
+            'expected': 'NOT_APPLICABLE'
+        },
+        {
+            'name': 'Replication Source (Should still be evaluated - compliant policy)',
+            'scenario': 'replication_source',
             'expected': 'NON_COMPLIANT'
         }
     ]

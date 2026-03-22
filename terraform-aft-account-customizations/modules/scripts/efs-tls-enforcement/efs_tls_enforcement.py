@@ -29,21 +29,24 @@ Valid action patterns for compliance:
 - "elasticfilesystem:Client*" (all client actions)
 - Explicit list containing elasticfilesystem:ClientMount/ClientWrite/ClientRootAccess
 
-AWS BACKUP COPY EXCLUSION:
-When AWS Backup copies an EFS file system to another region, the backup copy:
+EFS REPLICATION DESTINATION EXCLUSION:
+When EFS replication is configured, the destination file system:
 - Is read-only and cannot have a resource policy attached
-- Is automatically tagged with 'aws:backup:source-resource-arn' by AWS Backup
+- Appears as the Destination in the replication configuration
 - Should NOT be evaluated for TLS enforcement (policy attachment is not possible)
 
-This rule skips evaluation and returns NOT_APPLICABLE for any EFS tagged with
-AWS_BACKUP_TAG_KEY (default: 'aws:backup:source-resource-arn').
-To change the tag key, update the AWS_BACKUP_TAG_KEY constant.
+This rule detects replication destinations by calling describe_replication_configurations
+and checking whether the file system ID appears as a Destination entry. If so, the
+file system is read-only and TLS enforcement is NOT_APPLICABLE.
+
+Note: The previous approach of checking the 'aws:backup:source-resource-arn' tag was
+unreliable because this tag can also appear on source (writable) EFS file systems.
 
 EVALUATION FLOW:
 1. Receive Config event for AWS::EFS::FileSystem resource
-2. If resource is deleted           → NOT_APPLICABLE
-3. If resource is an AWS Backup copy → NOT_APPLICABLE (skip TLS check)
-4. Otherwise                        → evaluate TLS policy enforcement
+2. If resource is deleted                     → NOT_APPLICABLE
+3. If resource is a replication destination   → NOT_APPLICABLE (read-only, skip TLS check)
+4. Otherwise                                  → evaluate TLS policy enforcement
 
 COMPLEMENTS:
 - Guard policy (efs-validation) validates encryption-at-rest configuration
@@ -77,12 +80,6 @@ logger.setLevel(logging.INFO)
 # CONSTANTS
 # ============================================================================
 MAX_ANNOTATION_LENGTH = 256  # AWS Config annotation limit
-
-# AWS Backup automatically tags cross-region backup copies with this key.
-# EFS backup copies are read-only and cannot have resource policies, so TLS
-# enforcement is not applicable to them.
-# Change this value if your backup tag key is different.
-AWS_BACKUP_TAG_KEY = 'aws:backup:source-resource-arn'
 
 # ============================================================================
 # LAZY CLIENT INITIALIZATION
@@ -191,11 +188,11 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if configuration_item.get('configurationItemStatus') == 'ResourceDeleted':
             compliance_type = 'NOT_APPLICABLE'
             annotation = 'Resource has been deleted'
-        elif is_aws_backup_copy(resource_id):
-            # AWS Backup cross-region copies are read-only and cannot have resource
-            # policies - TLS enforcement does not apply to these EFS file systems
+        elif is_efs_replication_destination(resource_id):
+            # Replication destination EFS file systems are read-only and cannot have
+            # resource policies - TLS enforcement does not apply to them
             compliance_type = 'NOT_APPLICABLE'
-            annotation = f'EFS is an AWS Backup copy (read-only) - TLS enforcement not applicable'
+            annotation = 'EFS is a replication destination (read-only) - TLS enforcement not applicable'
         else:
             # Evaluate EFS file system policy
             compliance_type, annotation = evaluate_efs_tls_policy(resource_id)
@@ -317,30 +314,46 @@ def submit_not_applicable_evaluation(
     )
 
 
-def is_aws_backup_copy(file_system_id: str) -> bool:
+def is_efs_replication_destination(file_system_id: str) -> bool:
     """
-    Check if EFS file system is an AWS Backup cross-region copy.
+    Check if EFS file system is a replication destination (read-only).
 
-    AWS Backup tags backup copies with 'aws:backup:source-resource-arn'.
-    These EFS copies are read-only and cannot have resource policies attached,
-    so TLS enforcement validation does not apply to them.
+    EFS replication destinations are read-only and cannot have resource policies
+    attached, so TLS enforcement validation does not apply to them.
+
+    Detection method: call describe_replication_configurations with the file system
+    ID and check whether it appears as a Destination entry. The replication tab in
+    the AWS Console shows Source and Destination rows; the Destination file system
+    ID is what we compare against.
+
+    Note: Checking for the 'aws:backup:source-resource-arn' tag is unreliable
+    because this tag can also appear on source (writable) EFS file systems.
 
     Args:
         file_system_id: EFS file system ID
 
     Returns:
-        True if EFS is an AWS Backup copy, False otherwise
+        True if EFS is a replication destination (read-only), False otherwise
     """
     try:
-        response = get_efs_client().list_tags_for_resource(ResourceId=file_system_id)
-        tags = response.get('Tags', [])
-        for tag in tags:
-            if tag.get('Key') == AWS_BACKUP_TAG_KEY:
-                logger.info(f"EFS {file_system_id} is an AWS Backup copy (tag '{AWS_BACKUP_TAG_KEY}' found) - skipping TLS evaluation")
-                return True
+        response = get_efs_client().describe_replication_configurations(
+            FileSystemId=file_system_id
+        )
+        replications = response.get('Replications', [])
+        for replication in replications:
+            for destination in replication.get('Destinations', []):
+                if destination.get('FileSystemId') == file_system_id:
+                    logger.info(
+                        f"EFS {file_system_id} is a replication destination (read-only) "
+                        f"- skipping TLS evaluation"
+                    )
+                    return True
         return False
     except Exception as e:
-        logger.warning(f"Could not check backup tags for {file_system_id}: {str(e)} - proceeding with evaluation")
+        logger.warning(
+            f"Could not check replication config for {file_system_id}: {str(e)} "
+            f"- proceeding with evaluation"
+        )
         return False
 
 
