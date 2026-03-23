@@ -1,13 +1,13 @@
-package terraform.analysis_test
+package terraform.policies.aws_ebs_001_advise_encryption_test
 
-import data.terraform.analysis
+import data.terraform.policies.aws_ebs_001_advise_encryption
 import rego.v1
 
 test_authz_is_true_for_advisory_policy if {
-	analysis.authz with input as {"resource_changes": []}
+	aws_ebs_001_advise_encryption.authz with input as {"resource_changes": []}
 }
 
-test_standalone_ebs_unencrypted_generates_advice if {
+test_standalone_ebs_unencrypted_generates_warn if {
 	tfplan := {
 		"resource_changes": [
 			{
@@ -22,11 +22,11 @@ test_standalone_ebs_unencrypted_generates_advice if {
 		],
 	}
 
-	some msg in analysis.advice with input as tfplan
+	some msg in aws_ebs_001_advise_encryption.warn with input as tfplan
 	contains(msg, "EBS-ENC-001")
 }
 
-test_ec2_root_volume_unencrypted_generates_advice if {
+test_ec2_root_volume_unencrypted_generates_warn if {
 	tfplan := {
 		"resource_changes": [
 			{
@@ -43,11 +43,11 @@ test_ec2_root_volume_unencrypted_generates_advice if {
 		],
 	}
 
-	some msg in analysis.advice with input as tfplan
+	some msg in aws_ebs_001_advise_encryption.warn with input as tfplan
 	contains(msg, "EBS-ENC-002")
 }
 
-test_ec2_attached_ebs_unencrypted_generates_advice if {
+test_ec2_attached_ebs_unencrypted_generates_warn if {
 	tfplan := {
 		"resource_changes": [
 			{
@@ -64,11 +64,11 @@ test_ec2_attached_ebs_unencrypted_generates_advice if {
 		],
 	}
 
-	some msg in analysis.advice with input as tfplan
+	some msg in aws_ebs_001_advise_encryption.warn with input as tfplan
 	contains(msg, "EBS-ENC-003")
 }
 
-test_compliant_resources_have_no_advice if {
+test_compliant_resources_have_no_warn if {
 	tfplan := {
 		"resource_changes": [
 			{
@@ -95,11 +95,10 @@ test_compliant_resources_have_no_advice if {
 		],
 	}
 
-	count(analysis.advice with input as tfplan) == 0
-	analysis.compliant with input as tfplan
-	analysis.score with input as tfplan == 0
+	count(aws_ebs_001_advise_encryption.warn with input as tfplan) == 0
+	aws_ebs_001_advise_encryption.compliant with input as tfplan
+	aws_ebs_001_advise_encryption.score with input as tfplan == 0
 }
-
 
 test_noncompliant_plan_score_matches_finding_count if {
 	tfplan := {
@@ -128,6 +127,6 @@ test_noncompliant_plan_score_matches_finding_count if {
 		],
 	}
 
-	analysis.score with input as tfplan == 3
-	count(analysis.findings with input as tfplan) == 3
+	aws_ebs_001_advise_encryption.score with input as tfplan == 3
+	count(aws_ebs_001_advise_encryption.findings with input as tfplan) == 3
 }

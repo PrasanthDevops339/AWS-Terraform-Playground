@@ -1,4 +1,4 @@
-package terraform.analysis
+package terraform.policies.aws_ebs_001_advise_encryption
 
 import input as tfplan
 import rego.v1
@@ -11,12 +11,12 @@ resource_types := {"aws_ebs_volume", "aws_instance"}
 
 # A plan is considered compliant when no advisory findings are produced.
 compliant if {
-	advisory_count == 0
+	warn_count == 0
 }
 
-# Advisory count can be used as a lightweight score for reporting.
-advisory_count := count(advice)
-score := advisory_count
+# Warn count can be used as a lightweight score for reporting.
+warn_count := count(warn)
+score := warn_count
 
 # List all resources of a supported type.
 resources[resource_type] := matched if {
@@ -40,7 +40,7 @@ ec2_instance_changes contains resource if {
 }
 
 # Advisory 1: Standalone EBS volume should be encrypted.
-advice contains msg if {
+warn contains msg if {
 	some resource in ebs_volume_changes
 	not value_is_true(resource.change.after.encrypted)
 	msg := sprintf(
@@ -50,7 +50,7 @@ advice contains msg if {
 }
 
 # Advisory 2: EC2 root volume should be encrypted when explicitly managed in the plan.
-advice contains msg if {
+warn contains msg if {
 	some resource in ec2_instance_changes
 	some root in object.get(resource.change.after, "root_block_device", [])
 	not value_is_true(root.encrypted)
@@ -61,7 +61,7 @@ advice contains msg if {
 }
 
 # Advisory 3: Additional EBS volumes attached through aws_instance should be encrypted.
-advice contains msg if {
+warn contains msg if {
 	some resource in ec2_instance_changes
 	some device in object.get(resource.change.after, "ebs_block_device", [])
 	not value_is_true(device.encrypted)
@@ -73,7 +73,7 @@ advice contains msg if {
 
 # Structured findings for CI/reporting.
 findings := [finding |
-	some msg in advice
+	some msg in warn
 	finding := {
 		"message": msg,
 		"severity": "LOW",
@@ -90,7 +90,7 @@ metadata := {
 	"category": "encryption",
 	"service": ["ec2", "ebs"],
 	"description": "Advisory Terraform policy for standalone and EC2-attached EBS encryption.",
-	"decision": "terraform/analysis/authz",
+	"decision": "terraform/policies/aws_ebs_001_advise_encryption/authz",
 }
 
 # Helper: only evaluate create/update operations.

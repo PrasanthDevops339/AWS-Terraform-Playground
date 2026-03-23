@@ -1,0 +1,62 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.7.0",
+  "resource_changes": [
+    {
+      "address": "module.efs.aws_efs_file_system.main",
+      "module_address": "module.efs",
+      "mode": "managed",
+      "type": "aws_efs_file_system",
+      "name": "main",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "creation_token": "app-efs-prod",
+          "encrypted": true,
+          "kms_key_id": "arn:aws:kms:us-east-1:123456789012:key/abcd-1234-efgh-5678-ijkl-9012",
+          "performance_mode": "generalPurpose",
+          "throughput_mode": "bursting",
+          "provisioned_throughput_in_mibps": null,
+          "lifecycle_policy": [
+            { "transition_to_ia": "AFTER_30_DAYS" },
+            { "transition_to_primary_storage_class": "AFTER_1_ACCESS" }
+          ],
+          "protection": { "replication_overwrite": "ENABLED" },
+          "tags": {
+            "Name": "prod-app-efs",
+            "Environment": "production",
+            "ManagedBy": "terraform"
+          }
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true
+        }
+      }
+    },
+    {
+      "address": "module.efs.aws_efs_replication_configuration.main[0]",
+      "module_address": "module.efs",
+      "mode": "managed",
+      "type": "aws_efs_replication_configuration",
+      "name": "main",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "source_file_system_id": null,
+          "destination": [
+            {
+              "availability_zone_name": null,
+              "kms_key_id": "arn:aws:kms:us-west-2:123456789012:key/wxyz-9876-mnop-5432",
+              "region": "us-west-2"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

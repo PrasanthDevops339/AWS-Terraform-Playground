@@ -1,18 +1,18 @@
 # ============================================================================
 # OPA Tests: EFS KMS Encryption at Rest Policy
 # ============================================================================
-# Run:  opa test policy/ tests/ -v
+# Run:  opa test . -v
 # ============================================================================
 
-package terraform.efs.encryption_test
+package terraform.policies.aws_efs_001_mandatory_encryption_test
 
 import rego.v1
 
-import data.terraform.efs.encryption
+import data.terraform.policies.aws_efs_001_mandatory_encryption as encryption
 
 # ============================= TEST FIXTURES ================================
 
-# --- COMPLIANT: encrypted + customer-managed KMS key (mirrors your module) ---
+# --- COMPLIANT: encrypted + customer-managed KMS key ---
 mock_compliant := {
 	"resource_changes": [
 		{
@@ -320,4 +320,8 @@ test_metadata_exists if {
 
 test_metadata_severity_high if {
 	encryption.metadata.severity == "HIGH"
+}
+
+test_metadata_enforcement_mandatory if {
+	encryption.metadata.enforcement == "mandatory"
 }

@@ -10,7 +10,7 @@
 # Reference:   https://www.openpolicyagent.org/docs/terraform
 # ============================================================================
 
-package terraform.efs.encryption
+package terraform.policies.aws_efs_001_mandatory_encryption
 
 import rego.v1
 
@@ -116,6 +116,7 @@ metadata := {
 	"name": "efs-kms-encryption-at-rest",
 	"version": "1.0.0",
 	"severity": "HIGH",
+	"enforcement": "mandatory",
 	"category": "encryption",
 	"service": "efs",
 	"framework": ["CIS AWS 2.4.1", "AWS Well-Architected SEC08-BP02"],

@@ -1,0 +1,9 @@
+# Placeholder GitLab CI file recreated from screenshot
+stages:
+  - test
+
+opa_test:
+  stage: test
+  image: openpolicyagent/opa:latest
+  script:
+    - echo "Placeholder pipeline - replace with original commands"
