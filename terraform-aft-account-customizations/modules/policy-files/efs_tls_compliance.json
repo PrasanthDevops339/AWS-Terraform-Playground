@@ -24,7 +24,8 @@
       "Effect": "Allow",
       "Action": [
         "elasticfilesystem:DescribeFileSystemPolicy",
-        "elasticfilesystem:DescribeFileSystems"
+        "elasticfilesystem:DescribeFileSystems",
+        "elasticfilesystem:DescribeReplicationConfigurations"
       ],
       "Resource": "*"
     }
