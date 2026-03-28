@@ -190,8 +190,8 @@ policy "advise_apigwv2_module_usage" {
   description = "Warn not using API Gateway V2 service module"
 }
 
-policy "advise_ebs_encryption" {
+policy "advise_ebs_volume_encryption" {
   query = "data.terraform.policies.aws_ebs_001_advise_encryption.warn"
   enforcement_level = "advisory"
-  description = "Warn EBS volumes and EC2 instances are not using encryption"
+  description = "Warn EBS volume is not encrypted at rest"
 }
