@@ -193,5 +193,5 @@ policy "advise_apigwv2_module_usage" {
 policy "advise_ebs_volume_encryption" {
   query = "data.terraform.policies.aws_ebs_001_advise_encryption.warn"
   enforcement_level = "advisory"
-  description = "Warn EBS volume is not encrypted at rest"
+  description = "Warn EBS volume, EC2 root_block_device, or ebs_block_device is not encrypted at rest"
 }
