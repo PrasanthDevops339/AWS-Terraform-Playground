@@ -59,6 +59,47 @@
           "id": true
         }
       }
+    },
+    {
+      "address": "module.ec2_role.aws_instance.main",
+      "module_address": "module.ec2_role",
+      "mode": "managed",
+      "type": "aws_instance",
+      "name": "main",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "ami": "ami-1234567890abcdef0",
+          "instance_type": "t3.micro",
+          "root_block_device": [
+            {
+              "delete_on_termination": true,
+              "encrypted": true,
+              "volume_size": 80,
+              "volume_type": "gp3",
+              "throughput": 200,
+              "kms_key_id": "arn:aws:kms:us-east-2:590183660495:key/mrk-2982d"
+            }
+          ],
+          "ebs_block_device": [
+            {
+              "delete_on_termination": true,
+              "device_name": "/dev/sdf",
+              "encrypted": true,
+              "volume_size": 10,
+              "volume_type": "gp3",
+              "throughput": 200,
+              "kms_key_id": "arn:aws:kms:us-east-2:590183660495:key/mrk-2982d8681bffb4"
+            }
+          ]
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true
+        }
+      }
     }
   ]
 }
