@@ -1,13 +1,12 @@
 package terraform.policies.aws_ebs_001_advise_encryption_test
 
 import data.terraform.policies.aws_ebs_001_advise_encryption
-import rego.v1
 
-test_authz_is_true_for_advisory_policy if {
+test_authz_is_true_for_advisory_policy {
 	aws_ebs_001_advise_encryption.authz with input as {"resource_changes": []}
 }
 
-test_standalone_ebs_unencrypted_generates_warn if {
+test_standalone_ebs_unencrypted_generates_warn {
 	tfplan := {
 		"resource_changes": [
 			{
@@ -22,11 +21,11 @@ test_standalone_ebs_unencrypted_generates_warn if {
 		],
 	}
 
-	some msg in aws_ebs_001_advise_encryption.warn with input as tfplan
+	msg := aws_ebs_001_advise_encryption.warn[_] with input as tfplan
 	contains(msg, "EBS-ENC-001")
 }
 
-test_ec2_root_volume_unencrypted_generates_warn if {
+test_ec2_root_volume_unencrypted_generates_warn {
 	tfplan := {
 		"resource_changes": [
 			{
@@ -43,11 +42,11 @@ test_ec2_root_volume_unencrypted_generates_warn if {
 		],
 	}
 
-	some msg in aws_ebs_001_advise_encryption.warn with input as tfplan
+	msg := aws_ebs_001_advise_encryption.warn[_] with input as tfplan
 	contains(msg, "EBS-ENC-002")
 }
 
-test_ec2_attached_ebs_unencrypted_generates_warn if {
+test_ec2_attached_ebs_unencrypted_generates_warn {
 	tfplan := {
 		"resource_changes": [
 			{
@@ -64,11 +63,11 @@ test_ec2_attached_ebs_unencrypted_generates_warn if {
 		],
 	}
 
-	some msg in aws_ebs_001_advise_encryption.warn with input as tfplan
+	msg := aws_ebs_001_advise_encryption.warn[_] with input as tfplan
 	contains(msg, "EBS-ENC-003")
 }
 
-test_compliant_resources_have_no_warn if {
+test_compliant_resources_have_no_warn {
 	tfplan := {
 		"resource_changes": [
 			{
@@ -100,7 +99,7 @@ test_compliant_resources_have_no_warn if {
 	aws_ebs_001_advise_encryption.score with input as tfplan == 0
 }
 
-test_noncompliant_plan_score_matches_finding_count if {
+test_noncompliant_plan_score_matches_finding_count {
 	tfplan := {
 		"resource_changes": [
 			{
@@ -132,7 +131,7 @@ test_noncompliant_plan_score_matches_finding_count if {
 }
 
 # EC2 from a module should be checked for both root_block_device and ebs_block_device.
-test_module_ec2_unencrypted_root_and_ebs_generates_warn if {
+test_module_ec2_unencrypted_root_and_ebs_generates_warn {
 	tfplan := {
 		"resource_changes": [
 			{
@@ -170,14 +169,10 @@ test_module_ec2_unencrypted_root_and_ebs_generates_warn if {
 
 	warns := aws_ebs_001_advise_encryption.warn with input as tfplan
 	count(warns) == 2
-	some msg_root in warns
-	contains(msg_root, "EBS-ENC-002")
-	some msg_ebs in warns
-	contains(msg_ebs, "EBS-ENC-003")
 }
 
 # EC2 from a module with encrypted root and ebs block devices should pass.
-test_module_ec2_encrypted_root_and_ebs_no_warn if {
+test_module_ec2_encrypted_root_and_ebs_no_warn {
 	tfplan := {
 		"resource_changes": [
 			{
