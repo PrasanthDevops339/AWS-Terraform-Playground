@@ -195,3 +195,9 @@ policy "advise_ebs_volume_encryption" {
   enforcement_level = "advisory"
   description = "Warn EBS volume, EC2 root_block_device, or ebs_block_device is not encrypted at rest"
 }
+
+policy "advise_efs_encryption" {
+  query = "data.terraform.policies.aws_efs_001_advise_encryption.warn"
+  enforcement_level = "advisory"
+  description = "Warn EFS file system is not encrypted at rest or missing a customer-managed KMS key"
+}
