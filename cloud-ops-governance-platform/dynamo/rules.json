@@ -19,25 +19,24 @@
     "source": "aws_config",
     "id": 3,
     "enabled": false,
-    "description": "Matching on EBS Encryption",
+    "description": "Matching on EBS at-rest encryption",
     "actions_policy": "{\"Action\": {\"Target\": \"servicenow\",\"Type\": \"incident\",\"CallerId\": \"ccops\",\"AssignmentGroup\": \"cmdb:assignment_group\",\"ConfigurationItem\": \"aws_account\",\"Impact\": 2,\"Urgency\": 3}}",
-    "ingest_policy": "{\"ResourceTypes\": [\"AWS::EC2::Volume\"],\"ComplianceType\": \"NON_COMPLIANT\",\"Rules\": [\"ebs-is-encrypted-conformance-pack\"],\"Annotations\": [\"EBS Volumes must be encrypted\"],\"Exclusions\": []}"
+    "ingest_policy": "{\"ResourceTypes\": [\"AWS::EC2::Volume\"],\"ComplianceType\": \"NON_COMPLIANT\",\"Rules\": [\"ebs-is-encrypted\"],\"Annotations\": [\"EBS Volumes must be encrypted\"],\"Exclusions\": []}"
   },
   "item4": {
     "source": "aws_config",
     "id": 4,
     "enabled": false,
-    "description": "Matching on SQS in Rest Encryption",
+    "description": "Matching on SQS at-rest encryption",
     "actions_policy": "{\"Action\": {\"Target\": \"servicenow\",\"Type\": \"incident\",\"CallerId\": \"ccops\",\"AssignmentGroup\": \"cmdb:assignment_group\",\"ConfigurationItem\": \"aws_account\",\"Impact\": 2,\"Urgency\": 3}}",
-    "ingest_policy": "{\"ResourceTypes\": [\"AWS::SQS::Queue\"],\"ComplianceType\": \"NON_COMPLIANT\",\"Rules\": [\"sqs-is-encrypted-conformance-pack\"],\"Annotations\": [\"SQS must be encrypted by SQS-managed (SSE-SQS) or KMS\"]}"
+    "ingest_policy": "{\"ResourceTypes\": [\"AWS::SQS::Queue\"],\"ComplianceType\": \"NON_COMPLIANT\",\"Rules\": [\"sqs-is-encrypted\"],\"Annotations\": [\"SQS must be encrypted\"],\"Exclusions\": []}"
   },
   "item5": {
     "source": "aws_config",
     "id": 5,
     "enabled": true,
-    "description": "Matching on EFS in Rest and in-transit Encryption",
-    "actions_policy": "{\"Action\": {\"Target\": \"servicenow\",\"Type\": \"incident\",\"CallerId\": \"ccops\",\"AssignmentGroup\": \"cmdb:assignment_group\",\"ConfigurationItem\": \"aws_account\",\"Impact\": 2,\"Urgency\": 3,\"Priority\": 4,\"ShortDescription\": \"EFS in Rest Encryption Violations for AWS Account {$ACCOUNT_NAME$} {$ACCOUNT_NUMBER$}\",\"Description\": \"EFS encryption violations have been detected in AWS account {$ACCOUNT_NAME$}.\\nPlease refer to the attached CSV file for a detailed list of non-compliant resources. To remediate, ensure that all listed EFS resources are brought into compliance by enabling encryption in accordance with security standards.\\nFollow the step-by-step remediation guidance outlined in the following knowledge base article : https://sampleurl.com/23rtw4f/3rfwef\"}}",
-    "ingest_policy": "{\"ResourceTypes\": [\"AWS::EFS::FileSystem\"],\"ComplianceType\": \"NON_COMPLIANT\",\"Rules\": [\"efs-is-encrypted-conformance-pack\",\"efatlsenforcement\"],\"Annotations\": [\"EFS's must be encrypted\",\"EFS file system has no policy - TLS enforcement not configured\",\"EFS policy does not enforce TLS for EFS client actions (ClientMount/ClientWrite/ClientRootAccess)\"],\"Exclusions\": [{\"Accounts\": [],\"Regions\": [],\"ResourceTypes\": [],\"ResourceIds\": [],\"ARNs\": []}]}"
+    "description": "Matching on EFS at-rest and in-transit encryption",
+    "actions_policy": "{\"Action\": {\"Target\": \"servicenow\",\"Type\": \"incident\",\"CallerId\": \"ccops\",\"AssignmentGroup\": \"cmdb:assignment_group\",\"ConfigurationItem\": \"aws_account\",\"Impact\": 2,\"Urgency\": 3,\"Priority\": 4,\"ShortDescription\": \"EFS Encryption Violations for AWS Account {$ACCOUNT_NAME$} {$ACCOUNT_NUMBER$}\",\"Description\": \"EFS encryption violations have been detected in AWS account {$ACCOUNT_NAME$}.\\nPlease refer to the attached CSV file for a detailed list of non-compliant resources. To remediate, ensure that all listed EFS resources are brought into compliance by enabling encryption in accordance with security standards.\\nFollow the step-by-step remediation guidance outlined in the following knowledge base article : https://sampleurl.com/23rtw4f/3rfwef\"}}",
+    "ingest_policy": "{\"ResourceTypes\": [\"AWS::EFS::FileSystem\"],\"ComplianceType\": \"NON_COMPLIANT\",\"Rules\": [\"efs-is-encrypted\",\"efstlsenforcement\"],\"Annotations\": [\"EFS's must be encrypted\",\"EFS file system has no policy\",\"EFS policy does not enforce TLS\"],\"Exclusions\": [{\"Accounts\": [],\"Regions\": [],\"ResourceTypes\": [],\"ResourceIds\": [],\"ARNs\": []}]}"
   }
 }
-

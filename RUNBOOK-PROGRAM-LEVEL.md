@@ -1,344 +1,197 @@
 # Program-Level Runbook: AWS Encryption Compliance Controls
-**EBS · SQS · EFS | AWS Config + OPA Policy Governance**
 
----
+EBS, SQS, and EFS | AWS Config, AFT Lambda, OPA, and CCOPS
 
 | Field | Value |
-|---|---|
-| **Document Type** | Program-Level Runbook |
-| **Audience** | Program Managers, Technical Leads, Security & Compliance Stakeholders |
-| **Last Updated** | 2026-04-05 |
-| **Status** | Active |
-| **Jira Epic** | `<!-- PLACEHOLDER: e.g., CLOUD-XXXX -->` |
-| **Confluence** | `<!-- PLACEHOLDER: Link to architecture decision record -->` |
-| **Slack Channel** | `<!-- PLACEHOLDER: #cloud-governance or #security-compliance -->` |
-| **Owners** | `<!-- PLACEHOLDER: Team / Individual -->` |
-
----
-
-## 1. Executive Summary
-
-This runbook describes the **encryption compliance program** enforced across the AWS Organization for three key storage and messaging services:
-
-- **Amazon EBS** – Elastic Block Store volumes and snapshots
-- **Amazon SQS** – Simple Queue Service queues
-- **Amazon EFS** – Elastic File System file systems
-
-Controls are applied at **two layers**:
-
-| Layer | Tool | When | Enforcement |
-|---|---|---|---|
-| **Pre-deployment (IaC)** | OPA (Open Policy Agent) | During `terraform plan` in CI/CD | Advisory (warn) or Mandatory (block) |
-| **Post-deployment (runtime)** | AWS Config + Conformance Packs | Continuous, on resource change | Detect and report non-compliance |
-
----
-
-## 2. Business Justification
-
-| Driver | Details |
-|---|---|
-| **Regulatory** | Encryption at rest and in transit is required under CIS AWS Foundations Benchmark 2.4.1, AWS Well-Architected Framework SEC08-BP02, and internal Data Classification Policy |
-| **Risk Reduction** | Unencrypted storage and queues expose sensitive data to unauthorized access in the event of a breach or misconfiguration |
-| **Audit Readiness** | Continuous AWS Config findings feed directly into audit reports and security dashboards |
-| **Shift-Left** | OPA policies catch non-compliant IaC at PR time — before infrastructure is provisioned — reducing remediation cost |
-
----
-
-## 3. Scope
-
-### 3.1 Services Covered
-
-| Service | Resource Type | Control Applied |
-|---|---|---|
-| EBS | `AWS::EC2::Volume`, `AWS::EC2::Snapshot` | Encryption at rest (Guard + OPA) |
-| SQS | `AWS::SQS::Queue` | Encryption at rest — SSE-SQS or KMS (Guard) |
-| EFS | `AWS::EFS::FileSystem` | Encryption at rest (Guard + OPA), KMS CMK (OPA), TLS in-transit policy (Lambda) |
-| EFS Replication | `aws_efs_replication_configuration` | Destination KMS CMK (OPA Mandatory) |
-
-### 3.2 Organizational Reach
-
-- **AWS Config rules** deploy as **Organization Conformance Packs** — covering all member accounts in the AWS Organization.
-- Accounts explicitly excluded from org packs (e.g., sandbox/test accounts with Config not enabled) are tracked in the `excluded_accounts` list in Terraform.
-- **AFT Lambda rules** deploy per-account during the Account Factory for Terraform customization pipeline.
+| --- | --- |
+| Document Type | Program-Level Runbook |
+| Audience | Program Managers, Cloud Governance Leads, Security and Compliance Leads, Platform Owners |
+| Last Updated | 2026-04-05 |
+| Status | Active |
+| Primary Repository | `AWS-Terraform-Playground` |
+| Jira Epic | `<!-- PLACEHOLDER: CLOUD-XXXX -->` |
+| Confluence / ADR | `<!-- PLACEHOLDER -->` |
+| Slack Channel | `<!-- PLACEHOLDER -->` |
+| Program Owner | `<!-- PLACEHOLDER -->` |
+
+## 1. Purpose
 
-### 3.3 Regions
-
-Rules are deployed in both:
-- `us-east-2` (USE2) — primary
-- `us-east-1` (USE1) — secondary
-
----
-
-## 4. Control Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    DEVELOPER WORKFLOW                           │
-│                                                                 │
-│  Write Terraform  ──►  terraform plan  ──►  OPA Evaluation      │
-│  (IaC in GitLab)        (CI Pipeline)       (Shift-Left Gate)   │
-│                                               │                 │
-│                                      Advisory │ Mandatory       │
-│                                        warn   │  BLOCK          │
-└───────────────────────────────────────────────┼─────────────────┘
-                                                │
-┌───────────────────────────────────────────────▼─────────────────┐
-│                    AWS ORGANIZATION                             │
-│                                                                 │
-│  terraform apply  ──►  Resource Created  ──►  AWS Config        │
-│  (Provisioned)                               Conformance Pack   │
-│                                               │                 │
-│                              Guard Rules      │  Lambda Rules   │
-│                          (at-rest encrypt)    │  (TLS policy)   │
-│                                               │                 │
-│                               COMPLIANT / NON-COMPLIANT result  │
-│                                               │                 │
-│                          Security Hub / CloudWatch / Dashboard  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 5. Repository Alignment
-
-### 5.1 custom-config-rules — Organization Config Rules
-
-**Repository:** `AWS-Terraform-Playground/custom-config-rules`
-**Purpose:** Deploys Guard-based AWS Config rules as Organization Conformance Packs across all accounts.
-
-| Path | Purpose |
-|---|---|
-| `environments/prd/` | Production deployment — runs from management/delegated admin account |
-| `environments/dev/` | Development/testing deployment |
-| `modules/conformance_pack/` | Reusable Terraform module for building and deploying conformance packs |
-| `policies/ebs-is-encrypted/` | Guard policy for EBS encryption |
-| `policies/sqs-is-encrypted/` | Guard policy for SQS encryption |
-| `policies/efs-is-encrypted/` | Guard policy for EFS at-rest encryption |
-
-**Key Design Decision:** Guard rules (`.guard` files) are stored separately from infrastructure code. At deploy time, Terraform reads the `.guard` file contents, inlines them into a CloudFormation YAML template, and submits it as an Organization Conformance Pack. This means:
-- Guard rules are versioned by date (e.g., `ebs-is-encrypted-2026-01-09.guard`)
-- Deploying a new version requires updating the `config_rule_version` variable and running `terraform apply`
-
-### 5.2 terraform-aft-account-customizations — Lambda Rules via AFT
-
-**Repository:** `AWS-Terraform-Playground/terraform-aft-account-customizations`
-**Purpose:** Deploys Lambda-based custom Config rules to **each individual account** during AFT account vending.
-
-| Path | Purpose |
-|---|---|
-| `exceptions/terraform/` | Per-account Terraform customizations applied by AFT pipeline |
-| `modules/lambda/` | Reusable Lambda deployment module (IAM, S3, CloudWatch, SNS) |
-| `modules/scripts/efs-tls-enforcement/` | Python Lambda function for EFS TLS policy validation |
-| `modules/policy-files/efs_tls_compliance.json` | IAM policy granting Lambda permissions to evaluate EFS |
-
-**Why Lambda instead of Guard for EFS TLS?**
-
-Guard policies can only evaluate data present in the AWS Config configuration item. EFS resource policies (which enforce TLS / `aws:SecureTransport`) are **not included** in Config items — they require an API call (`elasticfilesystem:DescribeFileSystemPolicy`). Lambda enables complex JSON policy parsing and conditional evaluation that Guard DSL cannot express.
-
-**AFT Deployment Flow:**
-1. A new account is vended through Account Factory
-2. AFT runs the `exceptions/terraform/` customization pipeline
-3. Lambda function is packaged and deployed to the account
-4. Account-level conformance pack is created referencing the Lambda ARN
-5. AWS Config invokes the Lambda on each `AWS::EFS::FileSystem` change event
-
-### 5.3 Terrafrom-OPA-Prasanth — Shift-Left IaC Policies
-
-**Repository:** `AWS-Terraform-Playground/Terrafrom-OPA-Prasanth`
-**Purpose:** OPA policies evaluated against `terraform plan` JSON output in GitLab CI before any `terraform apply`.
-
-| Path | Purpose |
-|---|---|
-| `global-advisory-policies/` | Advisory policies — warn, never block |
-| `global-manadatery-policies/` | Mandatory policies — block the pipeline |
-| `global-advisory-policies/policies.hcl` | Registry of all advisory policy queries |
-| `global-manadatery-policies/policies.hcl` | Registry of all mandatory policy queries |
-
----
-
-## 6. What Each Control Detects
-
-### 6.1 EBS — Elastic Block Store
-
-| Control | Type | Finding Code | Condition Detected | Enforcement |
-|---|---|---|---|---|
-| AWS Config Guard | Runtime | — | `AWS::EC2::Volume` not encrypted | NON_COMPLIANT |
-| AWS Config Guard | Runtime | — | `AWS::EC2::Snapshot` not encrypted | NON_COMPLIANT |
-| OPA Advisory | Pre-deploy | `EBS-ENC-001` | `aws_ebs_volume` missing `encrypted = true` | WARN |
-| OPA Advisory | Pre-deploy | `EBS-ENC-002` | EC2 `root_block_device` not encrypted | WARN |
-| OPA Advisory | Pre-deploy | `EBS-ENC-003` | EC2 `ebs_block_device` not encrypted | WARN |
-
-### 6.2 SQS — Simple Queue Service
-
-| Control | Type | Finding Code | Condition Detected | Enforcement |
-|---|---|---|---|---|
-| AWS Config Guard | Runtime | — | Queue has neither `sqsManagedSseEnabled = true` nor a `kmsMasterKeyId` set | NON_COMPLIANT |
-
-> **Note:** SQS is covered at runtime (Config). An OPA shift-left policy for SQS is a **planned addition** — see Section 9.
-
-### 6.3 EFS — Elastic File System
-
-| Control | Type | Finding Code | Condition Detected | Enforcement |
-|---|---|---|---|---|
-| AWS Config Guard | Runtime | — | `AWS::EFS::FileSystem` not encrypted at rest | NON_COMPLIANT |
-| AWS Config Lambda | Runtime | — | EFS resource policy does not contain `Deny` with `aws:SecureTransport = false` | NON_COMPLIANT |
-| OPA Advisory | Pre-deploy | `EFS-ENC-001` | `aws_efs_file_system` missing `encrypted = true` | WARN |
-| OPA Advisory | Pre-deploy | `EFS-ENC-002` | EFS encrypted but no customer-managed KMS key | WARN |
-| OPA Advisory | Pre-deploy | `EFS-ENC-003` | `kms_key_id` is not a valid ARN (`arn:aws:kms:...`) | WARN |
-| OPA Advisory | Pre-deploy | `EFS-ENC-004` | Replication destination missing KMS key | WARN |
-| OPA Mandatory | Pre-deploy | `EFS-ENC-001` | `aws_efs_file_system` not encrypted — **BLOCKS plan** | DENY |
-| OPA Mandatory | Pre-deploy | `EFS-ENC-002` | EFS encrypted but no CMK — **BLOCKS plan** | DENY |
-| OPA Mandatory | Pre-deploy | `EFS-ENC-003` | Invalid KMS ARN format — **BLOCKS plan** | DENY |
-| OPA Mandatory | Pre-deploy | `EFS-ENC-004` | Replication destination missing CMK — **BLOCKS plan** | DENY |
-
----
-
-## 7. Compliance Frameworks Referenced
-
-| Framework | Control | Applies To |
-|---|---|---|
-| CIS AWS Foundations Benchmark v2.4.1 | Encryption at rest | EBS, EFS, SQS |
-| AWS Well-Architected Framework SEC08-BP02 | Protect data at rest | All services |
-| Internal Data Classification Policy | `<!-- PLACEHOLDER: Policy reference -->` | All services |
-| SOC 2 Type II CC6.1 | Logical access and encryption | EBS, EFS |
-
----
-
-## 8. Jira Alignment
-
-### 8.1 Epic Structure (Template)
-
-```
-Epic: AWS Encryption Compliance Controls  [CLOUD-XXXX]
-├── Story: EBS Encryption Org Config Rules          [CLOUD-XXXX]
-│   ├── Task: Guard policy – EBS at-rest            [CLOUD-XXXX]
-│   └── Task: OPA advisory policy – EBS             [CLOUD-XXXX]
-├── Story: SQS Encryption Org Config Rules          [CLOUD-XXXX]
-│   └── Task: Guard policy – SQS SSE/KMS            [CLOUD-XXXX]
-├── Story: EFS Encryption Controls                  [CLOUD-XXXX]
-│   ├── Task: Guard policy – EFS at-rest            [CLOUD-XXXX]
-│   ├── Task: Lambda rule – EFS TLS in-transit      [CLOUD-XXXX]
-│   ├── Task: OPA advisory policy – EFS             [CLOUD-XXXX]
-│   └── Task: OPA mandatory policy – EFS            [CLOUD-XXXX]
-└── Story: AFT Integration – Lambda rule deployment [CLOUD-XXXX]
-```
-
-> **Placeholder Instructions:** Replace all `[CLOUD-XXXX]` with your actual Jira ticket IDs. Align Stories to your program increment (PI) objectives.
-
-### 8.2 Definition of Done (per Story)
-
-- [ ] Guard/Lambda/OPA policy code reviewed and merged to `main`
-- [ ] Deployed to `dev` environment and validated
-- [ ] Organization Conformance Pack deployed to `prd` (management account)
-- [ ] Non-compliant resources identified and tracked for remediation
-- [ ] Runbook updated
-- [ ] Stakeholder sign-off received
-
----
-
-## 9. CCOPS — Cloud Ops Governance Platform Integration
-
-**Repository:** `AWS-Terraform-Playground/cloud-ops-governance-platform`
-
-CCOPS is the centralized compliance operations platform that ingests AWS Config findings, matches them against configurable policy rules stored in DynamoDB, and raises automated ServiceNow incidents for non-compliant resources.
-
-### 9.1 How CCOPS Works
-
-```
-AWS Config (NON_COMPLIANT findings)
-        │
-        ▼  CSV export uploaded to S3 (raw/)
-complianceIngestLambda  ──►  MySQL RDS (ingest table)
-                                    │
-                       EventBridge Scheduler
-                                    │
-                                    ▼
-              complianceRulesExecutionLambda
-                 reads DynamoDB (enabled rules)
-                 matches ingest rows to rules
-                 writes CSV to S3 (processed/)
-                 writes to MySQL (actions table)
-                                    │
-                                    ▼
-              serviceNowEventManagerLambda  ──►  ServiceNow Incident
-```
-
-### 9.2 DynamoDB Rules Table
-
-**Table:** `ccops-policy-engine-rules`
-**Source:** [cloud-ops-governance-platform/dynamo/rules.json](cloud-ops-governance-platform/dynamo/rules.json)
-**Managed by:** Terraform — `dynamodb.tf` loads `rules.json` and writes each item to the table at deploy time.
-
-Each rule has two key fields:
-
-- **`ingest_policy`** — filter criteria (which resource types, Config rule names, annotations to match)
-- **`actions_policy`** — what ServiceNow action to take when a match is found
-
-### 9.3 Encryption Rules in CCOPS
-
-| Rule ID | Description | Enabled | ServiceNow Impact/Urgency |
-|---|---|---|---|
-| `3` | EBS Encryption violations | **false** (disabled) | Impact 2 / Urgency 3 |
-| `4` | SQS At-Rest Encryption violations | **false** (disabled) | Impact 2 / Urgency 3 |
-| `5` | EFS At-Rest + In-Transit Encryption violations | **true** (active) | Impact 2 / Urgency 3 / Priority 4 |
-
-> **Note:** Rules 3 and 4 (EBS and SQS) are currently `enabled: false`. They exist in the DynamoDB table and are ready to activate. Enabling them will begin generating ServiceNow incidents for non-compliant EBS volumes and SQS queues. See Section 9 of the Operations Runbook for activation steps.
-
-### 9.4 EFS Rule — ServiceNow Incident Template (item5)
-
-When EFS non-compliance is detected, CCOPS raises a ServiceNow incident with:
-
-- **Short Description:** `EFS in Rest Encryption Violations for AWS Account {$ACCOUNT_NAME$} {$ACCOUNT_NUMBER$}`
-- **Description:** Lists non-compliant EFS resources with a link to the KB remediation article
-- **Assignment Group:** `cmdb:assignment_group`
-- **Caller ID:** `ccops`
-- **Impact:** 2 | **Urgency:** 3 | **Priority:** 4
-
-The EFS rule matches on **two Config rule names** simultaneously:
-
-- `efs-is-encrypted-conformance-pack` — at-rest encryption (Guard rule)
-- `efatlsenforcement` — TLS in-transit enforcement (Lambda rule)
-
-This means a **single CCOPS rule aggregates both encryption dimensions** into one ServiceNow incident per account.
-
-### 9.5 Jira Alignment — CCOPS
+This runbook defines the program-level operating model for encryption compliance controls covering:
+
+- Amazon EBS
+- Amazon SQS
+- Amazon EFS
+
+It standardizes:
+
+- Which repositories own which control layers
+- What each control detects
+- How work should be split in Jira
+- What evidence is required for delivery and audit
+- Which implementation gaps are still open
+
+## 2. Scope
+
+### 2.1 In Scope
+
+| Area | Repository | Purpose |
+| --- | --- | --- |
+| Org runtime controls | `custom-config-rules` | Guard-based AWS Config rules for EBS, SQS, and EFS at-rest checks |
+| Account runtime controls | `terraform-aft-account-customizations` | AFT-driven EFS TLS Lambda rule and account-level conformance pack |
+| Shift-left controls | `Terrafrom-OPA-Prasanth` | OPA advisory and mandatory Terraform plan checks |
+| Operational incident routing | `cloud-ops-governance-platform` | DynamoDB-backed CCOPS rule definitions and ServiceNow actions |
+
+### 2.2 Scope Note
+
+`custom-config-rules` also contains Lambda rule support and an organization-level EFS TLS implementation. Per the requested program model for this runbook, that path is excluded from the primary ownership narrative. This document treats:
+
+- `custom-config-rules` as the org Guard-rule source of truth
+- `terraform-aft-account-customizations` as the Lambda-rule source of truth
+
+### 2.3 Services and Control Layers
+
+| Service | Runtime Detection | Shift-Left Detection | Operational Routing |
+| --- | --- | --- | --- |
+| EBS | AWS Config Guard | OPA advisory | CCOPS `item3` |
+| SQS | AWS Config Guard | Not implemented for encryption | CCOPS `item4` |
+| EFS | AWS Config Guard and AFT Lambda | OPA advisory and mandatory | CCOPS `item5` |
+
+## 3. Control Architecture
+
+| Layer | Trigger | Implementation | Outcome |
+| --- | --- | --- | --- |
+| Pre-deployment | `terraform plan` in CI | OPA policies in `Terrafrom-OPA-Prasanth` | Warn or block before apply |
+| Post-deployment, org-wide | AWS Config resource evaluation | Guard rules in `custom-config-rules` | `COMPLIANT` or `NON_COMPLIANT` findings |
+| Post-deployment, per account | AFT customization pipeline | Lambda rule in `terraform-aft-account-customizations` | `COMPLIANT`, `NON_COMPLIANT`, or `NOT_APPLICABLE` findings |
+| Incident generation | Scheduled compliance processing | CCOPS rules in `cloud-ops-governance-platform` | ServiceNow incidents or updates |
+
+## 4. What We Detect and How
+
+### 4.1 EBS
+
+| Control | What Is Detected | How |
+| --- | --- | --- |
+| AWS Config Guard | Unencrypted EBS volumes | Guard file `custom-config-rules/policies/ebs-is-encrypted/ebs-is-encrypted-2026-01-09.guard` checks `configuration.encrypted == true` |
+| OPA advisory | Unencrypted `aws_ebs_volume`, `aws_instance.root_block_device`, and `aws_instance.ebs_block_device` | Rego policy `global-advisory-policies/aws_ebs_001_advise_encryption.rego` |
+| CCOPS | Runtime EBS non-compliance for incident generation | `cloud-ops-governance-platform/dynamo/rules.json` `item3` |
+
+### 4.2 SQS
+
+| Control | What Is Detected | How |
+| --- | --- | --- |
+| AWS Config Guard | Queues without SSE-SQS or SSE-KMS | Guard file `custom-config-rules/policies/sqs-is-encrypted/sqs-is-encrypted-2025-10-30.guard` |
+| OPA | No SQS encryption policy implemented today | Gap |
+| CCOPS | Runtime SQS non-compliance for incident generation | `cloud-ops-governance-platform/dynamo/rules.json` `item4` |
+
+### 4.3 EFS
+
+| Control | What Is Detected | How |
+| --- | --- | --- |
+| AWS Config Guard | EFS not encrypted at rest | Guard file `custom-config-rules/policies/efs-is-encrypted/efs-is-encrypted-2025-10-30.guard` |
+| AFT Lambda | EFS policy does not enforce TLS for client actions, or no usable policy exists | Lambda `terraform-aft-account-customizations/modules/scripts/efs-tls-enforcement/efs_tls_enforcement.py` calls `DescribeFileSystemPolicy` and `DescribeReplicationConfigurations` |
+| OPA advisory | Missing `encrypted`, missing `kms_key_id`, invalid KMS ARN, missing replication destination KMS key | `global-advisory-policies/aws_efs_001_advise_encryption.rego` |
+| OPA mandatory | Same EFS encryption and KMS checks, but blocking | `global-manadatery-policies/aws_efs_001_mandatory_encryption.rego` |
+| CCOPS | Runtime EFS non-compliance for incident generation | `cloud-ops-governance-platform/dynamo/rules.json` `item5` |
+
+## 5. Repository Ownership Model
+
+| Repository | Program Responsibility | Deployment Model | Program Output |
+| --- | --- | --- | --- |
+| `custom-config-rules` | Org Guard-rule definitions, versions, exclusions, and conformance-pack rollout | Manual Terraform plan/apply from the management or delegated admin account | AWS Config org conformance pack |
+| `terraform-aft-account-customizations` | EFS TLS Lambda packaging, IAM, and account-level conformance pack | AFT account customization pipeline | Per-account Lambda-based Config rule |
+| `Terrafrom-OPA-Prasanth` | Rego policies, registry entries, tests, and CI enforcement levels | CI evaluation during Terraform plan | Advisory or blocking policy decisions |
+| `cloud-ops-governance-platform` | Rule-to-incident mapping and ServiceNow action configuration | Terraform writes `rules.json` into DynamoDB | Enabled CCOPS rules and incident templates |
+
+## 6. Current Program State and Gaps
+
+| Area | Current State | Program Impact | Jira Placeholder |
+| --- | --- | --- | --- |
+| EBS runtime scope | `cpack_encryption.tf` scopes EBS to `AWS::EC2::Volume` and `AWS::EC2::Snapshot`, but the active Guard file only evaluates `AWS::EC2::Volume` | Snapshot compliance is not actually implemented in the Guard logic | `<!-- PLACEHOLDER -->` |
+| SQS shift-left | No SQS encryption Rego policy exists | SQS is runtime-only for encryption today | `<!-- PLACEHOLDER -->` |
+| SQS module usage | `policies.hcl` references `aws_sqs_001_advise_module_usage.warn`, but no corresponding `.rego` file exists | Registry entry is not backed by an implementation file | `<!-- PLACEHOLDER -->` |
+| EFS module usage | `aws_efs_001_advise_module_usage.rego` is a placeholder package only | Advisory exists only on paper, not as usable policy logic | `<!-- PLACEHOLDER -->` |
+| EBS advisory repo health | `aws_ebs_001_advise_encryption.rego` currently contains unresolved merge conflict markers | CI reliability for EBS advisory must be treated as at risk until corrected | `<!-- PLACEHOLDER -->` |
+| CCOPS routing | Rules for EBS, SQS, and EFS exist in `rules.json`; EBS and SQS are disabled, EFS is enabled | Incident routing is partly active and partly staged | `<!-- PLACEHOLDER -->` |
+
+## 7. Jira Allotment Template
+
+Use one epic with four story groups so ownership is clear across runtime, shift-left, and operations.
 
 ```text
-Story: CCOPS Rule Activation — EBS/SQS/EFS Encryption    [CLOUD-XXXX]
-├── Task: Enable item3 (EBS) — validate, set enabled=true   [CLOUD-XXXX]
-├── Task: Enable item4 (SQS) — validate, set enabled=true   [CLOUD-XXXX]
-├── Task: Confirm item5 (EFS) operating correctly           [CLOUD-XXXX]
-└── Task: Add exclusions for known exceptions (EBS/SQS)     [CLOUD-XXXX]
+Epic: AWS Encryption Compliance Controls [CLOUD-XXXX]
+|
++-- Story: Org Guard Rules - EBS, SQS, EFS [CLOUD-XXXX]
+|   +-- Task: Review active Guard file versions [CLOUD-XXXX]
+|   +-- Task: Update conformance-pack entries in prd/use1/use2 [CLOUD-XXXX]
+|   +-- Task: Review excluded accounts and evidence [CLOUD-XXXX]
+|
++-- Story: AFT Lambda Rule - EFS TLS [CLOUD-XXXX]
+|   +-- Task: Update Lambda code or IAM policy if needed [CLOUD-XXXX]
+|   +-- Task: Validate conformance-pack template output [CLOUD-XXXX]
+|   +-- Task: Re-run AFT customization for target accounts [CLOUD-XXXX]
+|
++-- Story: OPA Controls and Placeholders [CLOUD-XXXX]
+|   +-- Task: Correct EBS advisory repo issue [CLOUD-XXXX]
+|   +-- Task: Decide whether to implement SQS encryption policy [CLOUD-XXXX]
+|   +-- Task: Decide whether to implement EFS and SQS module-usage policies [CLOUD-XXXX]
+|
++-- Story: CCOPS Rule Mapping [CLOUD-XXXX]
+    +-- Task: Maintain `rules.json` for items 3, 4, and 5 [CLOUD-XXXX]
+    +-- Task: Validate DynamoDB item content after apply [CLOUD-XXXX]
+    +-- Task: Confirm ServiceNow ticket behavior [CLOUD-XXXX]
 ```
 
----
+## 8. Definition of Done
 
-## 10. Roadmap / Backlog Items
+### 8.1 Story Exit Criteria
 
-| Item | Status | Priority | Jira |
-|---|---|---|---|
-| OPA advisory policy for SQS encryption (shift-left) | `<!-- PLACEHOLDER: TODO / In Progress / Done -->` | Medium | `<!-- PLACEHOLDER -->` |
-| OPA mandatory policy for EBS encryption | `<!-- PLACEHOLDER -->` | High | `<!-- PLACEHOLDER -->` |
-| AWS Managed Rules evaluation for EFS (`EFS_ENCRYPTED_CHECK`) | Placeholder — commented out in code | Low | `<!-- PLACEHOLDER -->` |
-| Security Hub integration for Config findings | `<!-- PLACEHOLDER -->` | High | `<!-- PLACEHOLDER -->` |
-| Automated remediation (SSM Automation / Lambda) | `<!-- PLACEHOLDER -->` | Medium | `<!-- PLACEHOLDER -->` |
-| Additional regions beyond USE1/USE2 | `<!-- PLACEHOLDER -->` | Medium | `<!-- PLACEHOLDER -->` |
+- Code change is merged to the owning repository.
+- Terraform plan has been reviewed and attached to the ticket.
+- Runtime controls have been deployed in the correct environment.
+- OPA changes, if any, have been evaluated or tested.
+- CCOPS rule data has been validated in DynamoDB when changed.
+- Runbook references stay current.
+- Evidence links are attached to Jira.
 
----
+### 8.2 Required Evidence
 
-## 10. Contacts and Escalation
+- Git commit or PR link
+- Terraform plan and apply output or deployment job link
+- AWS Config verification screenshot or CLI output
+- OPA evaluation output for shift-left changes
+- DynamoDB item verification for CCOPS changes
+- ServiceNow incident or dry-run evidence when CCOPS behavior changes
 
-| Role | Name / Team | Contact |
-|---|---|---|
+## 9. CCOPS Program Mapping
+
+| CCOPS Rule | Service | Status in `rules.json` | Program Meaning |
+| --- | --- | --- | --- |
+| `item3` / `id=3` | EBS | `enabled: false` | Defined but not actively routing incidents |
+| `item4` / `id=4` | SQS | `enabled: false` | Defined but not actively routing incidents |
+| `item5` / `id=5` | EFS | `enabled: true` | Active incident rule for EFS encryption findings |
+
+Program teams should treat CCOPS enablement as a separate rollout decision from Guard-rule or Lambda-rule deployment.
+
+## 10. Change Governance Flow
+
+1. Open or link the Jira epic and story.
+2. Change the source repository first.
+3. Validate deployment and evidence in the owning control plane.
+4. Update `rules.json` only when incident routing behavior changes.
+5. Attach evidence and approvals.
+6. Update this runbook and the operations runbook in the same change window.
+
+## 11. Contacts and Approvals
+
+| Role | Owner | Contact |
+| --- | --- | --- |
 | Program Owner | `<!-- PLACEHOLDER -->` | `<!-- PLACEHOLDER -->` |
 | Cloud Governance Lead | `<!-- PLACEHOLDER -->` | `<!-- PLACEHOLDER -->` |
-| Security / Compliance | `<!-- PLACEHOLDER -->` | `<!-- PLACEHOLDER -->` |
-| On-Call (AWS Issues) | `<!-- PLACEHOLDER -->` | `<!-- PLACEHOLDER -->` |
+| Security Reviewer | `<!-- PLACEHOLDER -->` | `<!-- PLACEHOLDER -->` |
+| Platform Operations | `<!-- PLACEHOLDER -->` | `<!-- PLACEHOLDER -->` |
 
----
+## 12. Document History
 
-## 11. Document History
-
-| Version | Date | Author | Change |
-|---|---|---|---|
-| 1.0 | 2026-04-05 | `<!-- PLACEHOLDER -->` | Initial creation |
+| Version | Date | Change |
+| --- | --- | --- |
+| 2.0 | 2026-04-05 | Rewritten to align with the actual repository layout, current rule implementations, Jira allocation needs, CCOPS rule ownership, and known gaps |
