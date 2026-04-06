@@ -9,6 +9,9 @@ EBS, SQS, and EFS | AWS Config, AFT Lambda, OPA, and CCOPS
 | Last Updated | 2026-04-05 |
 | Status | Active |
 | Primary Repository | `AWS-Terraform-Playground` |
+| Combined Runbook | [RUNBOOK-COMBINED.md](./RUNBOOK-COMBINED.md) |
+| Operations Runbook | [RUNBOOK-OPERATIONS.md](./RUNBOOK-OPERATIONS.md) |
+| Low-Level Runbook | [RUNBOOK-LOW-LEVEL.md](./RUNBOOK-LOW-LEVEL.md) |
 | Jira Epic | `<!-- PLACEHOLDER: CLOUD-XXXX -->` |
 | Confluence / ADR | `<!-- PLACEHOLDER -->` |
 | Slack Channel | `<!-- PLACEHOLDER -->` |
