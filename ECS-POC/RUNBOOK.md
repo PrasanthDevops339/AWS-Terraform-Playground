@@ -1,90 +1,98 @@
-# ECS Fargate Service — Operational Runbook
+# ECS Fargate POC Runbook
+
+This runbook is a generic operational reference for the local ECS Fargate POC.
+Replace placeholder names such as `my-cluster`, `my-service`, and `/ecs/my-app`
+with the actual values from your environment.
 
 ## Quick Reference
 
-| Item | Value |
-|---|---|
-| **Cluster** | `my-api` |
-| **Service** | `my-api` |
-| **Log Group** | `/ecs/my-api` |
-| **Exec Log Group** | `/ecs/my-api/exec` |
-| **Alarm SNS Topic** | `my-api-ecs-alerts` |
+Track these values before an incident:
 
----
+- cluster name
+- service name
+- task definition family
+- application log group
+- exec log group
+- deployment alarm names
 
 ## Common Operations
 
-### 1. Check Service Status
+## Check Service Status
 
 ```bash
 aws ecs describe-services \
-  --cluster my-api \
-  --services my-api \
-  --query 'services[0].{Status:status,Running:runningCount,Desired:desiredCount,Deployments:deployments[*].{Id:id,Status:rolloutState,TaskDef:taskDefinition}}' \
+  --cluster my-cluster \
+  --services my-service \
+  --query 'services[0].{Status:status,Running:runningCount,Desired:desiredCount,Deployments:deployments[*].{Id:id,Rollout:rolloutState,TaskDef:taskDefinition}}' \
   --output table
 ```
 
-### 2. ECS Exec — Shell into a Running Container
+## List Running Tasks
 
 ```bash
-# List running tasks
-aws ecs list-tasks --cluster my-api --service-name my-api --desired-status RUNNING
+aws ecs list-tasks \
+  --cluster my-cluster \
+  --service-name my-service \
+  --desired-status RUNNING
+```
 
-# Exec into a task
+## ECS Exec Into A Running Container
+
+```bash
 aws ecs execute-command \
-  --cluster my-api \
+  --cluster my-cluster \
   --task <TASK_ID> \
-  --container api \
+  --container app \
   --interactive \
   --command "/bin/sh"
 ```
 
-### 3. Force New Deployment (No Code Change)
+## Force A New Deployment
 
 ```bash
 aws ecs update-service \
-  --cluster my-api \
-  --service my-api \
+  --cluster my-cluster \
+  --service my-service \
   --force-new-deployment
 ```
 
-### 4. Scale Service Manually
+## Scale Service Manually
 
 ```bash
 aws ecs update-service \
-  --cluster my-api \
-  --service my-api \
+  --cluster my-cluster \
+  --service my-service \
   --desired-count 5
 ```
 
-### 5. View Recent Logs
+## Tail Logs
 
 ```bash
-aws logs tail /ecs/my-api --follow --since 30m
+aws logs tail /ecs/my-app --follow --since 30m
 ```
 
-### 6. Check Deployment Circuit Breaker Events
+## Review Recent ECS Service Events
 
 ```bash
 aws ecs describe-services \
-  --cluster my-api \
-  --services my-api \
+  --cluster my-cluster \
+  --services my-service \
   --query 'services[0].events[:10]' \
   --output table
 ```
 
----
+## ECS-Native Deployment Operations
 
-## ECS-Native Deployment Operations (B/G, Linear, Canary)
+These examples assume the service is using the ECS deployment controller and
+the AWS provider-side deployment strategy features.
 
-### 7. Trigger Blue/Green Deployment (AWS CLI)
+## Trigger Blue/Green
 
 ```bash
-# Register new task definition, then:
 aws ecs update-service \
-  --cluster my-api \
-  --service my-api \
-  --task-definition my-api:42 \
+  --cluster my-cluster \
+  --service my-service \
+  --task-definition my-service:42 \
   --deployment-configuration '{
     "strategy": "BLUE_GREEN",
     "deploymentCircuitBreaker": {"enable": true, "rollback": true},
@@ -93,13 +101,13 @@ aws ecs update-service \
   --force-new-deployment
 ```
 
-### 8. Trigger Linear Deployment
+## Trigger Linear
 
 ```bash
 aws ecs update-service \
-  --cluster my-api \
-  --service my-api \
-  --task-definition my-api:42 \
+  --cluster my-cluster \
+  --service my-service \
+  --task-definition my-service:42 \
   --deployment-configuration '{
     "strategy": "LINEAR",
     "deploymentCircuitBreaker": {"enable": true, "rollback": true},
@@ -112,13 +120,13 @@ aws ecs update-service \
   --force-new-deployment
 ```
 
-### 9. Trigger Canary Deployment
+## Trigger Canary
 
 ```bash
 aws ecs update-service \
-  --cluster my-api \
-  --service my-api \
-  --task-definition my-api:42 \
+  --cluster my-cluster \
+  --service my-service \
+  --task-definition my-service:42 \
   --deployment-configuration '{
     "strategy": "CANARY",
     "deploymentCircuitBreaker": {"enable": true, "rollback": true},
@@ -131,109 +139,99 @@ aws ecs update-service \
   --force-new-deployment
 ```
 
-### 10. Monitor Active B/G Deployment
+## Monitor Active Deployment
 
 ```bash
-# Watch deployment progress
 watch -n5 'aws ecs describe-services \
-  --cluster my-api \
-  --services my-api \
+  --cluster my-cluster \
+  --services my-service \
   --query "services[0].deployments[*].{
-    Id:id, Status:status, RolloutState:rolloutState,
-    Running:runningCount, Desired:desiredCount,
-    TaskDef:taskDefinition, Strategy:strategy}" \
+    Id:id,Status:status,RolloutState:rolloutState,
+    Running:runningCount,Desired:desiredCount,
+    TaskDef:taskDefinition}" \
   --output table'
 ```
 
-### 11. Emergency Rollback — Switch Back to Previous Revision
+## Incident Response
+
+## Deployment Rolled Back
+
+1. Check ECS service events for the failure reason.
+2. Inspect recent application and proxy logs.
+3. Confirm which task definition revision failed.
+4. Verify alarms, listener rules, and target group health if traffic shifting
+   was involved.
+5. Re-deploy a corrected image or revert to the previous task definition.
+
+## Tasks Failing To Start
+
+Check:
+
+- task stopped reason
+- image pull permissions
+- secrets access
+- subnet routing and security group egress
+- log group existence
+- target group health checks for LB-backed services
+
+Useful command:
 
 ```bash
-# Option A: Let ECS handle it (if deployment still in progress)
-# ECS auto-rolls back if circuit breaker or alarms trigger.
+aws ecs describe-tasks \
+  --cluster my-cluster \
+  --tasks <TASK_ID>
+```
 
-# Option B: Manual — redeploy previous task definition
+## High CPU Or Memory
+
+Check:
+
+- current desired and running task count
+- recent scale-out activity
+- Container Insights or CloudWatch metrics
+- whether task CPU and memory sizing are still appropriate
+
+## EFS Mount Failure
+
+Check:
+
+- EFS mount targets in reachable subnets
+- EFS security group allowing `2049/tcp`
+- transit encryption requirements
+- task role permissions for EFS IAM auth
+
+## Rollback
+
+## Via Terraform
+
+Use the normal Terraform workflow after restoring the desired image tag or task
+definition inputs:
+
+```bash
+terraform plan
+terraform apply
+```
+
+## Via AWS CLI
+
+```bash
 PREV_TD=$(aws ecs describe-services \
-  --cluster my-api \
-  --services my-api \
+  --cluster my-cluster \
+  --services my-service \
   --query 'services[0].deployments[-1].taskDefinition' \
   --output text)
 
 aws ecs update-service \
-  --cluster my-api \
-  --service my-api \
+  --cluster my-cluster \
+  --service my-service \
   --task-definition "${PREV_TD}" \
   --force-new-deployment
-
-# Option C: Via GitLab — re-run the last successful deploy pipeline
 ```
 
----
+## Operating Notes
 
-## Incident Response
-
-### Deployment Rolled Back (Circuit Breaker)
-
-1. Check service events for the failure reason
-2. Inspect failed task logs: `aws logs tail /ecs/my-api --since 1h`
-3. Identify the broken task definition revision
-4. Fix the image / config issue
-5. Push a corrected image and re-deploy via CI/CD
-
-### High CPU / Memory Alarm
-
-1. Check if auto scaling has kicked in: verify running task count
-2. Review Container Insights for per-task CPU/memory breakdown
-3. If sustained: consider increasing `task_cpu` / `task_memory`
-4. If spike: verify the scaling policy target values are appropriate
-
-### Tasks Failing to Start
-
-1. Check task stopped reason: `aws ecs describe-tasks --cluster my-api --tasks <TASK_ID>`
-2. Common causes: ECR image pull failure, secrets access denied, port conflicts
-3. Verify task execution role has required permissions
-4. Check security group allows required egress (ECR, Secrets Manager, S3 endpoints)
-
-### EFS Mount Failure
-
-1. Verify EFS mount targets exist in the same subnets as ECS tasks
-2. Check EFS security group allows NFS (2049/tcp) from ECS security group
-3. Verify transit encryption is enabled if IAM auth is used
-4. Check task role has `elasticfilesystem:ClientMount` and `ClientWrite` permissions
-
----
-
-## Rollback Procedure
-
-### Via Terraform
-
-```bash
-# Revert to previous task definition revision
-terraform plan -target=module.ecs_fargate
-terraform apply -target=module.ecs_fargate
-```
-
-### Via AWS CLI (Emergency)
-
-```bash
-# Get previous task definition
-PREV_TD=$(aws ecs describe-services --cluster my-api --services my-api \
-  --query 'services[0].deployments[?status==`ACTIVE`].taskDefinition' --output text)
-
-# Update service to previous
-aws ecs update-service \
-  --cluster my-api \
-  --service my-api \
-  --task-definition $PREV_TD \
-  --force-new-deployment
-```
-
----
-
-## SLIs / SLOs
-
-| SLI | SLO | Alarm |
-|---|---|---|
-| CPU Utilization | < 80% avg over 10min | `my-api-cpu-high` |
-| Memory Utilization | < 80% avg over 10min | `my-api-memory-high` |
-| Running Task Count | >= 2 at all times | `my-api-low-task-count` |
-| Deployment Success | Auto-rollback on failure | Circuit Breaker |
+- Keep the cluster name, service names, log groups, and alarm names written
+  down before you need them.
+- Prefer Terraform as the source of truth for steady-state configuration.
+- Use direct AWS CLI service updates for incident response only, then reconcile
+  state back into Terraform.

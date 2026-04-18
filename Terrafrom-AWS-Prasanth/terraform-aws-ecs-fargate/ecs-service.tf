@@ -8,18 +8,20 @@ resource "aws_ecs_service" "main" {
     if try(v.service.deployment_controller.type, "ECS") == "ECS"
   }
 
-  name                   = "${local.account_alias}-${each.key}"
-  cluster                = aws_ecs_cluster.main[0].id
-  task_definition        = aws_ecs_task_definition.main[each.key].arn
-  desired_count          = try(each.value.service.desired_count, 1)
-  propagate_tags         = try(each.value.service.propagate_tags, "SERVICE")
+  name            = "${local.account_alias}-${each.key}"
+  cluster         = aws_ecs_cluster.main[0].id
+  task_definition = aws_ecs_task_definition.main[each.key].arn
+  desired_count   = try(each.value.service.desired_count, 1)
+  propagate_tags  = try(each.value.service.propagate_tags, "SERVICE")
   # Suppress launch_type when capacity_provider_strategy is set
-  launch_type            = length(try(each.value.service.capacity_provider_strategy, [])) > 0 ? null : "FARGATE"
-  platform_version       = try(each.value.service.platform_version, "LATEST")
-  scheduling_strategy    = "REPLICA"
-  enable_execute_command = try(each.value.service.enable_execute_command, false)
-  force_new_deployment   = try(each.value.service.force_new_deployment, false)
-  wait_for_steady_state  = try(each.value.service.wait_for_steady_state, false)
+  launch_type                       = length(try(each.value.service.capacity_provider_strategy, [])) > 0 ? null : "FARGATE"
+  platform_version                  = try(each.value.service.platform_version, "LATEST")
+  scheduling_strategy               = "REPLICA"
+  enable_execute_command            = try(each.value.service.enable_execute_command, false)
+  enable_ecs_managed_tags           = try(each.value.service.enable_ecs_managed_tags, true)
+  force_new_deployment              = try(each.value.service.force_new_deployment, false)
+  wait_for_steady_state             = try(each.value.service.wait_for_steady_state, false)
+  health_check_grace_period_seconds = var.load_balanced && length(try(each.value.service.target_groups, var.target_groups)) > 0 ? try(each.value.service.health_check_grace_period_seconds, null) : null
 
   tags = merge(var.tags, {
     "Name" = "${local.account_alias}-${each.key}"

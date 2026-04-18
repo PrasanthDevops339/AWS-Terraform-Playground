@@ -90,7 +90,7 @@ variable "target_groups" {
     condition = (
       var.load_balanced == false ||
       length(var.target_groups) == 0 ||
-      alltrue([ for tg in var.target_groups : try(tg.target_group_arn != null && tg.target_group_arn != "", false) ])
+      alltrue([for tg in var.target_groups : try(tg.target_group_arn != null && tg.target_group_arn != "", false)])
     )
     error_message = "When load_balanced is true, each target_groups entry must include a non-empty target_group_arn from the ALB module."
   }
@@ -163,8 +163,8 @@ variable "deployment_configuration" {
     maximum_percent         = optional(number, 200)
     minimum_healthy_percent = optional(number, 100)
     alarms = optional(object({
-      enable   = optional(bool, false)
-      rollback = optional(bool, false)
+      enable      = optional(bool, false)
+      rollback    = optional(bool, false)
       alarm_names = optional(list(string), [])
     }), null)
   })
@@ -187,14 +187,14 @@ variable "default_capacity_provider_strategy" {
   description = "Default capacity provider strategy for the cluster"
   type = list(object({
     capacity_provider = string
-    weight           = optional(number, 1)
-    base             = optional(number, 0)
+    weight            = optional(number, 1)
+    base              = optional(number, 0)
   }))
   default = [
     {
       capacity_provider = "FARGATE"
-      weight           = 1
-      base             = 0
+      weight            = 1
+      base              = 0
     }
   ]
 }

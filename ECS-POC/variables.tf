@@ -307,7 +307,7 @@ variable "services" {
       cidr_blocks                   = optional(list(string), [])
       ipv6_cidr_blocks              = optional(list(string), [])
       destination_security_group_id = optional(string, null)
-    })), [{
+      })), [{
       description = "Allow all outbound"
       from_port   = 0
       to_port     = 0

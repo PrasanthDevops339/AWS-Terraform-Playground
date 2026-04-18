@@ -3,12 +3,12 @@
 ################################################################################
 
 terraform {
-  required_version = ">= 1.5.0"
+  required_version = ">= 1.5.7"
 
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = ">= 6.4.0" # Required for ECS-native B/G, Linear, Canary strategies
+      version = ">= 6.34.0" # Keep the POC on the same 6.x floor as the maintained upstream module
     }
   }
 }
