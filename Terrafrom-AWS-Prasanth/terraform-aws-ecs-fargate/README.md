@@ -185,6 +185,8 @@ Fargate deployments.
 - [`examples/simple`](./examples/simple): minimal single-service consumer
 - [`examples/complete`](./examples/complete): three-tier example with Service
   Connect, canary deployment, and autoscaling
+- [`examples/complet-parten5`](./examples/complet-parten5): Pattern 5 example
+  with a load-balanced edge tier and unexposed internal services
 
 ## Examples
 

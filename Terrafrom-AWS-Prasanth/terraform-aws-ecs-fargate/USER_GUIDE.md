@@ -89,6 +89,15 @@ Recommended defaults:
 - `api`: `CANARY` or `LINEAR` if you want safer traffic shifting
 - `worker`: `ROLLING`, weighted toward `FARGATE_SPOT`
 
+Real-world usage:
+
+- SaaS products with a public web app, a private application API, and async job
+  workers
+- e-commerce platforms with storefront, order or catalog API, and background
+  processing for inventory, fulfillment, or payment events
+- internal enterprise portals with a browser-facing UI, private backend
+  services, and scheduled or event-driven workers
+
 ## Pattern 2: External Ingress Through ALB, Internal Hops Through Service Connect
 
 This is the combined pattern most teams want:
@@ -231,6 +240,15 @@ Why this pattern works well:
 - internal tiers do not need their own internal ALB
 - retries and proxy-side balancing are handled by Service Connect
 
+Real-world usage:
+
+- customer-facing web applications where users hit an ALB but frontend-to-API
+  traffic should stay private
+- backend-for-frontend architectures where the UI tier calls private services by
+  stable internal names
+- modernization programs moving from VM-based app tiers to private service
+  networking without introducing a full service mesh
+
 Security group rules usually look like this:
 
 - ALB security group -> `frontend` on the frontend listener port
@@ -344,6 +362,13 @@ Use this when:
 - the API calls other internal services
 - you want ECS-managed service discovery without a dedicated internal ALB
 
+Real-world usage:
+
+- internal microservice platforms where services discover each other by name
+- multi-service APIs that need private HTTP or RPC communication between tiers
+- platform teams that want lighter-weight service discovery than operating
+  internal load balancers for every service
+
 ## Pattern 4: Mixed FARGATE And FARGATE_SPOT
 
 Cluster-level defaults can stay conservative while individual services override
@@ -377,6 +402,15 @@ service = {
 Use interruption-tolerant tiers only. Do not push edge-facing tiers to Spot
 unless brief capacity loss is acceptable.
 
+Real-world usage:
+
+- queue consumers, schedulers, and batch workers that can tolerate replacement
+  or retry
+- nightly processing, report generation, indexing, media conversion, and other
+  non-edge workloads
+- cost-optimized internal jobs where partial Spot usage is worth the
+  interruption tradeoff
+
 ## Pattern 5: Edge Load Balanced, Internal Services Unexposed
 
 A clean service boundary is:
@@ -386,6 +420,18 @@ A clean service boundary is:
 - workers with no target groups and no inbound port mappings
 
 This reduces ALB sprawl and keeps internal dependencies explicit.
+
+Real-world usage:
+
+- SaaS web apps where only the browser-facing frontend should be public
+- B2B platforms with a customer dashboard, private API tier, and private worker
+  tier
+- content, workflow, and event-driven systems where internal services should
+  never be direct network entry points
+- teams that want clearer security boundaries and fewer internal load balancers
+
+See [`examples/complet-parten5`](./examples/complet-parten5) for a concrete
+three-tier implementation of this pattern.
 
 ## Deployment Strategies
 
@@ -614,6 +660,12 @@ Use [`examples/complete`](./examples/complete) when you need:
 - mixed capacity providers
 - ECS-native canary deployment
 - autoscaling examples
+
+Use [`examples/complet-parten5`](./examples/complet-parten5) when you need:
+
+- one edge-facing service behind a target group
+- internal API calls over Service Connect
+- a private worker tier with no inbound port mappings
 
 ## Practical Defaults
 
