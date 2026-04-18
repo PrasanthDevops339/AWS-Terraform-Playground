@@ -132,6 +132,27 @@ variable "service_connect_configuration" {
 ##############################
 # Deployment Strategy variables
 ##############################
+
+variable "deployment_strategy_default" {
+  description = <<-EOT
+    Default ECS-native deployment strategy applied to all services that do not
+    specify their own strategy via container_config[key].service.deployment_configuration.strategy.
+
+    Valid values (AWS provider >= 6.4.0, no CodeDeploy required):
+      ROLLING    — classic rolling update with circuit breaker (default)
+      BLUE_GREEN — full env alongside old; instant traffic shift; bake time
+      LINEAR     — gradual % traffic shift, e.g. 25% every 5 min
+      CANARY     — small canary %, bake, then full cutover
+  EOT
+  type        = string
+  default     = "ROLLING"
+
+  validation {
+    condition     = contains(["ROLLING", "BLUE_GREEN", "LINEAR", "CANARY"], var.deployment_strategy_default)
+    error_message = "deployment_strategy_default must be ROLLING, BLUE_GREEN, LINEAR, or CANARY."
+  }
+}
+
 variable "deployment_configuration" {
   description = "Default deployment configuration for services"
   type = object({
