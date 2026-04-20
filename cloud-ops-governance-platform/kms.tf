@@ -47,7 +47,7 @@ module "rds-aurora-mysql-ccops-kms-key" {
         {
           test     = "StringEquals"
           variable = "aws:PrincipalOrgID"
-          values   = ["o-ie70f219nn", "o-ie1yc8zvv5"]
+          values   = ["o-xxxxxxxxxx", "o-yyyyyyyyyy"]
         },
         {
           test     = "ArnLike"
@@ -144,7 +144,7 @@ module "stepfunc_kms" {
         {
           test     = "StringEquals"
           variable = "aws:PrincipalOrgID"
-          values   = ["o-ie70f219nn", "o-ie1yc8zvv5"]
+          values   = ["o-xxxxxxxxxx", "o-yyyyyyyyyy"]
         },
         {
           test     = "ArnLike"
@@ -236,7 +236,7 @@ module "ccop-s3-kms-key" {
         {
           test     = "StringEquals"
           variable = "aws:PrincipalOrgID"
-          values   = ["o-ie70f219nn", "o-ie1yc8zvv5"]
+          values   = ["o-xxxxxxxxxx", "o-yyyyyyyyyy"]
         },
         {
           test     = "ArnLike"
@@ -288,7 +288,7 @@ module "ccop_dynamodb_kms_key" {
         {
           test     = "StringEquals"
           variable = "aws:PrincipalOrgID"
-          values   = ["o-ie70f219nn", "o-ie1yc8zvv5"]
+          values   = ["o-xxxxxxxxxx", "o-yyyyyyyyyy"]
         },
         {
           test     = "ArnLike"
@@ -340,7 +340,7 @@ module "service-now-dev-secret-kms" {
         {
           test     = "StringEquals"
           variable = "aws:PrincipalOrgID"
-          values   = ["o-ie70f219nn", "o-ie1yc8zvv5"]
+          values   = ["o-xxxxxxxxxx", "o-yyyyyyyyyy"]
         },
         {
           test     = "ArnLike"
@@ -387,7 +387,7 @@ module "splunk-obsrv-token-kms" {
         {
           test     = "StringEquals"
           variable = "aws:PrincipalOrgID"
-          values   = ["o-ie70f219nn", "o-ie1yc8zvv5"]
+          values   = ["o-ieddewwfcw", "o-fwefwfvwesf"]
         },
         {
           test     = "ArnLike"
