@@ -107,3 +107,35 @@ output "autoscaling_target_resource_id" {
   description = "Application AutoScaling resource IDs"
   value       = { for k, v in aws_appautoscaling_target.main : k => v.resource_id }
 }
+
+output "alb_request_count_scaling_policy" {
+  description = "Attributes of ALB request count scaling policies"
+  value       = aws_appautoscaling_policy.alb_request_count
+}
+
+output "cpu_alarm_arns" {
+  description = "ARNs of CPU high CloudWatch alarms per service"
+  value       = { for k, v in aws_cloudwatch_metric_alarm.cpu_high : k => v.arn }
+}
+
+output "memory_alarm_arns" {
+  description = "ARNs of memory high CloudWatch alarms per service"
+  value       = { for k, v in aws_cloudwatch_metric_alarm.memory_high : k => v.arn }
+}
+
+output "task_count_alarm_arns" {
+  description = "ARNs of task count low CloudWatch alarms per service"
+  value       = { for k, v in aws_cloudwatch_metric_alarm.task_count_low : k => v.arn }
+}
+
+output "service_deployment_strategy" {
+  description = "Effective deployment strategy per ECS service"
+  value = {
+    for k, v in var.container_config : k => try(
+      v.service.deployment_configuration.strategy,
+      var.deployment_strategy_default
+    )
+    if try(v.service.deployment_controller.type, "ECS") == "ECS"
+  }
+}
+

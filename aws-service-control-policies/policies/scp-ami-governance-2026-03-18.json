@@ -1,0 +1,120 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyNonApprovedAMIsOrgWide",
+      "Effect": "Deny",
+      "Action": [
+        "ec2:RunInstances",
+        "ec2:CreateFleet",
+        "ec2:RequestSpotInstances",
+        "ec2:RunScheduledInstances"
+      ],
+      "Resource": "arn:aws:ec2:*::image/*",
+      "Condition": {
+        "StringNotEquals": {
+          "ec2:Owner": [
+            "565656565656",
+            "666363636363"
+          ],
+          "aws:PrincipalAccount": [
+            "100000000001",
+            "100000000002",
+            "100000000003",
+            "200000000001",
+            "200000000002",
+            "200000000003",
+            "300000000001",
+            "300000000002",
+            "300000000003",
+            "400000000001",
+            "400000000002",
+            "400000000003",
+            "500000000001",
+            "500000000002",
+            "500000000003",
+            "600000000001",
+            "600000000002",
+            "600000000003"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "DenyUpsolverAMIsOutsideDatalakeAccounts",
+      "Effect": "Deny",
+      "Action": [
+        "ec2:RunInstances",
+        "ec2:CreateFleet",
+        "ec2:RequestSpotInstances",
+        "ec2:RunScheduledInstances"
+      ],
+      "Resource": "arn:aws:ec2:*::image/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:Owner": "428641199958"
+        },
+        "StringNotEquals": {
+          "aws:PrincipalAccount": [
+            "100000000001",
+            "100000000002",
+            "100000000003"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "DenyMarketplaceTransitAMIsOutsideTransitAccounts",
+      "Effect": "Deny",
+      "Action": [
+        "ec2:RunInstances",
+        "ec2:CreateFleet",
+        "ec2:RequestSpotInstances",
+        "ec2:RunScheduledInstances"
+      ],
+      "Resource": "arn:aws:ec2:*::image/*",
+      "Condition": {
+        "ForAnyValue:StringEquals": {
+          "ec2:ProductCode": [
+            "6dcndlpi3tu6z8ten76nuejp",
+            "a8sxy6easi2zumgtyr564z6y7",
+            "akjez2r6bd6o7tg3mhptif6ti",
+            "7u0lnfhluv0k8cyewctn0xdx8",
+            "cmudow1tph9k98mz0ctkc063w"
+          ]
+        },
+        "StringNotEquals": {
+          "aws:PrincipalAccount": [
+            "200000000001",
+            "200000000002",
+            "200000000003"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "DenyAMICreationAndSideload",
+      "Effect": "Deny",
+      "Action": [
+        "ec2:CreateImage",
+        "ec2:CopyImage",
+        "ec2:RegisterImage",
+        "ec2:ImportImage"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "DenyPublicAMISharing",
+      "Effect": "Deny",
+      "Action": [
+        "ec2:ModifyImageAttribute"
+      ],
+      "Resource": "arn:aws:ec2:*::image/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:Add/group": "all"
+        }
+      }
+    }
+  ]
+}

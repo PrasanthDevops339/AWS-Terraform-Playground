@@ -23,3 +23,4 @@ resource "aws_schemas_schema" "test_event_schema" {
   content     = templatefile("${path.module}/templates/test_events_template.json", {})
   test_events = local.test_events_str
 }
+

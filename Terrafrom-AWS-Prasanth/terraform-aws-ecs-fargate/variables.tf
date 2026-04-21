@@ -90,7 +90,7 @@ variable "target_groups" {
     condition = (
       var.load_balanced == false ||
       length(var.target_groups) == 0 ||
-      alltrue([ for tg in var.target_groups : try(tg.target_group_arn != null && tg.target_group_arn != "", false) ])
+      alltrue([for tg in var.target_groups : try(tg.target_group_arn != null && tg.target_group_arn != "", false)])
     )
     error_message = "When load_balanced is true, each target_groups entry must include a non-empty target_group_arn from the ALB module."
   }
@@ -132,6 +132,27 @@ variable "service_connect_configuration" {
 ##############################
 # Deployment Strategy variables
 ##############################
+
+variable "deployment_strategy_default" {
+  description = <<-EOT
+    Default ECS-native deployment strategy applied to all services that do not
+    specify their own strategy via container_config[key].service.deployment_configuration.strategy.
+
+    Valid values (AWS provider >= 6.4.0, no CodeDeploy required):
+      ROLLING    — classic rolling update with circuit breaker (default)
+      BLUE_GREEN — full env alongside old; instant traffic shift; bake time
+      LINEAR     — gradual % traffic shift, e.g. 25% every 5 min
+      CANARY     — small canary %, bake, then full cutover
+  EOT
+  type        = string
+  default     = "ROLLING"
+
+  validation {
+    condition     = contains(["ROLLING", "BLUE_GREEN", "LINEAR", "CANARY"], var.deployment_strategy_default)
+    error_message = "deployment_strategy_default must be ROLLING, BLUE_GREEN, LINEAR, or CANARY."
+  }
+}
+
 variable "deployment_configuration" {
   description = "Default deployment configuration for services"
   type = object({
@@ -142,8 +163,8 @@ variable "deployment_configuration" {
     maximum_percent         = optional(number, 200)
     minimum_healthy_percent = optional(number, 100)
     alarms = optional(object({
-      enable   = optional(bool, false)
-      rollback = optional(bool, false)
+      enable      = optional(bool, false)
+      rollback    = optional(bool, false)
       alarm_names = optional(list(string), [])
     }), null)
   })
@@ -166,16 +187,17 @@ variable "default_capacity_provider_strategy" {
   description = "Default capacity provider strategy for the cluster"
   type = list(object({
     capacity_provider = string
-    weight           = optional(number, 1)
-    base             = optional(number, 0)
+    weight            = optional(number, 1)
+    base              = optional(number, 0)
   }))
   default = [
     {
       capacity_provider = "FARGATE"
-      weight           = 1
-      base             = 0
+      weight            = 1
+      base              = 0
     }
   ]
 }
 
 // Removed TG creation support: protocol/health_check are no longer used here.
+

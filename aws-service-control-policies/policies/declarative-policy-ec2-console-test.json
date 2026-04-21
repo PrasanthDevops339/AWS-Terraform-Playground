@@ -1,0 +1,62 @@
+{
+	"ec2_attributes": {
+		"@@operators_allowed_for_child_policies": [
+			"@@none"
+		],
+		"image_block_public_access": {
+			"state": {
+				"@@assign": "block_new_sharing"
+			}
+		},
+		"allowed_images_settings": {
+			"state": {
+				"@@assign": "audit_mode"
+			},
+			"image_criteria": {
+				"criteria_1": {
+					"allowed_image_providers": {
+						"@@assign": [
+							"565656565656",
+							"666363636363"
+						]
+					},
+					"creation_date_condition": {
+						"maximum_days_since_created": {
+							"@@assign": 300
+						}
+					},
+					"deprecation_time_condition": {
+						"maximum_days_since_deprecated": {
+							"@@assign": 0
+						}
+					}
+				},
+				"criteria_2": {
+					"allowed_image_providers": {
+						"@@assign": [
+							"123456789014"
+						]
+					},
+					"image_names": {
+						"@@assign": [
+							"golden-ami-*"
+						]
+					},
+					"creation_date_condition": {
+						"maximum_days_since_created": {
+							"@@assign": 300
+						}
+					},
+					"deprecation_time_condition": {
+						"maximum_days_since_deprecated": {
+							"@@assign": 0
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+
+		"exception_message": "AMI not approved for use in this organization. Only images from approved accounts are permitted"

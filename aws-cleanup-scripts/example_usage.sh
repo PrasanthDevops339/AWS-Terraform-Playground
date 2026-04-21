@@ -70,3 +70,4 @@ echo "  python aws_resource_cleanup.py --aws-account-id $AWS_ACCOUNT_ID --action
 echo ""
 echo -e "${YELLOW}Warning: The actual deletion will require typing 'yes' to confirm!${NC}"
 echo ""
+

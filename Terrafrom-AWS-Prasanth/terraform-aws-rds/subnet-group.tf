@@ -7,3 +7,4 @@ resource "aws_db_subnet_group" "main" {
 
   tags = merge(var.tags, { Name = "${local.account_alias}-${var.identifier}" })
 }
+

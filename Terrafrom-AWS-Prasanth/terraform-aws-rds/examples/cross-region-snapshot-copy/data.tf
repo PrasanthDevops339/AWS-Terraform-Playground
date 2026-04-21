@@ -13,7 +13,7 @@ data "aws_vpc" "primary" {
   
   filter {
     name   = "tag:Name"
-    values = ["erieins-dev-vpc-use2"]
+    values = ["test-placeholder-dev-vpc-use2"]
   }
 }
 
@@ -37,7 +37,7 @@ data "aws_vpc" "secondary" {
   provider = aws.secondary
   filter {
     name   = "tag:Name"
-    values = ["erieins-dev-vpc-use1"]  # Assuming similar naming pattern for us-east-1
+    values = ["test-placeholder-dev-vpc-use1"]  # Assuming similar naming pattern for us-east-1
   }
 }
 
@@ -59,7 +59,7 @@ data "aws_availability_zones" "secondary" {
 # DB Subnet Group for primary region
 data "aws_db_subnet_group" "primary" {
   provider = aws.primary
-  name     = "erieins-dev-db-subnet-group-use2"  # Update with your subnet group name
+  name     = "test-placeholder-dev-db-subnet-group-use2"  # Update with your subnet group name
 }
 
 # IAM role for RDS enhanced monitoring

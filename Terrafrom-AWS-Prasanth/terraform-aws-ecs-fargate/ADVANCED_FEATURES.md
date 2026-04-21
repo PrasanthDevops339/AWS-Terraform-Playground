@@ -1,249 +1,332 @@
-# Complete Documentation for Enhanced ECS Fargate Module
+# Advanced Features Reference
 
-This document provides comprehensive details about all the new features and capabilities added to the ECS Fargate module.
+This document focuses on the parts of the module that go beyond a plain
+single-service ECS deployment.
 
-## Quick Start Examples
+## What This File Covers
 
-### 1. Multiple Services with Service Connect
+- cluster-level advanced configuration
+- task definition synthesis details
+- Service Connect and Service Connect TLS
+- ECS-native traffic shifting strategies
+- autoscaling and observability features
+- legacy controller support that still exists in the codebase
 
-```hcl
-module "ecs_fargate" {
-  source = "path/to/this/module"
+## Cluster-Level Features
 
-  cluster_name = "my-cluster"
-  vpc_id       = "vpc-12345678"
+## Managed Storage Configuration
 
-  service_connect_configuration = {
-    enabled   = true
-    namespace = "my-namespace"
-  }
+The module passes `cluster_configuration` directly to the ECS cluster and
+supports nested `managed_storage_configuration`.
 
-  container_config = {
-    frontend = {
-      # Frontend service configuration
-    }
-    backend = {
-      # Backend service configuration  
-    }
-  }
-}
-```
-
-### 2. Service Connect with TLS
+Typical use:
 
 ```hcl
-service_connect = {
-  enabled = true
-  services = [{
-    port_name = "secure-app-port"
-    tls = {
-      issuer_certificate_authority = {
-        aws_pca_authority_arn = "arn:aws:acm-pca:..."
+cluster_configuration = [
+  {
+    execute_command_configuration = {
+      logging = "OVERRIDE"
+      log_configuration = {
+        cloud_watch_log_group_name = var.exec_log_group_name
       }
-      kms_key  = "arn:aws:kms:..."
-      role_arn = "arn:aws:iam::...role/service-connect-tls"
     }
-  }]
+
+    managed_storage_configuration = {
+      fargate_ephemeral_storage_kms_key_id = var.fargate_ephemeral_storage_kms_key_id
+      kms_key_id                           = var.managed_storage_kms_key_id
+    }
+  }
+]
+```
+
+Use this when:
+
+- ECS Exec logs need explicit log routing
+- Fargate ephemeral storage encryption must use customer-managed KMS keys
+
+## Cluster Default Capacity Providers
+
+The cluster can expose both `FARGATE` and `FARGATE_SPOT` and define a default
+strategy:
+
+```hcl
+capacity_providers = ["FARGATE", "FARGATE_SPOT"]
+
+default_capacity_provider_strategy = [
+  {
+    capacity_provider = "FARGATE"
+    weight            = 1
+    base              = 1
+  }
+]
+```
+
+Service-level `capacity_provider_strategy` overrides that default.
+
+## Task Definition Synthesis
+
+For most services, the module synthesizes `container_definitions` from common
+task fields.
+
+Supported synthesized inputs include:
+
+- `image`
+- `cpu`
+- `memory`
+- `memoryReservation`
+- `environment`
+- `secrets`
+- `command`
+- `entrypoint`
+- `port_mappings`
+- `mount_points`
+- `volumes_from`
+- `firelens_configuration`
+- `health_check`
+- `ephemeral_storage`
+- `operating_system_family`
+- `cpu_architecture`
+
+When you need exact JSON control, use:
+
+- `task_definition.container_definition`
+
+That bypasses the synthesized path and lets you provide the full container
+definition JSON yourself.
+
+## Service Connect
+
+Service Connect can be configured both at cluster default level and per
+service.
+
+Cluster default example:
+
+```hcl
+service_connect_configuration = {
+  enabled   = true
+  namespace = var.service_connect_namespace_arn
 }
 ```
 
-### 3. Blue/Green Deployment with CodeDeploy
+Per-service example:
 
 ```hcl
 service = {
-  deployment_controller = {
-    type = "CODE_DEPLOY"
+  service_connect = {
+    enabled   = true
+    namespace = var.service_connect_namespace_arn
+
+    services = [
+      {
+        port_name      = "api-http"
+        discovery_name = "api"
+        client_aliases = [
+          {
+            dns_name = "api"
+            port     = 8080
+          }
+        ]
+      }
+    ]
   }
-  codedeploy_role_arn = "arn:aws:iam::...role/codedeploy"
-  blue_green_deployment_config = {
-    terminate_blue_instances_on_deployment_success = {
-      action = "TERMINATE"
-      termination_wait_time_in_minutes = 5
+}
+```
+
+Important requirement:
+
+- `service_connect.services[].port_name` must match the `name` of a container
+  port mapping
+
+## Service Connect TLS
+
+The service-level Service Connect block supports TLS:
+
+```hcl
+service_connect = {
+  enabled   = true
+  namespace = var.service_connect_namespace_arn
+
+  services = [
+    {
+      port_name = "api-http"
+      tls = {
+        issuer_cert_authority = {
+          aws_pca_authority_arn = var.aws_pca_authority_arn
+        }
+        kms_key  = var.service_connect_tls_kms_key_arn
+        role_arn = var.service_connect_tls_role_arn
+      }
+    }
+  ]
+}
+```
+
+This requires the surrounding PCA, IAM, and KMS resources to exist already.
+
+## ECS-Native Deployment Strategies
+
+The maintained path in this repository is ECS-native deployment management
+through `aws_ecs_service.deployment_configuration`.
+
+Supported strategies:
+
+- `ROLLING`
+- `BLUE_GREEN`
+- `LINEAR`
+- `CANARY`
+
+Set them at:
+
+- module level with `deployment_strategy_default`
+- service level with `service.deployment_configuration.strategy`
+
+## Rolling
+
+Use for:
+
+- standard service rollouts
+- workers
+- services without advanced listener-rule traffic shifting
+
+## Blue/Green, Linear, and Canary
+
+These strategies require advanced load balancer inputs on the service target
+group mapping:
+
+- `target_group_arn`
+- `alternate_target_group_arn`
+- `production_listener_rule`
+
+They also require:
+
+- `service.deployment_configuration.ecs_alb_service_role_arn`
+
+Example:
+
+```hcl
+service = {
+  deployment_configuration = {
+    strategy                 = "CANARY"
+    bake_time_in_minutes     = 10
+    ecs_alb_service_role_arn = var.api_ecs_alb_service_role_arn
+
+    canary_configuration = {
+      canary_percent              = 10
+      canary_bake_time_in_minutes = 10
     }
   }
+
+  target_groups = [
+    {
+      target_group_arn           = var.api_blue_target_group_arn
+      alternate_target_group_arn = var.api_green_target_group_arn
+      production_listener_rule   = var.api_production_listener_rule_arn
+      container_name             = "api"
+      container_port             = 8080
+    }
+  ]
 }
 ```
 
-## Service Connect Features
+## Deployment Alarms And Lifecycle Hooks
 
-### Basic Service Connect
-- Automatic service discovery
-- DNS-based service communication
-- Load balancing between service instances
-- Health checking and circuit breaking
+The module supports:
 
-### Service Connect with TLS
-- End-to-end encryption for service communication
-- Automatic certificate management via AWS Private CA
-- KMS integration for key management
-- Performance optimized TLS termination
+- deployment alarms
+- circuit breaker
+- lifecycle hooks for non-rolling strategies
 
-## Deployment Strategies
-
-### 1. Rolling Updates (ECS - Default)
-- **Use Case**: Standard deployments with minimal configuration
-- **Benefits**: Simple, reliable, built-in circuit breaker support
-- **Configuration**: Automatic with optional circuit breaker and alarms
-
-### 2. Blue/Green Deployments (CodeDeploy)
-- **Use Case**: Zero-downtime deployments with instant rollback
-- **Benefits**: Complete environment isolation, automated traffic switching
-- **Requirements**: CodeDeploy service role, dual target groups
-
-### 3. External Deployment Controller
-- **Use Case**: Custom deployment logic, advanced strategies
-- **Benefits**: Full control, integration with external tools
-- **Examples**: Canary deployments, feature flag integration
-
-## Auto Scaling Capabilities
-
-### CPU-Based Scaling
-```hcl
-cpu_scaling_policy_configuration = {
-  target_value       = 70
-  scale_in_cooldown  = 300
-  scale_out_cooldown = 300
-}
-```
-
-### Memory-Based Scaling
-```hcl
-memory_scaling_policy_configuration = {
-  target_value = 80
-}
-```
-
-### Step Scaling
-```hcl
-step_scaling_policy_configuration = {
-  adjustment_type = "ChangeInCapacity"
-  scaling_adjustment = 2
-  metric_interval_lower_bound = 0
-}
-```
-
-## Advanced Configuration Options
-
-### Service Registries
-Support for AWS Cloud Map service discovery:
+Example:
 
 ```hcl
-service_registries = [{
-  registry_arn   = "arn:aws:servicediscovery:..."
-  container_name = "web-app"
-  container_port = 80
-}]
-```
+service = {
+  deployment_configuration = {
+    strategy = "LINEAR"
 
-### Capacity Provider Strategy
-Configure Fargate and Fargate Spot usage:
+    alarms = {
+      enable      = true
+      rollback    = true
+      alarm_names = var.api_deployment_alarm_names
+    }
 
-```hcl
-capacity_provider_strategy = [{
-  capacity_provider = "FARGATE_SPOT"
-  weight           = 1
-  base             = 0
-}]
-```
-
-### Placement Constraints
-Control task placement:
-
-```hcl
-placement_constraints = [{
-  type = "memberOf"
-  expression = "attribute:ecs.instance-type =~ t2.*"
-}]
-```
-
-## Security Features
-
-### Network Security
-- VPC networking with security groups
-- Private subnet deployment
-- Service-to-service communication controls
-
-### IAM Integration
-- Task execution roles for AWS API access
-- Task roles for application permissions
-- Service Connect TLS roles for certificate management
-
-### Encryption
-- TLS encryption for service communication
-- KMS key integration
-- CloudWatch Logs encryption
-
-## Monitoring and Observability
-
-### CloudWatch Integration
-- Container insights enabled by default
-- Custom metrics and alarms
-- Deployment monitoring and alerting
-
-### Service Connect Logging
-```hcl
-log_configuration = {
-  log_driver = "awslogs"
-  options = {
-    awslogs-group  = "/aws/ecs/service-connect"
-    awslogs-region = "us-west-2"
+    lifecycle_hooks = [
+      {
+        hook_target_arn  = var.validation_lambda_arn
+        role_arn         = var.validation_hook_role_arn
+        lifecycle_stages = ["TEST_TRAFFIC_SHIFT"]
+      }
+    ]
   }
 }
 ```
 
-### Deployment Alarms
+## Autoscaling
+
+The module supports per-service autoscaling for:
+
+- CPU target tracking
+- memory target tracking
+- ALB request count target tracking
+- scheduled scaling
+- step scaling
+
+Typical service block:
+
 ```hcl
-alarms = {
-  enable      = true
-  rollback    = true
-  alarm_names = ["high-cpu", "high-error-rate"]
+autoscaling = {
+  min_capacity = 2
+  max_capacity = 10
+
+  cpu_scaling_policy_configuration = {
+    target_value       = 60
+    scale_in_cooldown  = 300
+    scale_out_cooldown = 60
+  }
+
+  memory_scaling_policy_configuration = {
+    target_value       = 75
+    scale_in_cooldown  = 300
+    scale_out_cooldown = 60
+  }
 }
 ```
 
-## Migration Guide
+Use ALB request count only for services that are actually target-group attached.
 
-### From Previous Version
-1. **Target Groups**: Ensure all target groups are created externally
-2. **Service Configuration**: Update container_config structure for new features
-3. **Service Connect**: Add service_connect_configuration for inter-service communication
-4. **Deployment Strategy**: Specify deployment_controller type if not using ECS default
+## Observability And Operations
 
-### Best Practices
-1. **Service Naming**: Use consistent naming conventions across services
-2. **Resource Tagging**: Tag all resources for cost allocation and management
-3. **Security Groups**: Use least-privilege security group rules
-4. **Monitoring**: Enable CloudWatch Container Insights and custom alarms
-5. **Auto Scaling**: Configure appropriate scaling policies based on workload patterns
+Useful service flags:
 
-## Troubleshooting
+- `enable_execute_command`
+- `enable_ecs_managed_tags`
+- `health_check_grace_period_seconds`
+- `wait_for_steady_state`
 
-### Common Issues
-1. **Service Connect DNS Resolution**: Ensure namespace is properly configured
-2. **TLS Certificate Issues**: Verify AWS Private CA permissions and KMS key access
-3. **CodeDeploy Failures**: Check service role permissions and target group health
-4. **Auto Scaling**: Monitor CloudWatch metrics and scaling activity
+These are exposed directly in the maintained examples.
 
-### Debugging Tips
-1. **ECS Service Events**: Check service events in AWS console for deployment issues
-2. **CloudWatch Logs**: Enable execute command for container debugging
-3. **Service Connect**: Use service connect proxy logs for connectivity issues
-4. **Load Balancer**: Verify target group health and listener rules
+## Legacy Controller Support
 
-## Performance Considerations
+The codebase still contains support for:
 
-### Service Connect
-- Uses AWS infrastructure for load balancing
-- Minimal latency overhead for TLS encryption
-- Automatic scaling of proxy infrastructure
+- `deployment_controller.type = "CODE_DEPLOY"`
+- `deployment_controller.type = "EXTERNAL"`
 
-### Resource Allocation
-- Right-size CPU and memory allocations
-- Use Fargate Spot for cost optimization on non-critical workloads
-- Configure appropriate auto scaling thresholds
+Those paths remain for backward compatibility, but they are not the primary
+recommended path for this repository. The maintained examples and the main user
+guide focus on ECS-native deployments because they are the cleanest Fargate
+path with the current AWS provider.
 
-### Network Optimization
-- Use private subnets for internal services
-- Optimize security group rules for performance
-- Consider service mesh alternatives for complex networking requirements
+## Current Boundaries
 
-For more detailed examples and specific use cases, refer to the examples directory in this module.
+Advanced does not mean fully self-contained. The module still expects external
+ownership of:
+
+- IAM roles
+- target groups
+- listener rules
+- namespaces
+- security groups
+- log groups
+
+That separation is intentional and keeps the module focused on ECS Fargate
+resources rather than entire platform bootstrapping.

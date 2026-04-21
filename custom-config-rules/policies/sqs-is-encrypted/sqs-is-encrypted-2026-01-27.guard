@@ -1,0 +1,5 @@
+rule sqsIsEncrypted when resourceType == "AWS::SQS::Queue" {
+    configuration.sqsManagedSseEnabled == true <<SQS must be encrypted at the time of creation>>
+    OR
+    configuration.kmsMasterKeyId != null
+}

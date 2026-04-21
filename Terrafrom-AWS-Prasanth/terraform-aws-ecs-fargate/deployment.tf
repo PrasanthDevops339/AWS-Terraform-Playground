@@ -34,12 +34,12 @@ resource "aws_codedeploy_deployment_group" "main" {
     for_each = try(each.value.service.blue_green_deployment_config, null) != null ? [each.value.service.blue_green_deployment_config] : []
     content {
       terminate_blue_instances_on_deployment_success {
-        action                         = try(blue_green_deployment_config.value.terminate_blue_instances_on_deployment_success.action, "TERMINATE")
+        action                           = try(blue_green_deployment_config.value.terminate_blue_instances_on_deployment_success.action, "TERMINATE")
         termination_wait_time_in_minutes = try(blue_green_deployment_config.value.terminate_blue_instances_on_deployment_success.termination_wait_time_in_minutes, 5)
       }
 
       deployment_ready_option {
-        action_on_timeout = try(blue_green_deployment_config.value.deployment_ready_option.action_on_timeout, "CONTINUE_DEPLOYMENT")
+        action_on_timeout    = try(blue_green_deployment_config.value.deployment_ready_option.action_on_timeout, "CONTINUE_DEPLOYMENT")
         wait_time_in_minutes = try(blue_green_deployment_config.value.deployment_ready_option.wait_time_in_minutes, 0)
       }
 
@@ -56,7 +56,7 @@ resource "aws_codedeploy_deployment_group" "main" {
 
   ecs_service {
     cluster_name = aws_ecs_cluster.main[0].name
-    service_name = aws_ecs_service.main[each.key].name
+    service_name = aws_ecs_service.codedeploy[each.key].name
   }
 
   dynamic "load_balancer_info" {
@@ -65,7 +65,11 @@ resource "aws_codedeploy_deployment_group" "main" {
       dynamic "target_group_info" {
         for_each = var.target_groups
         content {
-          name = try(target_group_info.value.name, null)
+          name = try(
+            target_group_info.value.name,
+            split("/", target_group_info.value.target_group_arn)[1],
+            null
+          )
         }
       }
     }
@@ -96,8 +100,8 @@ resource "aws_ecs_service" "codedeploy" {
   }
 
   network_configuration {
-    security_groups = try(each.value.service.security_groups, [])
-    subnets         = try(each.value.service.subnets, [])
+    security_groups  = try(each.value.service.security_groups, [])
+    subnets          = try(each.value.service.subnets, [])
     assign_public_ip = try(each.value.service.assign_public_ip, false)
   }
 
@@ -139,8 +143,8 @@ resource "aws_ecs_service" "external" {
   }
 
   network_configuration {
-    security_groups = try(each.value.service.security_groups, [])
-    subnets         = try(each.value.service.subnets, [])
+    security_groups  = try(each.value.service.security_groups, [])
+    subnets          = try(each.value.service.subnets, [])
     assign_public_ip = try(each.value.service.assign_public_ip, false)
   }
 

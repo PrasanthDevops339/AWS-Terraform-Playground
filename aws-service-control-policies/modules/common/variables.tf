@@ -62,3 +62,4 @@ variable "workloads_prd" {
   description = "ID of workloads prd OU"
   type        = string
 }
+

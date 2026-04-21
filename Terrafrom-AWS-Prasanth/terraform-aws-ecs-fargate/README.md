@@ -1,107 +1,196 @@
 # terraform-aws-ecs-fargate
 
-Comprehensive ECS Fargate module with support for multiple services, service connect with TLS, and all ECS deployment strategies. This module can deploy multiple services to the same cluster and provides advanced networking and deployment capabilities.
+Fargate-only Terraform module for creating one ECS cluster and one or more ECS
+services from a single `container_config` map.
 
-## Features
+## Scope
 
-- ✅ **Multiple Services**: Deploy multiple services to the same ECS cluster
-- ✅ **Service Connect**: Native service-to-service communication with optional TLS encryption
-- ✅ **All Deployment Strategies**: Rolling updates, Blue/Green (CodeDeploy), and External deployment controllers
-- ✅ **Auto Scaling**: CPU, Memory, and Step scaling policies per service
-- ✅ **Load Balancer Integration**: Support for ALB/NLB target groups
-- ✅ **Advanced Networking**: VPC, security groups, service discovery
-- ✅ **Comprehensive Monitoring**: CloudWatch integration and deployment alarms
+This module is intentionally opinionated:
 
-## Breaking Changes from Previous Version
+- Fargate only
+- one shared ECS cluster
+- one or more ECS services and task definitions
+- external network, IAM, log groups, and load balancer resources
 
-- Target Groups must be created externally (e.g., by ALB module)
-- Each `target_groups` entry must include `target_group_arn` when `load_balanced = true`
-- New service connect and deployment strategy configurations
+It supports multi-tier applications by treating each key in `container_config`
+as an independent service boundary. A typical shape is `frontend`, `api`, and
+`worker` on the same cluster.
 
-## Variable: `target_groups`
+This module is not a drop-in mirror of
+`terraform-aws-modules/terraform-aws-ecs`. It covers the ECS Fargate features
+used by this repository and keeps the surrounding infrastructure explicit
+instead of auto-creating everything inside the module.
 
-Input shape depends on your use case:
+## Version Requirements
 
-### Variable summary
+- Terraform `>= 1.5.7`
+- AWS provider `>= 6.34.0`
 
-| Name           | Description                                                                                                                                                                                                                               | Type       | Default | Required         |
-|----------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------|---------|------------------|
-| `target_groups` | Target group config to associate with the ECS service. Case 1: provide `target_group_arn` for each entry (reusing ALB TGs). Case 2: provide `target_group_name` (module creates TG). Include `container_name`/`container_port` to map correctly. | list(any)  | `[]`    | No (conditional) |
+The module uses newer AWS provider arguments for ECS-native deployment
+strategies and newer Terraform type features. Terraform `1.1.x` is too old for
+the current inputs.
 
-Note: When `load_balanced = true` and `create_target_groups = false`, each entry must include a non-empty `target_group_arn`.
+## What The Module Manages
 
-- Reusing external TGs (Case 1):
-	- Each entry must include `target_group_arn`
-	- You should also specify `container_name` and `container_port` so the ECS service can map the correct container/port
+- ECS cluster
+- ECS cluster settings and optional managed storage configuration
+- cluster default capacity provider strategy
+- ECS task definitions
+- ECS services
+- ECS-native deployment strategies: `ROLLING`, `BLUE_GREEN`, `LINEAR`,
+  `CANARY`
+- service-level load balancer attachment to external target groups
+- Service Connect, including optional TLS blocks
+- Cloud Map service registries
+- autoscaling policies and scheduled actions
+- per-service CloudWatch alarms
+- ECS Exec enablement
+- EFS task volumes
 
-- Creating TGs here (Case 2):
-	- Provide `target_group_name` (required)
-	- Optional: `container_port`, `deregistration_delay`
-	- Also specify `container_name` if your task container name doesn’t match this module’s default naming convention
+## What You Provide Externally
 
-Common optional health check settings are provided via `var.health_check`.
+This module expects these resources to exist already and be passed in:
 
-## Examples
+- VPC and subnet IDs
+- security group IDs
+- task execution role ARNs
+- task role ARNs
+- CloudWatch log groups
+- target groups and listener rules
+- ECS ALB infrastructure role ARN for ECS-native traffic shifting
+- Cloud Map namespace ARN if Service Connect is enabled
+- optional PCA and KMS resources for Service Connect TLS
 
-### Example — Use ALB module TGs
+## Multi-Tier Model
+
+Each `container_config` entry becomes:
+
+- one task definition
+- one ECS service
+- optional autoscaling resources
+- optional deployment alarms
+
+That is enough to model:
+
+- `frontend`: public, target-group attached, usually `ROLLING`
+- `api`: internal or mixed, often `CANARY` or `LINEAR`
+- `worker`: private, usually no load balancer, often `FARGATE_SPOT` weighted
+
+## Quick Start
 
 ```hcl
-module "app_container" {
-	source              = "../../"         # path to this module
-	vpc_id              = data.aws_vpc.main.id
-	cluster_name        = "ecs-cluster-example"
-	create_cluster      = true
+module "ecs_service" {
+  source = "./terraform-aws-ecs-fargate"
 
-	# Map ECS service to TGs created by an external ALB module
-	target_groups = [
-		{
-			target_group_arn = module.alb.target_groups["ex-ip"].id
-			container_name   = "first-complete"
-			container_port   = 80
-		}
-	]
+  cluster_name = "my-app"
+  vpc_id       = var.vpc_id
 
-	container_config = {
-		"first-app" = {
-			container_name = "first-complete"
-			service = {
-				desired_count        = 1
-				container_port       = 80
-				security_groups      = [module.ecs_sg.security_group_id]
-				subnets              = [element(data.aws_subnets.app_subnets.ids, 0)]
-				enable_execute_command = true
-				force_new_deployment = true
-			}
-			task_definition = {
-				cpu                 = 2048
-				memory              = 4096
-				image               = "${module.ecr.repository_url}:latest"
-				execution_role_arn  = module.iam_role.iam_role_arn
-				task_role_arn       = module.iam_role.iam_role_arn
-				host_port           = 80
-				container_port      = 80
-			}
-		}
-	}
+  container_config = {
+    app = {
+      container_name = "app"
+
+      task_definition = {
+        cpu                 = 512
+        memory              = 1024
+        image               = var.image
+        execution_role_arn  = var.execution_role_arn
+        task_role_arn       = var.task_role_arn
+        task_log_group_name = var.log_group_name
+
+        port_mappings = [
+          {
+            name          = "http"
+            containerPort = 8080
+            hostPort      = 8080
+            protocol      = "tcp"
+            appProtocol   = "http"
+          }
+        ]
+      }
+
+      service = {
+        desired_count                     = 2
+        security_groups                   = [var.service_security_group_id]
+        subnets                           = var.private_subnet_ids
+        enable_execute_command            = true
+        enable_ecs_managed_tags           = true
+        health_check_grace_period_seconds = 60
+
+        target_groups = [
+          {
+            target_group_arn = var.target_group_arn
+            container_name   = "app"
+            container_port   = 8080
+          }
+        ]
+      }
+    }
+  }
 }
 ```
 
-### Removing TG creation
+## Container Definition Paths
 
-Older examples showing TG creation inside this module have been removed. Ensure your ALB module creates TGs and exposes their ARNs for wiring here.
+For most services, use the synthesized task definition fields:
 
-## Variable reference (excerpt)
+- `task_definition.image`
+- `task_definition.environment`
+- `task_definition.port_mappings`
+- `task_definition.mount_points`
+- `task_definition.firelens_configuration`
+- `task_definition.ephemeral_storage`
+- `task_definition.operating_system_family`
+- `task_definition.cpu_architecture`
 
-- `load_balanced` (bool, default `true`): Whether to attach the service to LB target groups
-- `target_groups` (list(any), default `[]`):
-	- Each entry must include `target_group_arn` and should specify `container_name`, `container_port`
-- `task_container_port` (number, default `80`): Default container port
-// Removed: `task_container_protocol` and `health_check` as Target Groups are not created here
+If you need complete control, pass a prebuilt JSON string through:
 
-## Notes
+- `task_definition.container_definition`
 
-- Fargate requires `awsvpc` networking; ensure `subnets` and `security_groups` are provided per service
-- Target Groups use `target_type = "ip"`
-- Ensure `container_name` in `target_groups` matches the container name in your task definition (or use the module’s default naming convention if aligned)
-- You still need an ALB/NLB, listeners, and listener rules to route traffic to the TGs
+Service Connect requires a named port mapping. The value of
+`service.service_connect.services[].port_name` must match the `name` of one of
+the container `port_mappings`.
 
+## Deployment Strategy Notes
+
+The maintained examples focus on ECS-native service deployments, not
+CodeDeploy-first workflows.
+
+- `ROLLING` works with a normal target group or with no target group at all
+- `BLUE_GREEN`, `LINEAR`, and `CANARY` require advanced LB wiring
+- non-rolling traffic shifting requires
+  `target_groups[].alternate_target_group_arn`
+- non-rolling traffic shifting requires
+  `target_groups[].production_listener_rule`
+- non-rolling traffic shifting requires
+  `service.deployment_configuration.ecs_alb_service_role_arn`
+
+The module still contains legacy `CODE_DEPLOY` and `EXTERNAL` controller paths,
+but the maintained examples and primary documentation are centered on ECS-native
+Fargate deployments.
+
+## Current Gaps
+
+- no service `volume_configuration` support for ECS-managed EBS volumes
+- no VPC Lattice integration
+- no Service Connect test traffic rule surface
+- no integrated creation of IAM roles, security groups, target groups, or log
+  groups
+
+## Documentation Map
+
+- [`USER_GUIDE.md`](./USER_GUIDE.md): usage guide for multi-tier patterns and
+  deployment strategies
+- [`ADVANCED_FEATURES.md`](./ADVANCED_FEATURES.md): focused reference for
+  Service Connect, traffic shifting, autoscaling, and task definition options
+- [`examples/simple`](./examples/simple): minimal single-service consumer
+- [`examples/complete`](./examples/complete): three-tier example with Service
+  Connect, canary deployment, and autoscaling
+- [`examples/complet-parten5`](./examples/complet-parten5): Pattern 5 example
+  with a load-balanced edge tier and unexposed internal services
+
+## Examples
+
+The shipped examples assume the network, IAM, security groups, target groups,
+listener rules, namespaces, and log groups already exist. That keeps the
+examples aligned with this module's actual scope and avoids hiding critical
+production dependencies inside example-only infrastructure.

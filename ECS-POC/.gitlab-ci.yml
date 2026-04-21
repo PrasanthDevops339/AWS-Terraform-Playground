@@ -1,0 +1,246 @@
+# ==============================================================================
+# GitLab CI/CD Pipeline — ECS Fargate Deployment
+# Supports ECS-Native: ROLLING | BLUE_GREEN | LINEAR | CANARY
+#
+# Pipeline Flow:
+#   build → terraform-plan → terraform-apply → deploy-ecs
+#
+# Required CI/CD Variables (Settings → CI/CD → Variables):
+#   AWS_ACCESS_KEY_ID         - AWS credentials (or use OIDC)
+#   AWS_SECRET_ACCESS_KEY     - AWS credentials (or use OIDC)
+#   AWS_REGION                - Target region (e.g., ap-southeast-2)
+#   ECR_REGISTRY              - ECR registry URL (e.g., 123456789.dkr.ecr.region.amazonaws.com)
+#   ECR_REPOSITORY            - ECR repo name (e.g., my-api)
+#   ECS_CLUSTER               - ECS cluster name
+#   ECS_SERVICE               - ECS service name
+#   CONTAINER_NAME            - Container name in task definition
+#   TF_STATE_BUCKET           - S3 bucket for Terraform state
+#   TF_LOCK_TABLE             - DynamoDB table for state locking
+#
+# Optional CI/CD Variables:
+#   DEPLOY_STRATEGY           - Override: ROLLING|BLUE_GREEN|LINEAR|CANARY
+#   BG_BAKE_TIME_MINUTES      - Blue/Green bake time (default: 5)
+#   LINEAR_STEP_PERCENT       - Linear step % (default: 10)
+#   LINEAR_STEP_BAKE_MINUTES  - Linear step bake (default: 5)
+#   CANARY_PERCENT            - Canary traffic % (default: 10)
+#   CANARY_BAKE_MINUTES       - Canary bake time (default: 10)
+# ==============================================================================
+
+stages:
+  - build
+  - validate
+  - plan
+  - apply
+  - deploy
+
+variables:
+  DOCKER_HOST: tcp://docker:2376
+  DOCKER_TLS_CERTDIR: "/certs"
+  DOCKER_TLS_VERIFY: 1
+  TF_IN_AUTOMATION: "true"
+  TF_ROOT: "${CI_PROJECT_DIR}/infra"
+
+# ==============================================================================
+# Templates
+# ==============================================================================
+
+.aws_auth: &aws_auth
+  before_script:
+    - aws sts get-caller-identity
+    - aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY} 2>/dev/null || true
+
+.terraform_base: &terraform_base
+  image:
+    name: hashicorp/terraform:1.9
+    entrypoint: [""]
+  before_script:
+    - cd ${TF_ROOT}
+    - terraform init
+        -backend-config="bucket=${TF_STATE_BUCKET}"
+        -backend-config="key=${ECS_SERVICE}/terraform.tfstate"
+        -backend-config="region=${AWS_REGION}"
+        -backend-config="dynamodb_table=${TF_LOCK_TABLE}"
+
+# ==============================================================================
+# Stage: Build — Docker image → ECR
+# ==============================================================================
+
+build:
+  stage: build
+  image: docker:27
+  services:
+    - docker:27-dind
+  <<: *aws_auth
+  script:
+    - IMAGE_TAG="${ECR_REGISTRY}/${ECR_REPOSITORY}:${CI_COMMIT_SHORT_SHA}"
+    - IMAGE_LATEST="${ECR_REGISTRY}/${ECR_REPOSITORY}:latest"
+
+    - echo "🐳 Building image..."
+    - docker build
+        --cache-from "${IMAGE_LATEST}"
+        --tag "${IMAGE_TAG}"
+        --tag "${IMAGE_LATEST}"
+        --label "git.commit=${CI_COMMIT_SHA}"
+        --label "git.branch=${CI_COMMIT_REF_NAME}"
+        --label "ci.pipeline=${CI_PIPELINE_ID}"
+        .
+
+    - echo "📦 Pushing to ECR..."
+    - docker push "${IMAGE_TAG}"
+    - docker push "${IMAGE_LATEST}"
+
+    - echo "IMAGE_URI=${IMAGE_TAG}" >> build.env
+  artifacts:
+    reports:
+      dotenv: build.env
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_MERGE_REQUEST_IID
+
+# ==============================================================================
+# Stage: Validate — Terraform fmt + validate
+# ==============================================================================
+
+terraform-validate:
+  stage: validate
+  <<: *terraform_base
+  script:
+    - terraform fmt -check -recursive
+    - terraform validate
+  rules:
+    - if: $CI_MERGE_REQUEST_IID
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ==============================================================================
+# Stage: Plan — Terraform plan (MR + main)
+# ==============================================================================
+
+terraform-plan:
+  stage: plan
+  <<: *terraform_base
+  script:
+    - terraform plan
+        -var="image_uri=${IMAGE_URI:-placeholder}"
+        -out=tfplan
+        -input=false
+    - terraform show -no-color tfplan > plan.txt
+  artifacts:
+    paths:
+      - ${TF_ROOT}/tfplan
+      - ${TF_ROOT}/plan.txt
+    expire_in: 1 hour
+  rules:
+    - if: $CI_MERGE_REQUEST_IID
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ==============================================================================
+# Stage: Apply — Terraform apply (main branch only)
+# ==============================================================================
+
+terraform-apply:
+  stage: apply
+  <<: *terraform_base
+  script:
+    - terraform apply -input=false tfplan
+  dependencies:
+    - terraform-plan
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+  environment:
+    name: production
+    action: prepare
+
+# ==============================================================================
+# Stage: Deploy — Force new deployment (image-only updates)
+#
+# When Terraform manages the deployment strategy natively, the deploy stage
+# just needs to force a new deployment to pick up the new container image.
+# The strategy (ROLLING / BLUE_GREEN / LINEAR / CANARY) is already configured
+# in Terraform via deployment_configuration.strategy.
+# ==============================================================================
+
+deploy:
+  stage: deploy
+  image:
+    name: amazon/aws-cli:2.22
+    entrypoint: [""]
+  dependencies:
+    - build
+  script:
+    - echo "🚀 Triggering ECS deployment with strategy configured in Terraform..."
+    - aws ecs update-service
+        --cluster "${ECS_CLUSTER}"
+        --service "${ECS_SERVICE}"
+        --force-new-deployment
+        --query 'service.deployments[0].{Status:status,Strategy:strategy,Desired:desiredCount,Running:runningCount}'
+        --output table
+
+    - echo "⏳ Waiting for deployment to stabilize..."
+    - |
+      SECONDS=0
+      TIMEOUT=${DEPLOY_TIMEOUT:-900}
+      while (( SECONDS < TIMEOUT )); do
+        STATE=$(aws ecs describe-services \
+          --cluster "${ECS_CLUSTER}" \
+          --services "${ECS_SERVICE}" \
+          --query 'services[0].deployments[0].rolloutState' \
+          --output text)
+        echo "[${SECONDS}s] Rollout state: ${STATE}"
+        case "${STATE}" in
+          COMPLETED) echo "✅ Deployment completed!"; exit 0 ;;
+          FAILED)    echo "❌ Deployment failed!"; exit 1 ;;
+        esac
+        sleep 15
+      done
+      echo "⏰ Timed out after ${TIMEOUT}s"; exit 2
+  environment:
+    name: production
+    action: start
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ==============================================================================
+# Multi-environment variant (dev → staging → prod)
+# ==============================================================================
+# Uncomment and adapt for multi-env pipelines:
+#
+# .deploy_env: &deploy_env
+#   <<: *deploy_base
+#   script:
+#     - ./scripts/ecs-deploy.sh
+#
+# deploy-dev:
+#   <<: *deploy_env
+#   variables:
+#     ECS_CLUSTER: myapp-dev
+#     ECS_SERVICE: api-dev
+#     DEPLOY_STRATEGY: ROLLING    # Fast iteration in dev
+#   environment: { name: dev }
+#   rules:
+#     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+#
+# deploy-staging:
+#   <<: *deploy_env
+#   variables:
+#     ECS_CLUSTER: myapp-staging
+#     ECS_SERVICE: api-staging
+#     DEPLOY_STRATEGY: CANARY     # Validate with canary in staging
+#     CANARY_PERCENT: "20"
+#     CANARY_BAKE_MINUTES: "5"
+#   environment: { name: staging }
+#   rules:
+#     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+#       when: manual
+#
+# deploy-prod:
+#   <<: *deploy_env
+#   variables:
+#     ECS_CLUSTER: myapp-prod
+#     ECS_SERVICE: api-prod
+#     DEPLOY_STRATEGY: BLUE_GREEN  # Full B/G safety in prod
+#     BG_BAKE_TIME_MINUTES: "10"
+#   environment: { name: production }
+#   rules:
+#     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+#       when: manual

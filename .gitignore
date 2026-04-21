@@ -236,3 +236,6 @@ test-output/
 
 # Performance test results
 .benchmarks/
+
+# Kiro
+.kiro/

@@ -15,3 +15,4 @@ resource "aws_db_event_subscription" "subscription" {
   event_categories = var.db_events_list
   tags             = merge(var.tags, { Name = "${local.account_alias}-${var.identifier}-db-event-subscription" })
 }
+

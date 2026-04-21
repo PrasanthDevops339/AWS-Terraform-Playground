@@ -18,3 +18,4 @@ resource "aws_db_parameter_group" "main" {
 
   lifecycle { create_before_destroy = true }
 }
+

@@ -1,3 +1,79 @@
+locals {
+  task_definition_port_mappings = {
+    for service_name, service_config in var.container_config :
+    service_name => try(
+      service_config.task_definition.port_mappings,
+      try(
+        service_config.task_definition.portMappings,
+        try(service_config.task_definition.container_port, null) != null ? [{
+          name          = try(service_config.task_definition.port_name, null)
+          containerPort = service_config.task_definition.container_port
+          hostPort      = try(service_config.task_definition.host_port, null)
+          protocol      = try(service_config.task_definition.port_protocol, null)
+          appProtocol   = try(service_config.task_definition.app_protocol, null)
+        }] : null
+      )
+    )
+  }
+
+  task_definition_rendered_container_definitions = {
+    for service_name, service_config in var.container_config :
+    service_name => (
+      try(service_config.task_definition.container_definition, null) != null
+      ? service_config.task_definition.container_definition
+      : jsonencode([{
+        name              = try(service_config.container_name, "${local.account_alias}-${service_name}-${var.container_name}")
+        image             = try(service_config.task_definition.image, null)
+        cpu               = try(service_config.task_definition.cpu, null)
+        memory            = try(service_config.task_definition.memory, null)
+        memoryReservation = try(service_config.task_definition.memoryReservation, null)
+
+        portMappings = local.task_definition_port_mappings[service_name]
+
+        environment            = try(service_config.task_definition.environment, try(service_config.task_definition.envvars, null))
+        secrets                = try(service_config.task_definition.secrets, null)
+        credentialSpecs        = try(service_config.task_definition.credentialSpecs, null)
+        command                = try(service_config.task_definition.command, null)
+        environmentFiles       = try(service_config.task_definition.environmentFiles, null)
+        disableNetworking      = try(service_config.task_definition.disableNetworking, null)
+        dnsSearchDomains       = try(service_config.task_definition.dns_search_domains, null)
+        dnsServers             = try(service_config.task_definition.dns_servers, null)
+        dockerLabels           = try(service_config.task_definition.docker_labels, null)
+        dockerSecurityOptions  = try(service_config.task_definition.docker_security_options, null)
+        linuxParameters        = try(service_config.task_definition.linuxParameters, null)
+        links                  = try(service_config.task_definition.links, null)
+        entryPoint             = try(service_config.task_definition.entrypoint, try(service_config.task_definition.entry_point, null))
+        hostname               = try(service_config.task_definition.hostname, null)
+        healthCheck            = try(service_config.task_definition.health_check, try(service_config.task_definition.healthcheck, try(service_config.task_definition.healthCheck, null)))
+        essential              = try(service_config.task_definition.essential, null)
+        interactive            = try(service_config.task_definition.interactive, null)
+        readonlyRootFilesystem = try(service_config.task_definition.readonlyRootFilesystem, null)
+        mountPoints            = try(service_config.task_definition.mount_points, try(service_config.task_definition.mountPoints, null))
+        volumesFrom            = try(service_config.task_definition.volumes_from, try(service_config.task_definition.volumesFrom, null))
+        firelensConfiguration  = try(service_config.task_definition.firelens_configuration, try(service_config.task_definition.firelensConfiguration, null))
+
+        logConfiguration = {
+          logDriver = "awslogs"
+          options = {
+            awslogs-group         = try(service_config.task_definition.task_log_group_name, null)
+            awslogs-region        = data.aws_region.current.name
+            awslogs-stream-prefix = "/${service_name}"
+            mode                  = try(service_config.task_definition.mode, null)
+            max-buffer-size = try(
+              service_config.task_definition.max_buffer_size,
+              try(service_config.task_definition["max-buffer-size"],
+                try(service_config.task_definition["max-buffer_size"], null)
+              )
+            )
+          }
+        }
+
+        dependsOn = try(service_config.task_definition.dependsOn, null)
+      }])
+    )
+  }
+}
+
 resource "aws_ecs_task_definition" "main" {
   for_each = var.container_config
   family   = "${local.account_alias}-${each.key}"
@@ -5,59 +81,14 @@ resource "aws_ecs_task_definition" "main" {
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
 
-  cpu                      = try(each.value.task_definition.cpu, null)
-  memory                   = try(each.value.task_definition.memory, null)
-  task_role_arn            = try(each.value.task_definition.task_role_arn, null)
-  execution_role_arn       = try(each.value.task_definition.execution_role_arn, null)
+  cpu                = try(each.value.task_definition.cpu, null)
+  memory             = try(each.value.task_definition.memory, null)
+  task_role_arn      = try(each.value.task_definition.task_role_arn, null)
+  execution_role_arn = try(each.value.task_definition.execution_role_arn, null)
 
-  # If a complete container_definition JSON was provided, use it directly.
-  # Otherwise, synthesize one from common fields.
-  container_definitions = try(each.value.task_definition.container_definition, null) != null ?
-    each.value.task_definition.container_definition :
-    jsonencode([{
-      name  = try(each.value.container_name, "${local.account_alias}-${each.key}-${var.container_name}")
-      image = try(each.value.task_definition.image, null)
-      cpu   = try(each.value.task_definition.cpu, null)
-      memory               = try(each.value.task_definition.memory, null)
-      memoryReservation    = try(each.value.task_definition.memoryReservation, null)
-
-      portMappings = [{
-        containerPort = try(each.value.task_definition.container_port, null)
-        hostPort      = try(each.value.task_definition.host_port, null)
-      }]
-
-      environment          = try(each.value.task_definition.envvars, null)
-      secrets              = try(each.value.task_definition.secrets, null)
-      credentialSpecs      = try(each.value.task_definition.credentialSpecs, null)
-      command              = try(each.value.task_definition.command, null)
-      environmentFiles     = try(each.value.task_definition.environmentFiles, null)
-      disableNetworking    = try(each.value.task_definition.disableNetworking, null)
-      dnsSearchDomains     = try(each.value.task_definition.dns_search_domains, null)
-      dnsServers           = try(each.value.task_definition.dns_servers, null)
-      dockerLabels         = try(each.value.task_definition.docker_labels, null)
-      dockerSecurityOptions= try(each.value.task_definition.docker_security_options, null)
-      linuxParameters      = try(each.value.task_definition.linuxParameters, null)
-      links                = try(each.value.task_definition.links, null)
-      entryPoint           = try(each.value.task_definition.entrypoint, null)
-      hostname             = try(each.value.task_definition.hostname, null)
-      healthCheck          = try(each.value.task_definition.healthcheck, null)
-      essential            = try(each.value.task_definition.essential, null)
-      interactive          = try(each.value.task_definition.interactive, null)
-      readonlyRootFilesystem = try(each.value.task_definition.readonlyRootFilesystem, null)
-
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          awslogs-group         = try(each.value.task_definition.task_log_group_name, null)
-          awslogs-region        = data.aws_region.current.name
-          awslogs-stream-prefix = "/${each.key}"
-          mode                  = try(each.value.task_definition.mode, null)
-          max-buffer-size       = try(each.value.task_definition.max-buffer_size, null)
-        }
-      }
-
-      dependsOn = try(each.value.task_definition.dependsOn, null)
-    }])
+  # Keep the resource body simple; render the JSON in locals so both Terraform
+  # and IDE language servers have an easier time parsing it.
+  container_definitions = local.task_definition_rendered_container_definitions[each.key]
 
   runtime_platform {
     operating_system_family = try(each.value.task_definition.operating_system_family, "LINUX")
@@ -80,10 +111,10 @@ resource "aws_ecs_task_definition" "main" {
       dynamic "efs_volume_configuration" {
         for_each = lookup(volume.value, "efs_volume_configuration", [])
         content {
-          file_system_id         = lookup(efs_volume_configuration.value, "file_system_id", null)
-          root_directory         = lookup(efs_volume_configuration.value, "root_directory", null)
-          transit_encryption     = lookup(efs_volume_configuration.value, "transit_encryption", null)
-          transit_encryption_port= lookup(efs_volume_configuration.value, "transit_encryption_port", null)
+          file_system_id          = lookup(efs_volume_configuration.value, "file_system_id", null)
+          root_directory          = lookup(efs_volume_configuration.value, "root_directory", null)
+          transit_encryption      = lookup(efs_volume_configuration.value, "transit_encryption", null)
+          transit_encryption_port = lookup(efs_volume_configuration.value, "transit_encryption_port", null)
 
           dynamic "authorization_config" {
             for_each = length(lookup(efs_volume_configuration.value, "authorization_config", {})) == 0 ? [] : [lookup(efs_volume_configuration.value, "authorization_config", {})]

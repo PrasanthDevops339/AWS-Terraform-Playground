@@ -1,0 +1,64 @@
+{
+	"ec2_attributes": {
+		"@@operators_allowed_for_child_policies": [
+			"@@none"
+		],
+		"image_block_public_access": {
+			"state": {
+				"@@assign": "block_new_sharing"
+			}
+		},
+		"allowed_images_settings": {
+			"state": {
+				"@@assign": "audit_mode"
+			},
+			"image_criteria": {
+				"criteria_1": {
+					"allowed_image_providers": {
+						"@@assign": [
+							"111111111111",
+							"222222222222"
+						]
+					},
+					"image_names": {
+						"@@assign": [
+							"prasanth-*",
+							"test2-*",
+							"aply-*"
+						]
+					}
+				},
+				"criteria_2": {
+					"allowed_image_providers": {
+						"@@assign": [
+							"amazon"
+						]
+					},
+					"image_names": {
+						"@@assign": [
+							"dave-1-*",
+							"dave-2-*"
+						]
+					}
+				},
+				"criteria_3": {
+					"allowed_image_providers": {
+						"@@assign": [
+							"aws_marketplace"
+						]
+					},
+					"marketplace_product_codes": {
+						"@@assign": [
+							"0vg0000000000000000000000",
+							"0vg000000000000000000011",
+							"0vg000000000000000008906"
+						]
+					}
+				}
+			}
+		},
+		"exception_message": {
+			"@@assign": "test message"
+		}
+	}
+}

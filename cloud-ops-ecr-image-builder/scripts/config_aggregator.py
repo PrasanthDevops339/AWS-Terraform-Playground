@@ -1,0 +1,659 @@
+"""
+AWS Config Aggregator Query Script
+
+Purpose:
+    Queries AWS Config aggregator for non-compliant resources across multiple accounts.
+    Retrieves resource compliance data and stores results for reporting/remediation.
+
+Features:
+    - Cross-account Config data aggregation
+    - SQL-based querying of resource configurations
+    - OpenTelemetry tracing for observability
+    - Pagination handling for large result sets
+    - Integration with DynamoDB for data persistence
+
+Environment Variables Required:
+    - AGGREGATOR_NAME: Name of the AWS Config aggregator
+    - REGION: AWS region for Config queries
+    - TAGGING_BUCKET: S3 bucket for storing results
+    - BUCKET_PREFIX: S3 key prefix for organizing data
+    - POLICY_TABLE: DynamoDB table for policy tracking
+    - CLOUD_VERSION_TABLE: DynamoDB table for version tracking
+
+Usage:
+    Called by orchestration script with resource type filter
+    Example: main('vol-')  # Query EBS volumes
+
+Output:
+    Returns non-compliant resources with:
+    - Resource type and ID
+    - Compliance status and rule violations
+    - Account and region information
+    - Configuration capture timestamp
+"""
+
+# scripts/config_aggregator.py
+
+import json
+import boto3
+import io
+import csv
+import os
+import time
+import pandas as pd
+from datetime import datetime
+from botocore.config import Config
+from botocore.exceptions import ClientError
+from boto3.dynamodb.conditions import Key, Attr
+import sys
+import logging
+
+# OpenTelemetry for distributed tracing
+from opentelemetry import trace
+from opentelemetry.trace import SpanKind
+
+# Configure logging with OpenTelemetry trace context
+FORMAT = '%(asctime)s - %(levelname)s - [trace_id=%(otelTraceID)s span_id=%(otelSpanID)s resource.service.name=%(otelServiceName)s] - %(message)s'
+logger = logging.getLogger(__name__)
+logger.setLevel("INFO")
+logger.propagate = False  # prevent duplicate output if root logger also has handlers
+h = logging.StreamHandler(sys.stdout)
+h.setFormatter(logging.Formatter(FORMAT))
+logger.addHandler(h)
+
+logger.info("Starting Config query")
+
+# Load configuration from environment variables
+AGGREGATOR_NAME = os.getenv('AGGREGATOR_NAME')  # Config aggregator name
+REGION = os.getenv('REGION')                    # AWS region
+bucket_name = os.getenv('TAGGING_BUCKET')       # S3 bucket for results
+bucket_prefix = os.getenv('BUCKET_PREFIX')      # S3 object key prefix
+policy_table = os.getenv('POLICY_TABLE')        # DynamoDB policy table
+# Optional: comma-separated allowlist of account IDs to query (e.g., "111111111111,222222222222")
+ACCOUNT_ID_ALLOWLIST = os.getenv('ACCOUNT_ID_ALLOWLIST')
+# CLOUD_VERSION_TABLE: DynamoDB table containing 1.0 accounts to exclude
+# Format: operations-{env}-cloud-versions (e.g., operations-dev-cloud-versions)
+version_table = os.getenv('CLOUD_VERSION_TABLE')  # DynamoDB version table
+
+# ============================================================================
+# SUSPENDED OU CONFIGURATION
+# ============================================================================
+# Hardcoded OU ID for the Suspended OU. All accounts under this OU will be
+# excluded from compliance reporting. Update this if your Suspended OU changes.
+# ============================================================================
+SUSPENDED_OU_ID = 'ou-susp345jkl'  # Update this with your actual Suspended OU ID
+# ============================================================================
+
+
+def main(item, tries=1):
+    """
+    Main query function for AWS Config aggregator.
+    
+    Args:
+        item (str): Resource ID prefix to filter query (e.g., 'vol-' for EBS volumes)
+        tries (int): Retry attempt number (for error handling)
+        
+    Returns:
+        list: Non-compliant resources matching the filter
+        
+    Process:
+        1. Construct SQL query for Config aggregator
+        2. Execute query with pagination
+        3. Process and format results
+        4. Handle retries on failures
+        
+    Query Logic:
+        - Selects resources with NON_COMPLIANT status
+        - Filters by resource ID prefix
+        - Orders by account ID
+        - Returns resource configuration and compliance details
+    """
+    # Initialize AWS Config client with retry configuration
+    client = boto3.client('config', region_name=REGION, config=Config(retries={'max_attempts': 10}))
+    
+    # SQL query to select all non-compliant resources matching the filter
+    # Query structure:
+    #   - resourceType: Type of AWS resource (e.g., AWS::EC2::Volume)
+    #   - resourceId: Unique resource identifier
+    #   - configuration.complianceType: Compliance status
+    #   - configuration.configRuleList: Rules that evaluated the resource
+
+    safe_item = item.replace("'", "''")
+
+    allowlist = []
+    if ACCOUNT_ID_ALLOWLIST:
+        allowlist = [a.strip() for a in ACCOUNT_ID_ALLOWLIST.split(",") if a.strip()]
+
+    account_filter = ""
+    if allowlist:
+        quoted_accounts = ",".join([f"'{a}'" for a in allowlist])
+        account_filter = f"AND accountId IN ({quoted_accounts}) "
+
+    # =========================================================================
+    # PRODUCTION QUERY (active by default)
+    # TO TEST: comment out this query block and uncomment the TEST QUERY block below
+    # =========================================================================
+    query = "SELECT resourceType,resourceId,resourceName,configuration.targetResourceType,configuration.complianceType,configuration.configRuleList," \
+            "configurationItemCaptureTime,configurationItemStatus,accountId,awsRegion " \
+            "WHERE configuration.complianceType = 'NON_COMPLIANT' " \
+            "AND resourceId LIKE '" + item + "%' " \
+            + account_filter + \
+            "ORDER BY accountId DESC"
+    # =========================================================================
+
+    # Optional: Add time filter for recent violations only
+    # "AND configurationItemCaptureTime >= '2025-09-15T00:00:00Z'" \
+    #logger.info(query)
+
+    # =========================================================================
+    # TEST QUERY — hardcoded dummy account IDs (commented out by default)
+    # TO ACTIVATE: uncomment this block and comment out the PRODUCTION QUERY block above
+    # Replace dummy IDs below with real test account IDs before running
+    # =========================================================================
+    # query = (
+    #     "SELECT resourceType,resourceId,resourceName,configuration.targetResourceType,"
+    #     "configuration.complianceType,configuration.configRuleList,"
+    #     "configurationItemCaptureTime,configurationItemStatus,accountId,awsRegion "
+    #     "WHERE configuration.complianceType = 'NON_COMPLIANT' "
+    #     "AND resourceId LIKE '" + safe_item + "%' "
+    #     "AND accountId IN ("
+    #     "'111122223333',"  # dummy-sandbox-account-01
+    #     "'222233334444',"  # dummy-sandbox-account-02
+    #     "'333344445555',"  # dummy-dev-account-01
+    #     "'444455556666',"  # dummy-dev-account-02
+    #     "'555566667777',"  # dummy-dev-account-03
+    #     "'666677778888',"  # dummy-staging-account-01
+    #     "'777788889999',"  # dummy-staging-account-02
+    #     "'888899990000',"  # dummy-nonprod-account-01
+    #     "'999900001111',"  # dummy-nonprod-account-02
+    #     "'000011112222',"  # dummy-nonprod-account-03
+    #     "'101010101010',"  # dummy-test-account-01
+    #     "'121212121212'"   # dummy-test-account-02
+    #     ") "
+    #     "ORDER BY accountId DESC"
+    # )
+    # =========================================================================
+
+    results = []
+
+    try:
+        # Initialize the nextToken as None to start the loop
+        next_token = None
+        # Loop to handle pagination with nextToken
+        while True:
+            # Execute the query with the current nextToken
+            if next_token:
+                response = client.select_aggregate_resource_config(
+                    Expression=query,
+                    ConfigurationAggregatorName=AGGREGATOR_NAME,
+                    NextToken=next_token
+                )
+            else:
+                response = client.select_aggregate_resource_config(
+                    Expression=query,
+                    ConfigurationAggregatorName=AGGREGATOR_NAME
+                )
+
+            # Track Config query API call
+            api_metrics['config_query_calls'] += 1
+
+            #logger.info("Response", response)
+
+            # Process the results (for example, logger.info them)
+            results.extend(response['Results'])
+
+            # Check if there is a nextToken to continue fetching more results
+            next_token = response.get('NextToken')
+
+            # If no nextToken, break out of the loop
+            if not next_token:
+                break
+
+        return results
+
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ThrottlingException':
+            if tries <= 3:
+                logger.error("Throttling Exception Occured.")
+                logger.error("Retrying.....")
+                logger.error("Attempt No.: " + str(tries))
+                time.sleep(3*tries)
+                return main(item, tries+1)
+            else:
+                logger.error("Attempted 3 Times But No Success.")
+                logger.error("Raising Exception.....")
+                raise
+        else:
+            logger.error(f"Error executing query : {str(e)}")
+            logger.error(f"Failed query: {query}")
+            raise
+
+
+# A cache to store annotations once they've been fetched
+annotation_cache = {}
+
+
+# ============================================================================
+# API CALL METRICS TRACKING
+# ============================================================================
+# Track API usage for cost monitoring and optimization validation
+# ============================================================================
+api_metrics = {
+    'config_query_calls': 0,
+    'rule_description_calls': 0,
+    'rule_description_cache_hits': 0,
+    'rule_description_wildcard_skips': 0
+}
+
+
+def get_rule_description(rule_name, account_id, region, rule_ann):
+    client = get_config_client()  # Use cached client instead of creating new one
+
+    cache_key = (rule_name, account_id, region)
+
+    if cache_key in annotation_cache:
+        api_metrics['rule_description_cache_hits'] += 1
+        return annotation_cache[cache_key]
+
+    # Handle empty/missing annotations (treat as wildcard)
+    if not rule_ann or rule_ann == {} or rule_ann == []:
+        logger.warning(f"No annotation filter for {rule_name} - treating as wildcard")
+        rule_ann = ["*"]
+
+    # Wildcard shortcut - skip API call if any annotation is acceptable
+    if "*" in rule_ann:
+        logger.info(f"Wildcard annotation filter - skipping API call for {rule_name}")
+        annotation_cache[cache_key] = "NON_COMPLIANT (wildcard match)"
+        api_metrics['rule_description_wildcard_skips'] += 1
+        return annotation_cache[cache_key]
+
+    detail_paginator = client.get_paginator('get_aggregate_compliance_details_by_config_rule')
+    detail_iterator = detail_paginator.paginate(
+        ConfigurationAggregatorName=AGGREGATOR_NAME,
+        ConfigRuleName=rule_name,
+        AccountId=account_id,
+        AwsRegion=region,
+        ComplianceType='NON_COMPLIANT',
+        PaginationConfig={
+            'PageSize': 100  # Fetch 100 per page (max allowed) instead of default 50
+        }
+    )
+
+    # Track API call (each pagination may involve multiple API requests, but count as 1 lookup)
+    api_metrics['rule_description_calls'] += 1
+
+    for details_page in detail_iterator:
+        for result in details_page['AggregateEvaluationResults']:
+            if 'Annotation' in result:
+                if "*" in rule_ann:
+                    ruleann_check = True
+                else:
+                    ruleann_check = any(item in result['Annotation'] for item in rule_ann)
+                if ruleann_check:
+                    description = result['Annotation']
+                    logger.info(f"In subset desc {result['Annotation']}")
+                else:
+                    logger.info("No subset: continuing")
+                    continue
+            else:
+                description = ''
+            annotation_cache[cache_key] = description
+            return description
+
+
+def get_account_name(account_id):
+    try:
+        org_client = boto3.client('organizations')
+        response = org_client.describe_account(AccountId=account_id)
+        account_name = response.get('Account', {}).get('Name')
+        return account_name
+    except Exception as e:
+        logger.error(f"Error getting account name: {e}")
+        return None
+
+
+# A cache to store account names once they've been fetched
+account_cache = {}
+
+
+def get_account_name_cached(account_id):
+    # Check if the account name is already cached
+    if account_id not in account_cache:
+        # If not cached, fetch and store it
+        account_cache[account_id] = get_account_name(account_id)
+    return account_cache[account_id]
+
+
+# A cache to store 1.0/2.0 version lookups once they've been fetched per account
+version_cache = {}
+
+
+def check_account_cached(account_name):
+    # Returns cached result to avoid repeated DynamoDB queries for the same account
+    if account_name not in version_cache:
+        version_cache[account_name] = check_account(account_name)
+    return version_cache[account_name]
+
+
+def check_account(account_name):
+    # Check if the account is in dynamo to determine 1.0 or 2.0
+    dynamodb = boto3.resource('dynamodb', region_name=REGION)
+    table = dynamodb.Table(version_table)
+
+    try:
+        response = table.query(
+            KeyConditionExpression=boto3.dynamodb.conditions.Key('account_name').eq(account_name)
+        )
+
+        # Check if the 'Items' list in the response is not empty
+        if bool(response.get('Items')):
+            return True
+        else:
+            return False
+
+    except ClientError as e:
+        logger.error(f"Error in Dynamo query: {e}")
+        return False
+
+
+# ============================================================================
+# BOTO3 CLIENT CACHING
+# ============================================================================
+# Create shared boto3 clients once at module level to avoid repeated client
+# creation in loops, which can trigger unnecessary STS API calls
+# ============================================================================
+_config_client = None
+_s3_client = None
+
+
+def get_config_client():
+    """Get or create cached Config client"""
+    global _config_client
+    if _config_client is None:
+        _config_client = boto3.client('config', region_name=REGION,
+                                      config=Config(retries={'max_attempts': 10}))
+    return _config_client
+
+
+def get_s3_client():
+    """Get or create cached S3 client"""
+    global _s3_client
+    if _s3_client is None:
+        _s3_client = boto3.client('s3', region_name=REGION)
+    return _s3_client
+
+
+# ============================================================================
+# SUSPENDED OU EXCLUSION - START
+# ============================================================================
+# Build a suspended account set once per run to avoid repeated Organizations API
+# calls (especially expensive for accounts with many resources).
+# ============================================================================
+suspended_account_cache = None
+suspended_account_cache_ts = None
+SUSPENDED_OU_CACHE_TTL_ENABLED = os.getenv('SUSPENDED_OU_CACHE_TTL_ENABLED', 'true').strip().lower() == 'true'
+SUSPENDED_OU_CACHE_TTL_SECONDS = int(os.getenv('SUSPENDED_OU_CACHE_TTL_SECONDS', '1800'))
+
+
+def _list_accounts_for_parent(org_client, parent_id):
+    account_ids = []
+    paginator = org_client.get_paginator('list_accounts_for_parent')
+    for page in paginator.paginate(ParentId=parent_id):
+        for account in page.get('Accounts', []):
+            if account.get('Id'):
+                account_ids.append(account['Id'])
+    return account_ids
+
+
+def get_suspended_account_ids():
+    """
+    Fetch all account IDs directly under the Suspended OU.
+    Returns a set of account IDs. Cached for the lifetime of the process.
+    """
+    global suspended_account_cache, suspended_account_cache_ts
+    now = time.time()
+    if suspended_account_cache is not None and suspended_account_cache_ts is not None:
+        if not SUSPENDED_OU_CACHE_TTL_ENABLED:
+            return suspended_account_cache
+        if now - suspended_account_cache_ts < SUSPENDED_OU_CACHE_TTL_SECONDS:
+            return suspended_account_cache
+
+    try:
+        org_client = boto3.client('organizations')
+        suspended_accounts = set()
+        for account_id in _list_accounts_for_parent(org_client, SUSPENDED_OU_ID):
+            suspended_accounts.add(account_id)
+
+        suspended_account_cache = suspended_accounts
+        suspended_account_cache_ts = now
+        sorted_accounts = sorted(suspended_accounts)
+        logger.info(f"[SUSPENDED OU] Cached {len(suspended_accounts)} suspended accounts")
+        logger.info(f"[SUSPENDED OU] Account IDs: {', '.join(sorted_accounts)}")
+        return suspended_account_cache
+
+    except Exception as e:
+        logger.error(f"[ERROR] Error building suspended account list: {e}")
+        # In case of error, return empty set to avoid skipping valid accounts
+        suspended_account_cache = set()
+        suspended_account_cache_ts = now
+        return suspended_account_cache
+
+
+def is_account_in_suspended_ou(account_id):
+    """
+    Fast membership check against cached Suspended OU accounts.
+    """
+    suspended_accounts = get_suspended_account_ids()
+    return account_id in suspended_accounts
+
+# ============================================================================
+# SUSPENDED OU EXCLUSION - END
+# ============================================================================
+
+
+if __name__ == '__main__':
+    tracer = trace.get_tracer(__name__)
+    with tracer.start_as_current_span("GetConfig", kind=SpanKind.SERVER):
+        now = datetime.now()
+        # Format the time
+        current_time = now.strftime("%H:%M:%S")
+        # logger.info the current time
+        logger.info(f"Current Time: {current_time}")
+
+        #get what to get from aws config using dynamo db table
+        dynamodb = boto3.resource('dynamodb', region_name=REGION)
+        table = dynamodb.Table(policy_table)
+
+        try:
+            # Perform the query with boolean filter
+            response = table.query(
+                KeyConditionExpression=Key('source').eq('aws_config'),
+                FilterExpression=Attr('enabled').eq(True)
+            )
+
+            if 'Items' in response and response['Items']:
+                for rule_item in response['Items']:  # Iterate over ALL enabled rules
+                    ingest_policy = rule_item.get('ingest_policy', '{}')
+                    rule_id = rule_item.get('id', 1)
+                    ingest = json.loads(ingest_policy)
+                    res_types = ingest.get('ResourceTypes', {})
+                    rule_ann = ingest.get('Annotations', {})
+                    rule_type = ingest.get('Rules', {})
+                    comp_type = ingest.get('ComplianceType', 'NON_COMPLIANT')
+
+                    logger.info(f"Processing rule_id={rule_id}")
+                    logger.info(f"res types: {res_types}")
+                    logger.info(f"rann {rule_ann}")
+                    logger.info(f"rtype {rule_type}")
+                    logger.info(f"comp {comp_type}")
+
+                    # Write to CSV in memory (fresh buffer per rule)
+                    csv_buffer = io.StringIO()
+                    fieldnames = ['resourceId', 'resourceType', 'resourceName', 'targetResourceType', 'complianceType', 'configRuleName',
+                                  'configurationItemCaptureTime', 'configurationItemStatus', 'accountId', 'accountName', 'awsRegion', 'description']
+                    writer = csv.DictWriter(csv_buffer, fieldnames=fieldnames)
+                    writer.writeheader()
+
+                    # Track accounts we've already logged a skip message for, so each
+                    # message fires at most once per account regardless of how many
+                    # non-compliant resources that account has.
+                    _logged_suspended: set = set()
+                    _logged_1dot0: set = set()
+                    _logged_no_annotations: set = set()
+
+                    for item in res_types:
+                        logger.info(item)
+                        results = main(item)
+
+                        n1 = datetime.now()
+                        t1 = n1.strftime("%H:%M:%S")
+                        logger.info(f"After res {t1}")
+
+                        for item in results:
+                            parsed_results = json.loads(item)
+                            resource_id = parsed_results.get('resourceId')
+                            resource_name = parsed_results.get('resourceName')
+                            resource_type = parsed_results.get('resourceType')
+                            target_res_type = parsed_results.get('configuration', {}).get('targetResourceType')
+                            compliance_type = parsed_results.get('configuration', {}).get('complianceType')
+                            capture_time = parsed_results.get('configurationItemCaptureTime')
+                            status = parsed_results.get('configurationItemStatus')
+                            account_id = parsed_results.get('accountId')
+                            account_name = get_account_name_cached(account_id)
+
+                            # ================================================================
+                            # SUSPENDED OU CHECK: Exclude accounts from Suspended OU
+                            # If account is in a Suspended OU, skip it entirely from reporting
+                            # ================================================================
+                            if is_account_in_suspended_ou(account_id):
+                                if account_id not in _logged_suspended:
+                                    logger.warning(f"[SUSPENDED OU] Skipping account: {account_id} ({account_name})")
+                                    _logged_suspended.add(account_id)
+                                continue
+                            # ================================================================
+
+                            region = parsed_results.get('awsRegion')
+                            config_rule_name = []
+                            config_annotation = []
+
+                            for rule in parsed_results.get('configuration', {}).get('configRuleList', []):
+                                if "*" in rule_type:
+                                    rule_check = True
+                                else:
+                                    rule_check = any(item in rule.get('configRuleName') for item in rule_type)
+                                if rule.get('complianceType') == comp_type and rule_check:
+                                    annotation = get_rule_description(rule.get('configRuleName'), account_id, region, rule_ann)
+                                    config_rule_name.append(rule.get('configRuleName'))
+                                    config_annotation.append(annotation)
+                                else:
+                                    continue
+
+                            #check if its 2.0 and then insert into list
+                            is_one_dot_zero = check_account_cached(account_name)
+                            if not is_one_dot_zero and config_annotation:
+                                # not 1.0 account
+                                writer.writerow({
+                                    'resourceId': resource_id, 'resourceType': resource_type, 'resourceName': resource_name,
+                                    'targetResourceType': target_res_type, 'complianceType': compliance_type, 'configRuleName': config_rule_name,
+                                    'configurationItemCaptureTime': capture_time, 'configurationItemStatus': status,
+                                    'accountId': account_id, 'accountName': account_name, 'awsRegion': region, 'description': config_annotation
+                                })
+                            elif is_one_dot_zero:
+                                if account_id not in _logged_1dot0:
+                                    logger.info(f"Account {account_id} & {account_name} is 1.0 - skipping")
+                                    _logged_1dot0.add(account_id)
+                            else:
+                                if account_id not in _logged_no_annotations:
+                                    logger.info(f"Account {account_id} & {account_name} - skipped (no matching annotations)")
+                                    _logged_no_annotations.add(account_id)
+
+                    n = datetime.now()
+                    current_time_str = n.strftime("%H:%M:%S")
+                    logger.info(f"After csv: {current_time_str}")
+
+                    # Read the CSV buffer into a pandas DataFrame
+                    try:
+                        logger.info("Reading csv to df")
+                        csv_buffer.seek(0)
+                        df = pd.read_csv(csv_buffer)
+                    except pd.errors.EmptyDataError:
+                        logger.error("Input CSV buffer is empty.")
+                    except Exception as e:
+                        logger.error(f"Error reading CSV buffer: {e}")
+
+                    # Group the DataFrame by the specified columns
+                    logger.info("Grouping data")
+                    logger.info(df)
+                    grouped_data = df.groupby(['accountId', 'accountName'])
+                    logger.info(f"Grouped data {grouped_data}")
+
+                    logger.info(f"Found {len(grouped_data)} unique account groups.")
+
+                    # Get S3 client once before loop (instead of creating new client per iteration)
+                    s3 = get_s3_client()
+
+                    # Iterate over each group and upload to S3
+                    for group_keys, group_df in grouped_data:
+                        # Create a safe file name from the grouping keys
+                        # Convert tuple to string, e.g., (101, 'John Doe') -> '101_John Doe'
+                        if isinstance(group_keys, tuple):
+                            group_account_id = str(group_keys[0])
+                            group_key_str = '_'.join(str(key) for key in group_keys)
+                        else:
+                            group_account_id = str(group_keys)
+                            group_key_str = str(group_keys)
+
+                        # Skip CSV creation for accounts in Suspended OU
+                        if is_account_in_suspended_ou(group_account_id):
+                            logger.warning(f"[SUSPENDED OU] Skipping CSV creation for suspended account: {group_account_id}")
+                            continue
+
+                        # Create an in-memory buffer for the group's CSV data
+                        csv_out_buffer = io.StringIO()
+                        group_df.to_csv(csv_out_buffer, index=False)
+                        csv_out_buffer.seek(0)
+
+                        # Upload to S3
+                        try:
+                            now = datetime.now()
+                            timestamp = now.timestamp()
+                            logger.info(timestamp)
+                            object_key = f'{bucket_prefix}/{group_key_str}_{rule_id}.csv'
+
+                            # Use cached S3 client from outside the loop
+                            s3.put_object(
+                                Bucket=bucket_name,
+                                Key=object_key,
+                                Body=csv_out_buffer.getvalue()
+                            )
+
+                            logger.info(f"CSV saved to s3://{bucket_name}/{object_key}")
+
+                        except ClientError as e:
+                            logger.error(f"Error uploading to s3 with key {object_key}: {e}")
+
+            else:
+                logger.info("No enabled rules")
+
+        except ClientError as e:
+            logger.error(f"Error in Dynamo query: {e}")
+
+        # Log API call metrics summary for cost monitoring
+        logger.info("=" * 80)
+        logger.info("API CALL METRICS SUMMARY")
+        logger.info("=" * 80)
+        logger.info(f"Config Query API Calls: {api_metrics['config_query_calls']}")
+        logger.info(f"Rule Description API Calls: {api_metrics['rule_description_calls']}")
+        logger.info(f"Rule Description Cache Hits: {api_metrics['rule_description_cache_hits']}")
+        logger.info(f"Rule Description Wildcard Skips: {api_metrics['rule_description_wildcard_skips']}")
+        total_rule_lookups = (api_metrics['rule_description_calls'] +
+                              api_metrics['rule_description_cache_hits'] +
+                              api_metrics['rule_description_wildcard_skips'])
+        if total_rule_lookups > 0:
+            cache_hit_rate = (api_metrics['rule_description_cache_hits'] / total_rule_lookups) * 100
+            logger.info(f"Cache Hit Rate: {cache_hit_rate:.1f}%")
+        logger.info(f"Total Config API Calls: {api_metrics['config_query_calls'] + api_metrics['rule_description_calls']}")
+        logger.info("=" * 80)
+
+        trace.get_tracer_provider().shutdown()
+

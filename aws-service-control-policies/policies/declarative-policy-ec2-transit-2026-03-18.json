@@ -1,0 +1,32 @@
+{
+  "ec2_attributes": {
+    "@@operators_allowed_for_child_policies": ["@@none"],
+    "allowed_images_settings": {
+      "@@operators_allowed_for_child_policies": ["@@none"],
+      "state": {
+        "@@assign": "${enforcement_mode}"
+      },
+      "image_criteria": {
+        "criteria_1": {
+          "allowed_image_providers": {
+            "@@assign": [
+              "aws_marketplace"
+            ]
+          },
+          "marketplace_product_codes": {
+            "@@assign": [
+              "6dcndlpi3tu6z8ten76nuejp",
+              "a8sxy6easi2zumgtyr564z6y7",
+              "akjez2r6bd6o7tg3mhptif6ti",
+              "7u0lnfhluv0k8cyewctn0xdx8",
+              "cmudow1tph9k98mz0ctkc063w"
+            ]
+          }
+        }
+      },
+      "exception_message": {
+        "@@assign": "AMI not approved for use in this application account. Only pras-transit exception AMIs are permitted: gigamon-gigavue-uctv-cntlr-*, gigamon-gigavue-vseries-node-*, ftdv-* (Cisco Firepower). Contact the Cloud Platform team for assistance."
+      }
+    }
+  }
+}

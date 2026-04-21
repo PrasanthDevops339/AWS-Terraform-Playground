@@ -1,0 +1,40 @@
+{
+  "ec2_attributes": {
+    "@@operators_allowed_for_child_policies": ["@@none"],
+    "allowed_images_settings": {
+      "@@operators_allowed_for_child_policies": ["@@none"],
+      "state": {
+        "@@assign": "${enforcement_mode}"
+      },
+      "image_criteria": {
+        "criteria_1": {
+          "allowed_image_providers": {
+            "@@assign": [
+              "amazon"
+            ]
+          },
+          "image_names": {
+            "@@assign": [
+              "amazon-eks-node-al2023-x86_64-standard-*"
+            ]
+          }
+        },
+        "criteria_2": {
+          "allowed_image_providers": {
+            "@@assign": [
+              "428641199958"
+            ]
+          },
+          "image_names": {
+            "@@assign": [
+              "UpsolverPrivateVpc-*"
+            ]
+          }
+        }
+      },
+      "exception_message": {
+        "@@assign": "AMI not approved for use in this application account. Only pras-datalake exception AMIs are permitted: amazon-eks-node-al2023-x86_64-standard-*, UpsolverPrivateVpc-*. Contact the Cloud Platform team for assistance."
+      }
+    }
+  }
+}

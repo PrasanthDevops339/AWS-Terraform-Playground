@@ -1,0 +1,102 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.6.6",
+  "resource_changes": [
+    {
+      "address": "aws_ebs_volume.data_disk",
+      "mode": "managed",
+      "type": "aws_ebs_volume",
+      "name": "data_disk",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "availability_zone": "us-east-1a",
+          "encrypted": false,
+          "size": 100,
+          "tags": {
+            "Name": "noncompliant-data-disk"
+          }
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true
+        }
+      }
+    },
+    {
+      "address": "aws_instance.app",
+      "mode": "managed",
+      "type": "aws_instance",
+      "name": "app",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "ami": "ami-1234567890abcdef0",
+          "instance_type": "t3.micro",
+          "root_block_device": [
+            {
+              "encrypted": false,
+              "volume_size": 20,
+              "volume_type": "gp3"
+            }
+          ],
+          "ebs_block_device": [
+            {
+              "device_name": "/dev/sdf",
+              "encrypted": false,
+              "volume_size": 50,
+              "volume_type": "gp3"
+            }
+          ]
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true
+        }
+      }
+    },
+    {
+      "address": "module.ec2_role.aws_instance.main",
+      "module_address": "module.ec2_role",
+      "mode": "managed",
+      "type": "aws_instance",
+      "name": "main",
+      "provider_name": "registry.terraform.io/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "ami": "ami-1234567890abcdef0",
+          "instance_type": "t3.micro",
+          "root_block_device": [
+            {
+              "delete_on_termination": true,
+              "encrypted": false,
+              "volume_size": 80,
+              "volume_type": "gp3",
+              "throughput": 200
+            }
+          ],
+          "ebs_block_device": [
+            {
+              "delete_on_termination": true,
+              "device_name": "/dev/sdf",
+              "encrypted": false,
+              "volume_size": 10,
+              "volume_type": "gp3",
+              "throughput": 200
+            }
+          ]
+        },
+        "after_unknown": {
+          "arn": true,
+          "id": true
+        }
+      }
+    }
+  ]
+}

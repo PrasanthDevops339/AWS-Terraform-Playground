@@ -61,3 +61,4 @@ output "lambda_s3_key" {
   description = "The lambda zip file, s3 uploaded key"
   value       = element(concat([local.lambda_s3_key], [""]), 0)
 }
+

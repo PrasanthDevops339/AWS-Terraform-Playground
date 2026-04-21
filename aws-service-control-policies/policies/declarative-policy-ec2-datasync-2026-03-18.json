@@ -1,0 +1,28 @@
+{
+  "ec2_attributes": {
+    "@@operators_allowed_for_child_policies": ["@@none"],
+    "allowed_images_settings": {
+      "@@operators_allowed_for_child_policies": ["@@none"],
+      "state": {
+        "@@assign": "${enforcement_mode}"
+      },
+      "image_criteria": {
+        "criteria_1": {
+          "allowed_image_providers": {
+            "@@assign": [
+              "amazon"
+            ]
+          },
+          "image_names": {
+            "@@assign": [
+              "aws-datasync-*"
+            ]
+          }
+        }
+      },
+      "exception_message": {
+        "@@assign": "AMI not approved for use in this application account. Only pras-datasync exception AMIs are permitted: aws-datasync-*. Contact the Cloud Platform team for assistance."
+      }
+    }
+  }
+}

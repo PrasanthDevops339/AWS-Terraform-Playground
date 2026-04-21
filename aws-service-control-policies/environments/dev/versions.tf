@@ -7,10 +7,9 @@ terraform {
   }
 
   backend "s3" {
-    bucket       = "acme-audit-dev-tf-backend-use2"
-    use_lockfile = true
-    key          = "aws-service-control-policies"
-    region       = "us-east-2"
+    bucket = "acme-audit-dev-tf-backend-use2"
+    key    = "aws-service-control-policies"
+    region = "us-east-2"
   }
 }
 
@@ -19,11 +18,12 @@ provider "aws" {
 
   default_tags {
     tags = {
-      "finops:application"  = "platform_core_services"
-      "finops:portfolio"    = "Technology Delivery"
-      "finops:costcenter"   = ""
-      "finops:owner"        = ""
-      "admin:environment"   = "dev"
+      "finops:application" = "platform_core_services"
+      "finops:portfolio"   = "Technology Delivery"
+      "finops:costcenter"  = ""
+      "finops:owner"       = ""
+      "admin:environment"  = "dev"
     }
   }
 }
+

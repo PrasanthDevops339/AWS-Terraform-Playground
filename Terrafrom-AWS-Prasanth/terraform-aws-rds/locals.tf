@@ -10,3 +10,4 @@ locals {
 
   is_replica_local = var.replicate_source_db != null
 }
+
