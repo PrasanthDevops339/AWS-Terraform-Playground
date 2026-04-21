@@ -80,17 +80,71 @@ module "sns_kms" {
 
       principals = [
         {
-          type        = "Service"
+          type = "Service"
           identifiers = [
             "sns.amazonaws.com",
             "events.amazonaws.com"
           ]
+        },
+        {
+          type        = "AWS"
+          identifiers = ["*"]
+        }
+      ]
+
+      actions = [
+        "kms:GenerateDataKey",
+        "kms:Encrypt*",
+        "kms:Decrypt*",
+        "kms:ReEncrypt*",
+        "kms:GenerateDataKey*",
+        "kms:Create*",
+        "kms:Describe*",
+        "kms:Enable*",
+        "kms:List*",
+        "kms:Put*",
+        "kms:Update*",
+        "kms:Get*",
+        "kms:ReplicateKey",
+        "kms:TagResource",
+        "kms:UntagResource",
+        "kms:ScheduleKeyDeletion",
+        "kms:Delete*"
+      ]
+
+      resources = ["*"]
+
+      conditions = [
+        {
+          test     = "StringEquals"
+          variable = "aws:PrincipalOrgID"
+          values   = ["o-xxxxxxxxxx", "o-yyyyyyyyyy"]
+        },
+        {
+          test     = "ArnLike"
+          variable = "aws:PrincipalArn"
+          values = [
+            "arn:aws:iam::${local.account_id}:role/operations--administrator",
+            "arn:aws:iam::${local.account_id}:role/prasan-operations--platformadministrator-role",
+            "arn:aws:iam::${local.account_id}:role/aws-reserved/sso.amazonaws.com/us-east-2/AWSReservedSSO_AppInfraAdmin_455df6525ee84dbf"
+          ]
+        }
+      ]
+    },
+    {
+      sid    = "CloudWatchPermissions"
+      effect = "Allow"
+
+      principals = [
+        {
+          type        = "Service"
+          identifiers = ["cloudwatch.amazonaws.com"]
         }
       ]
 
       actions = [
         "kms:Decrypt",
-        "kms:GenerateDataKey"
+        "kms:GenerateDataKey*"
       ]
 
       resources = ["*"]
