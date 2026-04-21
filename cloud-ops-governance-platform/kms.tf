@@ -53,7 +53,7 @@ module "rds-aurora-mysql-ccops-kms-key" {
           test     = "ArnLike"
           variable = "aws:PrincipalArn"
           values = [
-            "arn:aws:iam::142174879951:role/prasan-logarchive-prd-backup-replication-role",
+            "arn:aws:iam::111122223333:role/prasan-logarchive-prd-backup-replication-role",
             "arn:aws:iam::${local.account_id}:role/prasan-operations--platformadministrator-role",
             "arn:aws:iam::${local.account_id}:role/operations--administrator"
           ]
@@ -204,7 +204,7 @@ module "stepfunc_kms" {
           test     = "ArnLike"
           variable = "aws:PrincipalArn"
           values = [
-            "arn:aws:iam::142174879951:role/prasan-logarchive-prd-backup-replication-role",
+            "arn:aws:iam::111122223333:role/prasan-logarchive-prd-backup-replication-role",
             "arn:aws:iam::${local.account_id}:role/operations--administrator",
             "arn:aws:iam::${local.account_id}:role/prasan-operations--platformadministrator-role",
             "${module.lambda_compliance_ingest_lambda_role.iam_role_arn}",
@@ -296,7 +296,7 @@ module "ccop-s3-kms-key" {
           test     = "ArnLike"
           variable = "aws:PrincipalArn"
           values = [
-            "arn:aws:iam::142174879951:role/prasan-logarchive-prd-backup-replication-role",
+            "arn:aws:iam::111122223333:role/prasan-logarchive-prd-backup-replication-role",
             "arn:aws:iam::${local.account_id}:role/operations--administrator",
             "arn:aws:iam::${local.account_id}:role/prasan-operations--platformadministrator-role",
             "arn:aws:iam::${local.account_id}:role/aws-reserved/sso.amazonaws.com/us-east-2/AWSReservedSSO_Dev_Developer_*",
@@ -348,7 +348,7 @@ module "ccop_dynamodb_kms_key" {
           test     = "ArnLike"
           variable = "aws:PrincipalArn"
           values = [
-            "arn:aws:iam::142174879951:role/prasan-logarchive-prd-backup-replication-role",
+            "arn:aws:iam::111122223333:role/prasan-logarchive-prd-backup-replication-role",
             "arn:aws:iam::${local.account_id}:role/operations--administrator",
             "arn:aws:iam::${local.account_id}:role/prasan-operations--platformadministrator-role",
             "${module.lambda_compliance_ingest_lambda_role.iam_role_arn}",
