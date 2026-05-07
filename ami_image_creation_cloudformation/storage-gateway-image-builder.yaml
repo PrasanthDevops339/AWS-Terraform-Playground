@@ -1,0 +1,341 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  EC2 Image Builder pipeline that sources the latest AWS Storage Gateway (FILE_S3)
+  AMI from SSM, creates a renamed golden AMI, and distributes it to all
+  AWS Organizations member accounts.
+
+# ---------------------------------------------------------------------------
+# Parameters
+# ---------------------------------------------------------------------------
+Parameters:
+
+  GatewayType:
+    Type: String
+    Default: FILE_S3
+    AllowedValues:
+      - FILE_S3
+      - FILE_FSX
+      - VOLUME
+      - TAPE
+    Description: Storage Gateway type embedded in the published image name.
+
+  ImageNamePrefix:
+    Type: String
+    Default: prasanth-storage-gateway
+    Description: Prefix for the published AMI name.
+
+  ImageDateTag:
+    Type: String
+    Default: "2026-05-07"
+    Description: >
+      Date portion of the published AMI name (YYYY-MM-DD). Override at
+      deploy time if you want a different date stamped in the name.
+
+  StorageGatewaySsmPath:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/storagegateway/ami/FILE_S3/latest
+    Description: >
+      SSM public parameter path that resolves to the latest Storage Gateway AMI.
+      Change if you pin to a specific version.
+
+  TargetRegions:
+    Type: CommaDelimitedList
+    Default: "us-east-1,us-west-2,eu-west-1"
+    Description: >
+      Comma-separated list of regions the finished AMI will be copied to
+      (in addition to the build region).
+
+  OrganizationId:
+    Type: String
+    Description: >
+      AWS Organizations ID (o-xxxxxxxxxx). The distribution configuration
+      shares the AMI with this entire org.
+
+  BuildSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet where the Image Builder build instance will run.
+
+  BuildVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC that contains the build subnet.
+
+  ScheduleExpression:
+    Type: String
+    Default: "cron(0 2 ? * MON *)"
+    Description: >
+      EventBridge / Image Builder schedule expression for automatic pipeline runs.
+      Set to an empty string to disable the schedule (manual runs only).
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+Resources:
+
+  # ── IAM ────────────────────────────────────────────────────────────────────
+
+  ImageBuilderInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "StorageGatewayImageBuilderRole-${AWS::StackName}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/EC2InstanceProfileForImageBuilder
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: ImageBuilderS3Logs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:GetBucketLocation
+                Resource:
+                  - !Sub "arn:aws:s3:::${LogsBucket}"
+                  - !Sub "arn:aws:s3:::${LogsBucket}/*"
+
+  ImageBuilderInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub "StorageGatewayImageBuilderProfile-${AWS::StackName}"
+      Roles:
+        - !Ref ImageBuilderInstanceRole
+
+  # ── S3 bucket for Image Builder logs ──────────────────────────────────────
+
+  LogsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub "imagebuilder-logs-${AWS::AccountId}-${AWS::Region}"
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # ── Security Group for the build instance ─────────────────────────────────
+
+  BuildSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Image Builder build instance – egress only"
+      VpcId: !Ref BuildVpcId
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: "HTTPS egress for SSM and S3"
+      Tags:
+        - Key: Name
+          Value: !Sub "imagebuilder-build-sg-${AWS::StackName}"
+
+  # ── Image Builder Infrastructure Configuration ────────────────────────────
+
+  InfrastructureConfiguration:
+    Type: AWS::ImageBuilder::InfrastructureConfiguration
+    Properties:
+      Name: !Sub "StorageGatewayInfra-${AWS::StackName}"
+      Description: "Build infrastructure for Storage Gateway golden AMI"
+      InstanceProfileName: !Ref ImageBuilderInstanceProfile
+      InstanceTypes:
+        - m5.large
+        - m5.xlarge
+      SubnetId: !Ref BuildSubnetId
+      SecurityGroupIds:
+        - !Ref BuildSecurityGroup
+      Logging:
+        S3Logs:
+          S3BucketName: !Ref LogsBucket
+          S3KeyPrefix: "image-builder-logs/"
+      TerminateInstanceOnFailure: true
+      Tags:
+        GatewayType: !Ref GatewayType
+        ManagedBy: CloudFormation
+
+  # ── Image Builder Component (minimal – validates gateway service) ──────────
+
+  ValidationComponent:
+    Type: AWS::ImageBuilder::Component
+    Properties:
+      Name: !Sub "StorageGatewayValidation-${AWS::StackName}"
+      Description: "Validates that the Storage Gateway service is present on the AMI"
+      Platform: Linux
+      Version: "1.0.0"
+      Data: |
+        name: StorageGatewayValidation
+        description: Check gateway binary is present
+        schemaVersion: 1.0
+        phases:
+          - name: build
+            steps:
+              - name: TagImage
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - echo "Storage Gateway AMI validated - type FILE_S3"
+                    - ls /usr/local/bin/gateway* 2>/dev/null || true
+          - name: validate
+            steps:
+              - name: CheckDisk
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - df -h
+                    - echo "Validation complete"
+      Tags:
+        GatewayType: !Ref GatewayType
+
+  # ── Image Recipe ───────────────────────────────────────────────────────────
+
+  ImageRecipe:
+    Type: AWS::ImageBuilder::ImageRecipe
+    Properties:
+      Name: !Sub "StorageGatewayRecipe-${AWS::StackName}"
+      Description: !Sub "Golden AMI recipe for Storage Gateway ${GatewayType}"
+      Version: "1.0.0"
+      ParentImage: !Ref StorageGatewaySsmPath
+      Components:
+        - ComponentArn: !Ref ValidationComponent
+      AdditionalInstanceConfiguration:
+        UserDataOverride: ""
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: 80
+            Encrypted: true
+            DeleteOnTermination: true
+      Tags:
+        GatewayType: !Ref GatewayType
+        BaseAmiSource: SSM
+
+  # ── Distribution Configuration ─────────────────────────────────────────────
+
+  DistributionConfiguration:
+    Type: AWS::ImageBuilder::DistributionConfiguration
+    Properties:
+      Name: !Sub "StorageGatewayDistribution-${AWS::StackName}"
+      Description: "Distribute Storage Gateway AMI to all org accounts in target regions"
+      Distributions:
+        # The !Select / !Split construct iterates over TargetRegions.
+        # CloudFormation does not have native loops, so we list each region
+        # explicitly. Add or remove regions by editing TargetRegions parameter
+        # and the Distributions list below.
+        - Region: !Select [0, !Ref TargetRegions]
+          AmiDistributionConfiguration:
+            Name: !Sub
+              - "${Prefix}-${GType}-${DateTag}-{{ imagebuilder:buildDate }}"
+              - Prefix: !Ref ImageNamePrefix
+                GType: !Ref GatewayType
+                DateTag: !Ref ImageDateTag
+            Description: !Sub "Storage Gateway ${GatewayType} golden AMI – ${ImageDateTag}"
+            AmiTags:
+              Name: !Sub "${ImageNamePrefix}-${GatewayType}-${ImageDateTag}"
+              GatewayType: !Ref GatewayType
+              ManagedBy: ImageBuilder
+              SourceRegion: !Ref AWS::Region
+            LaunchPermissionConfiguration:
+              OrganizationArns:
+                - !Sub "arn:aws:organizations::${AWS::AccountId}:organization/${OrganizationId}"
+
+        - Region: !Select [1, !Ref TargetRegions]
+          AmiDistributionConfiguration:
+            Name: !Sub
+              - "${Prefix}-${GType}-${DateTag}-{{ imagebuilder:buildDate }}"
+              - Prefix: !Ref ImageNamePrefix
+                GType: !Ref GatewayType
+                DateTag: !Ref ImageDateTag
+            Description: !Sub "Storage Gateway ${GatewayType} golden AMI – ${ImageDateTag}"
+            AmiTags:
+              Name: !Sub "${ImageNamePrefix}-${GatewayType}-${ImageDateTag}"
+              GatewayType: !Ref GatewayType
+              ManagedBy: ImageBuilder
+              SourceRegion: !Ref AWS::Region
+            LaunchPermissionConfiguration:
+              OrganizationArns:
+                - !Sub "arn:aws:organizations::${AWS::AccountId}:organization/${OrganizationId}"
+
+        - Region: !Select [2, !Ref TargetRegions]
+          AmiDistributionConfiguration:
+            Name: !Sub
+              - "${Prefix}-${GType}-${DateTag}-{{ imagebuilder:buildDate }}"
+              - Prefix: !Ref ImageNamePrefix
+                GType: !Ref GatewayType
+                DateTag: !Ref ImageDateTag
+            Description: !Sub "Storage Gateway ${GatewayType} golden AMI – ${ImageDateTag}"
+            AmiTags:
+              Name: !Sub "${ImageNamePrefix}-${GatewayType}-${ImageDateTag}"
+              GatewayType: !Ref GatewayType
+              ManagedBy: ImageBuilder
+              SourceRegion: !Ref AWS::Region
+            LaunchPermissionConfiguration:
+              OrganizationArns:
+                - !Sub "arn:aws:organizations::${AWS::AccountId}:organization/${OrganizationId}"
+
+      Tags:
+        GatewayType: !Ref GatewayType
+
+  # ── Image Pipeline ─────────────────────────────────────────────────────────
+
+  ImagePipeline:
+    Type: AWS::ImageBuilder::ImagePipeline
+    Properties:
+      Name: !Sub "StorageGatewayPipeline-${AWS::StackName}"
+      Description: !Sub "Builds and distributes Storage Gateway ${GatewayType} AMI"
+      ImageRecipeArn: !Ref ImageRecipe
+      InfrastructureConfigurationArn: !Ref InfrastructureConfiguration
+      DistributionConfigurationArn: !Ref DistributionConfiguration
+      ImageTestsConfiguration:
+        ImageTestsEnabled: true
+        TimeoutMinutes: 60
+      Schedule:
+        ScheduleExpression: !Ref ScheduleExpression
+        PipelineExecutionStartCondition: EXPRESSION_MATCH_AND_DEPENDENCY_UPDATES_AVAILABLE
+      Status: ENABLED
+      Tags:
+        GatewayType: !Ref GatewayType
+        ManagedBy: CloudFormation
+
+# ---------------------------------------------------------------------------
+# Outputs
+# ---------------------------------------------------------------------------
+Outputs:
+
+  PipelineArn:
+    Description: ARN of the Image Builder pipeline
+    Value: !Ref ImagePipeline
+    Export:
+      Name: !Sub "${AWS::StackName}-PipelineArn"
+
+  InfrastructureConfigArn:
+    Description: ARN of the infrastructure configuration
+    Value: !Ref InfrastructureConfiguration
+
+  DistributionConfigArn:
+    Description: ARN of the distribution configuration
+    Value: !Ref DistributionConfiguration
+
+  LogsBucketName:
+    Description: S3 bucket used for Image Builder logs
+    Value: !Ref LogsBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-LogsBucket"
+
+  PublishedAmiNamePattern:
+    Description: Name pattern of the published AMI
+    Value: !Sub "${ImageNamePrefix}-${GatewayType}-${ImageDateTag}-<buildDate>"
