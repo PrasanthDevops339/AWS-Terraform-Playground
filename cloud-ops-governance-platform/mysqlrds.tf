@@ -53,6 +53,13 @@ resource "aws_lambda_invocation" "run_database_bootstrap_lambda" {
     key1 = "value1"
   })
 
+  # Re-invoke the bootstrap Lambda whenever mysql_config.txt or the
+  # bootstrap script changes, so SQL edits get applied on the next apply.
+  triggers = {
+    mysql_config_hash = filesha256("${path.module}/scripts/databasebootstrap/mysql_config.txt")
+    bootstrap_script_hash = filesha256("${path.module}/scripts/databasebootstrap/database_bootstrap.py")
+  }
+
   depends_on = [
     module.aurora-mysql-ccops-cluster,
     module.lambda_database_bootstrap
