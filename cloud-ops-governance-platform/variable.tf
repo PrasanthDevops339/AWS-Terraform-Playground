@@ -83,3 +83,9 @@ variable "ObsrvLambdaToken" {
   type        = string
   default     = "REDACTED"
 }
+
+variable "enable_database_bootstrap_invocation" {
+  description = "When true, Terraform invokes the database bootstrap Lambda on apply (and re-invokes it whenever its triggers change). Set true only for approved release windows where schema changes are intended; default false keeps schema execution out of the routine deployment path."
+  type        = bool
+  default     = false
+}

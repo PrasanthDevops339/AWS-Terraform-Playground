@@ -46,18 +46,25 @@ module "aurora-mysql-ccops-cluster" {
 }
 
 #Run SQL to configure database
+# Gated by var.enable_database_bootstrap_invocation so non-prod environments
+# (or releases that don't need schema changes) can skip the auto-invoke.
 resource "aws_lambda_invocation" "run_database_bootstrap_lambda" {
+  count = var.enable_database_bootstrap_invocation ? 1 : 0
+
   function_name = module.lambda_database_bootstrap.lambda_function_name
 
   input = jsonencode({
     key1 = "value1"
   })
 
-  # Re-invoke the bootstrap Lambda whenever mysql_config.txt or the
-  # bootstrap script changes, so SQL edits get applied on the next apply.
+  # Re-invoke the bootstrap Lambda whenever the SQL file, the script, or the
+  # underlying lambda package changes. lambda_source_hash covers every file in
+  # the zip; the explicit filesha256 entries are kept as belt-and-suspenders
+  # in case the module ever stops surfacing source_code_hash.
   triggers = {
-    mysql_config_hash = filesha256("${path.module}/scripts/databasebootstrap/mysql_config.txt")
+    mysql_config_hash     = filesha256("${path.module}/scripts/databasebootstrap/mysql_config.txt")
     bootstrap_script_hash = filesha256("${path.module}/scripts/databasebootstrap/database_bootstrap.py")
+    lambda_source_hash    = module.lambda_database_bootstrap.lambda_source_code_hash
   }
 
   depends_on = [
@@ -67,5 +74,5 @@ resource "aws_lambda_invocation" "run_database_bootstrap_lambda" {
 }
 
 output "database_bootstrap_lambda_result" {
-  value = jsondecode(aws_lambda_invocation.run_database_bootstrap_lambda.result)
+  value = var.enable_database_bootstrap_invocation ? jsondecode(aws_lambda_invocation.run_database_bootstrap_lambda[0].result) : null
 }
