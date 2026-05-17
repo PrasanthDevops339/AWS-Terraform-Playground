@@ -1,0 +1,359 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  EC2 Image Builder pipeline that sources the latest AWS Storage Gateway FILE_S3
+  AMI from the AWS-owned SSM public parameter
+  (/aws/service/storagegateway/ami/FILE_S3/latest), copies it into the Operations
+  account, tags it with source lineage metadata, and distributes it to approved
+  accounts. No OS modifications, packages, agents, or hardening components are
+  applied — copy, rename, tag, and distribute only.
+
+# ---------------------------------------------------------------------------
+# Parameters
+# ---------------------------------------------------------------------------
+Parameters:
+
+  # Source: AWS-documented public SSM parameter for Storage Gateway FILE_S3 AMI.
+  # CloudFormation resolves this path to the current AMI ID at deploy/update time.
+  StorageGatewaySsmPath:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/storagegateway/ami/FILE_S3/latest
+    Description: >
+      AWS-owned SSM public parameter that resolves to the Storage Gateway FILE_S3 AMI.
+      Do not change unless AWS publishes a new parameter path for this AMI stream.
+
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Default: "subnet-00fewf34grg"
+
+  VPCId:
+    Type: AWS::EC2::VPC::Id
+    Default: "vpc-111111111111"
+
+  KMSKeyUSE2:
+    Type: String
+    Default: "arn:aws:kms:us-east-2:111111111111:alias/sourceamikey"
+
+  KMSKeyUSE1:
+    Type: String
+    Default: "arn:aws:kms:us-east-1:111111111111:alias/sourceamikey"
+
+  AppName:
+    Type: String
+    Default: "PRASAN-AWS-STORAGEGATEWAY-FILE-S3-CF"
+
+  ImageVersion:
+    Type: String
+    Default: "1.0.0"
+
+  InstanceType:
+    Type: String
+    Default: "t3.medium"
+
+  KeyPair:
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: "prasainst-operations-dev-image-builder-admin"
+
+  StackName:
+    Type: String
+    Default: "PRASAN-AWS-STORAGEGATEWAY-FILE-S3-CF-Stack"
+
+  OrganizationArn:
+    Type: String
+    Default: "arn:aws:organizations::222222222222:organization/o-iefvwevvb"
+
+  LoggingBucket:
+    Type: String
+    Description: S3 bucket to receive Image Builder logs
+    Default: "prasainst-operations-prd-ec2-image-builder-logging-bucket-cf"
+
+  CostCenter:
+    Type: String
+    Description: Value for the CostCenter tag
+    Default: "Test-Stacks"
+
+  Environment:
+    Type: String
+    Description: Deployment environment (dev or prd)
+    AllowedValues:
+      - dev
+      - prd
+    Default: "dev"
+
+# ---------------------------------------------------------------------------
+# Conditions
+# ---------------------------------------------------------------------------
+Conditions:
+  IsProd: !Equals [!Ref Environment, "prd"]
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+Resources:
+
+  # ── IAM ────────────────────────────────────────────────────────────────────
+
+  ImageBuilderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM
+        - arn:aws:iam::aws:policy/AWSImageBuilderReadOnlyAccess
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/EC2InstanceProfileForImageBuilder
+      Path: /
+      Policies:
+        - PolicyName: "S3-Write-Logs"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:PutObject"
+                Resource: !Sub "arn:aws:s3:::${LoggingBucket}/*"
+        - PolicyName: "SNS-Publish-Topics"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "sns:Publish"
+                Resource: "*"
+
+  ImageBuilderInstanceProfile:
+    Type: "AWS::IAM::InstanceProfile"
+    Properties:
+      InstanceProfileName: !Sub "${AppName}ImageBuilderInstanceProfile"
+      Path: "/"
+      Roles:
+        - !Ref ImageBuilderRole
+
+  # ── Networking ─────────────────────────────────────────────────────────────
+
+  ImageBuilderSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow access to Image Builder instance.
+      VpcId: !Ref VPCId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 10.0.0.0/8
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: "HTTPS egress for SSM and S3"
+
+  # ── CloudWatch Logs ────────────────────────────────────────────────────────
+
+  AWSStorageGatewayLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub "/aws/imagebuilder/${AppName}-Image"
+      RetentionInDays: 90
+
+  # ── Image Builder Infrastructure Configuration ────────────────────────────
+
+  InfrastructureConfiguration:
+    Type: AWS::ImageBuilder::InfrastructureConfiguration
+    Properties:
+      InstanceProfileName: !Sub "${AppName}ImageBuilderInstanceProfile"
+      Description: Infrastructure configuration for Storage Gateway FILE_S3 AMI copy
+      InstanceTypes:
+        - !Ref InstanceType
+      KeyPair: !Ref KeyPair
+      Name: !Sub "${AppName} Image - Infrastructure Configuration"
+      SubnetId: !Ref SubnetId
+      InstanceMetadataOptions:
+        HttpTokens: required
+      SecurityGroupIds:
+        - !Ref ImageBuilderSecurityGroup
+      Logging:
+        S3Logs:
+          S3BucketName: !Ref LoggingBucket
+          S3KeyPrefix: !Ref StackName
+      ResourceTags:
+        CostCenter: !Ref CostCenter
+        Purpose: ImageBuilder
+      TerminateInstanceOnFailure: true
+      Tags:
+        CostCenter: !Ref CostCenter
+    DependsOn:
+      - ImageBuilderInstanceProfile
+
+  # ── Image Recipe ───────────────────────────────────────────────────────────
+  # No components — copy-only pipeline for an AWS appliance AMI.
+  # Do NOT add OS patches, packages, agents, cloud-init changes, or hardening.
+
+  ImageRecipe:
+    Type: AWS::ImageBuilder::ImageRecipe
+    Properties:
+      Name: !Sub "${AppName} Image"
+      Description: >-
+        Copy-only recipe sourcing the Storage Gateway FILE_S3 AMI from
+        /aws/service/storagegateway/ami/FILE_S3/latest. No OS modifications applied.
+      Version: !Ref ImageVersion
+      ParentImage: !Ref StorageGatewaySsmPath
+      AdditionalInstanceConfiguration:
+        SystemsManagerAgent:
+          UninstallAfterBuild: false
+      BlockDeviceMappings:
+        - DeviceName: "/dev/xvda"
+          Ebs:
+            Encrypted: true
+            VolumeSize: 80
+            VolumeType: gp3
+            DeleteOnTermination: true
+            KmsKeyId: !Ref KMSKeyUSE2
+      Tags:
+        CostCenter: !Ref CostCenter
+        SourceSsmParam: "/aws/service/storagegateway/ami/FILE_S3/latest"
+
+  # ── Distribution Configuration ─────────────────────────────────────────────
+
+  DistributionConfiguration:
+    Type: AWS::ImageBuilder::DistributionConfiguration
+    Properties:
+      Name: !Sub "${AppName} Image - Distribution Configuration"
+      Description: "Distribute AWS Storage Gateway FILE_S3 AMI to approved Prasan AWS accounts"
+      Distributions:
+        - Region: "us-east-2"
+          AmiDistributionConfiguration:
+            Name: "prasan-aws-storagegateway-file-s3-{{ imagebuilder:buildDate }}"
+            Description: "Operations-owned Storage Gateway FILE_S3 AMI distributed to org and OUs."
+            AmiTags:
+              auto-delete: "no"
+              Name: !Sub "${AppName} AMI"
+              image-ssm: !Sub "${AppName}"
+              Prasan_OS: "True"
+              GatewayType: "FILE_S3"
+              SourceSsmParam: "/aws/service/storagegateway/ami/FILE_S3/latest"
+              SourceAccount: !Ref AWS::AccountId
+              ManagedBy: "ImageBuilder"
+            KmsKeyId: !Ref KMSKeyUSE2
+            LaunchPermissionConfiguration:
+              OrganizationArns:
+                - !Ref OrganizationArn
+
+        - Region: "us-east-1"
+          AmiDistributionConfiguration:
+            Name: "prasan-aws-storagegateway-file-s3-{{ imagebuilder:buildDate }}"
+            Description: "Operations-owned Storage Gateway FILE_S3 AMI distributed to org and OUs."
+            AmiTags:
+              auto-delete: "no"
+              Name: !Sub "${AppName} AMI"
+              image-ssm: !Sub "${AppName}"
+              Prasan_OS: "True"
+              GatewayType: "FILE_S3"
+              SourceSsmParam: "/aws/service/storagegateway/ami/FILE_S3/latest"
+              SourceAccount: !Ref AWS::AccountId
+              ManagedBy: "ImageBuilder"
+            KmsKeyId: !Ref KMSKeyUSE1
+            LaunchPermissionConfiguration:
+              OrganizationArns:
+                - !Ref OrganizationArn
+      Tags:
+        image-ssm: !Sub "${AppName}"
+        Prasan_OS: "True"
+        GatewayType: "FILE_S3"
+        SourceSsmParam: "/aws/service/storagegateway/ami/FILE_S3/latest"
+
+  # ── Image Pipeline ─────────────────────────────────────────────────────────
+
+  ImagePipeline:
+    Type: AWS::ImageBuilder::ImagePipeline
+    Properties:
+      Description: !Sub "${AppName} Image Pipeline"
+      DistributionConfigurationArn: !If
+        - IsProd
+        - !Ref DistributionConfiguration
+        - !Ref AWS::NoValue
+      ImageRecipeArn: !Ref ImageRecipe
+      InfrastructureConfigurationArn: !Ref InfrastructureConfiguration
+      Name: !Sub "${AppName} Image Pipeline"
+      Status: ENABLED
+      ImageScanningConfiguration:
+        ImageScanningEnabled: true
+      Schedule:
+        PipelineExecutionStartCondition: EXPRESSION_MATCH_ONLY
+        ScheduleExpression: !If
+          - IsProd
+          - "cron(30 6 ? * 1 *)"
+          - "cron(30 6 ? * 4 *)"
+    DependsOn:
+      - DistributionConfiguration
+      - ImageRecipe
+      - InfrastructureConfiguration
+
+  # ── On-demand Image (initial build on stack creation) ─────────────────────
+
+  Image:
+    Type: AWS::ImageBuilder::Image
+    Properties:
+      EnhancedImageMetadataEnabled: true
+      ImageRecipeArn: !Ref ImageRecipe
+      InfrastructureConfigurationArn: !Ref InfrastructureConfiguration
+      ImageScanningConfiguration:
+        ImageScanningEnabled: true
+      Tags:
+        Name: !Sub "${AppName} Image"
+        CostCenter: !Ref CostCenter
+        GatewayType: "FILE_S3"
+        SourceSsmParam: "/aws/service/storagegateway/ami/FILE_S3/latest"
+
+  # ── Internal SSM parameter — publish Operations-owned AMI ID ──────────────
+  # Downstream consumers reference this path instead of the AWS public parameter.
+
+  StorageGatewayAmiSsmParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/internal/amis/storage-gateway/file-s3/latest"
+      Type: String
+      Value: !GetAtt Image.ImageId
+      Description: >-
+        Operations-owned Storage Gateway FILE_S3 AMI ID. Sourced from
+        /aws/service/storagegateway/ami/FILE_S3/latest via EC2 Image Builder.
+      Tags:
+        GatewayType: "FILE_S3"
+        ManagedBy: "ImageBuilder"
+        SourceSsmParam: "/aws/service/storagegateway/ami/FILE_S3/latest"
+
+# ---------------------------------------------------------------------------
+# Outputs
+# ---------------------------------------------------------------------------
+Outputs:
+
+  AMIArn:
+    Value: !Ref Image
+    Description: ARN of the produced Image Builder image resource.
+
+  AMIId:
+    Value: !GetAtt Image.ImageId
+    Description: ID of the Operations-owned Storage Gateway FILE_S3 AMI.
+    Export:
+      Name: !Sub "${AWS::StackName}-AMIId"
+
+  InternalSsmParamName:
+    Value: "/internal/amis/storage-gateway/file-s3/latest"
+    Description: Internal SSM parameter holding the Operations-owned AMI ID.
+    Export:
+      Name: !Sub "${AWS::StackName}-SsmParamName"
+
+  PipelineArn:
+    Value: !Ref ImagePipeline
+    Description: ARN of the Image Builder pipeline for scheduled refreshes.
+    Export:
+      Name: !Sub "${AWS::StackName}-PipelineArn"
