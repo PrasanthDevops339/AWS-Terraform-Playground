@@ -1,65 +1,110 @@
 stages:
   - upload
 
+default:
+  tags:
+    - cloud-enablement-runner
+
 variables:
-  AWS_REGION: "us-east-1"
-  S3_BUCKET: "prasanth"
+  ENABLED_ENVIRONMENTS:
+    description: "Array of environments to enable for job runs. eg 'dev prd'. Valid values include dev prd"
 
-upload_csv_nonprod:
-  stage: upload
-  image: python:3.11
+  NONPROD_ENV:
+    description: "Environment name used for non-prod federation login."
+    value: "dev"
 
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-      when: manual
+  PROD_ENV:
+    description: "Environment name used for prod federation login."
+    value: "prd"
 
-    - if: '$CI_COMMIT_BRANCH != "main"'
-      when: manual
+  GROUP:
+    description: "Group name of the target account. e.g. platform or transit"
 
+  NONPROD_USERNAME:
+    description: "Non-prod service account name with access to target AWS account (group)"
+
+  NONPROD_PASSWORD:
+    description: "Non-prod service account password with access to target AWS account (group)"
+
+  PROD_USERNAME:
+    description: "Production service account name with access to target AWS account (group)"
+
+  PROD_PASSWORD:
+    description: "Production service account password with access to target AWS account (group)"
+
+  S3_BUCKET:
+    description: "Target S3 bucket name for CSV uploads."
+    value: "prasanth"
+
+  REGION:
+    description: "AWS region for S3 upload. Valid values are us-east-1 or us-east-2."
+    value: "us-east-1"
+    options:
+      - "us-east-1"
+      - "us-east-2"
+
+# --- Shared hidden jobs ---
+
+.before_script:
   before_script:
     - export DATA_DATE=$(date +%Y-%m-%d)
     - export CSV_FILE_PATH="data/$DATA_DATE/reference.csv"
     - export S3_OBJECT_KEY="prasanth/refence/$DATA_DATE/reference.csv"
-
     - pip install boto3
 
-    - python fedrate.py \
-        --user "$NONPROD_USER" \
-        --password "$NONPROD_PASSWORD" \
-        --region "$AWS_REGION" \
-        --account "$NONPROD_ACCOUNT"
+.federate-login:
+  script:
+    - mkdir -p ~/.aws/
+    - touch ~/.aws/credentials
+    - python3 /federate-standalone.py -e $ENV -g $GROUP -u $USERNAME -p $PASSWORD
+    - export AWS_PROFILE=saml-erieins-$GROUP-$ENV
+
+# --- Upload jobs ---
+
+upload_csv_nonprod:
+  stage: upload
+
+  variables:
+    ENV: $NONPROD_ENV
+    USERNAME: $NONPROD_USERNAME
+    PASSWORD: $NONPROD_PASSWORD
+
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: manual
+    - if: '$CI_COMMIT_BRANCH != "main"'
+      when: manual
+
+  before_script:
+    - !reference [.before_script, before_script]
+    - !reference [.federate-login, script]
 
   script:
-    - python scripts/upload_csv_to_s3.py \
+    - python3 scripts/upload_csv_to_s3.py \
         --bucket "$S3_BUCKET" \
         --key "$S3_OBJECT_KEY" \
         --file "$CSV_FILE_PATH" \
-        --region "$AWS_REGION"
+        --region "$REGION"
 
 upload_csv_prd:
   stage: upload
-  image: python:3.11
+
+  variables:
+    ENV: $PROD_ENV
+    USERNAME: $PROD_USERNAME
+    PASSWORD: $PROD_PASSWORD
 
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
       when: manual
 
   before_script:
-    - export DATA_DATE=$(date +%Y-%m-%d)
-    - export CSV_FILE_PATH="data/$DATA_DATE/reference.csv"
-    - export S3_OBJECT_KEY="prasanth/refence/$DATA_DATE/reference.csv"
-
-    - pip install boto3
-
-    - python fedrate.py \
-        --user "$PRD_USER" \
-        --password "$PRD_PASSWORD" \
-        --region "$AWS_REGION" \
-        --account "$PRD_ACCOUNT"
+    - !reference [.before_script, before_script]
+    - !reference [.federate-login, script]
 
   script:
-    - python scripts/upload_csv_to_s3.py \
+    - python3 scripts/upload_csv_to_s3.py \
         --bucket "$S3_BUCKET" \
         --key "$S3_OBJECT_KEY" \
         --file "$CSV_FILE_PATH" \
-        --region "$AWS_REGION"
+        --region "$REGION"
