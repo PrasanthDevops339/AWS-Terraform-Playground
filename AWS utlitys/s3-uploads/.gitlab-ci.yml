@@ -1,0 +1,65 @@
+stages:
+  - upload
+
+variables:
+  AWS_REGION: "us-east-1"
+  S3_BUCKET: "prasanth"
+
+upload_csv_nonprod:
+  stage: upload
+  image: python:3.11
+
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: manual
+
+    - if: '$CI_COMMIT_BRANCH != "main"'
+      when: manual
+
+  before_script:
+    - export DATA_DATE=$(date +%Y-%m-%d)
+    - export CSV_FILE_PATH="data/$DATA_DATE/reference.csv"
+    - export S3_OBJECT_KEY="prasanth/refence/$DATA_DATE/reference.csv"
+
+    - pip install boto3
+
+    - python fedrate.py \
+        --user "$NONPROD_USER" \
+        --password "$NONPROD_PASSWORD" \
+        --region "$AWS_REGION" \
+        --account "$NONPROD_ACCOUNT"
+
+  script:
+    - python scripts/upload_csv_to_s3.py \
+        --bucket "$S3_BUCKET" \
+        --key "$S3_OBJECT_KEY" \
+        --file "$CSV_FILE_PATH" \
+        --region "$AWS_REGION"
+
+upload_csv_prd:
+  stage: upload
+  image: python:3.11
+
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+
+  before_script:
+    - export DATA_DATE=$(date +%Y-%m-%d)
+    - export CSV_FILE_PATH="data/$DATA_DATE/reference.csv"
+    - export S3_OBJECT_KEY="prasanth/refence/$DATA_DATE/reference.csv"
+
+    - pip install boto3
+
+    - python fedrate.py \
+        --user "$PRD_USER" \
+        --password "$PRD_PASSWORD" \
+        --region "$AWS_REGION" \
+        --account "$PRD_ACCOUNT"
+
+  script:
+    - python scripts/upload_csv_to_s3.py \
+        --bucket "$S3_BUCKET" \
+        --key "$S3_OBJECT_KEY" \
+        --file "$CSV_FILE_PATH" \
+        --region "$AWS_REGION"
