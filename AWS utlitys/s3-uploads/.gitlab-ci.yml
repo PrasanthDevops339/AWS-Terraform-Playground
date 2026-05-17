@@ -53,7 +53,7 @@ variables:
   before_script:
     - export DATA_DATE=$(date +%Y-%m-%d)
     - export CSV_FILE_PATH="data/$DATA_DATE/reference.csv"
-    - export S3_OBJECT_KEY="prasanth/refence/$DATA_DATE/reference.csv"
+    - export S3_OBJECT_KEY="$S3_BUCKET/reference/reference.csv"
     - pip install boto3
 
 .federate-login:
