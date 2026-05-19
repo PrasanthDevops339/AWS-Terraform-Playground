@@ -40,7 +40,7 @@ module "lambda_servicenow_eventmanager" {
     DEFAULT_ASSIGNMENT_GROUP   = "Cloud Enblmnt-Cloud Operations"
     INGEST_PREFIX              = "ingest/aws-config/"
     KB_ARTICLE_URL             = "https://prasnprod.service-now.com/kb_view.do?sys_kb_id=d409b489c3ea16d83354392f0501311f"
-    SNOW_INSTANCE              = "prasn${var.environment}"
+    SNOW_INSTANCE              = var.environment == "prd" ? "prasnprod" : "prasn${var.environment}"
     SNOW_SECRET_NAME           = module.secrets_manager_service_now_dev.secret_arn
     TICKET_CATEGORY            = "Application -> Other Issue"
     db_host                    = module.aurora-mysql-ccops-cluster.rds_cluster_endpoint
@@ -50,7 +50,7 @@ module "lambda_servicenow_eventmanager" {
     region                     = "us-east-2"
     rules_table                = module.ccop_dynamodb_table.dynamodb_table_id
     SPLUNK_REALM               = "us0"
-    SPLUNK_ACCESS_TOKEN        = ""
+    SPLUNK_ACCESS_TOKEN       = var.splunkaccesstoken
     AWS_LAMBDA_EXEC_WRAPPER    = "/opt/otel-instrument"
     OTEL_SERVICE_NAME          = "Service Now Event Manager Lambda"
     OTEL_RESOURCE_ATTRIBUTES   = "deployment.environment=dev"
@@ -101,7 +101,7 @@ module "lambda_compliance_ingest" {
     db_name                   = module.aurora-mysql-ccops-cluster.rds_cluster_database_name
     region                    = "us-east-2"
     SPLUNK_REALM              = "us0"
-    SPLUNK_ACCESS_TOKEN       = ""
+    SPLUNK_ACCESS_TOKEN       = var.splunkaccesstoken
     AWS_LAMBDA_EXEC_WRAPPER   = "/opt/otel-instrument"
     OTEL_SERVICE_NAME         = "Compliance DB Ingest Lambda"
     OTEL_RESOURCE_ATTRIBUTES  = "deployment.environment=dev"
@@ -142,7 +142,7 @@ module "lambda_database_bootstrap" {
     database_secret_arn        = module.aurora-mysql-ccops-cluster.rds_master_user_secret[0].secret_arn
     proxy_host_name            = module.aurora-mysql-ccops-cluster.rds_cluster_endpoint
     SPLUNK_REALM               = "us0"
-    SPLUNK_ACCESS_TOKEN        = ""
+    SPLUNK_ACCESS_TOKEN       = var.splunkaccesstoken
     AWS_LAMBDA_EXEC_WRAPPER    = "/opt/otel-instrument"
     OTEL_SERVICE_NAME          = "Database Bootstrap Lambda"
     OTEL_RESOURCE_ATTRIBUTES   = "deployment.environment=dev"
@@ -187,7 +187,7 @@ module "lambda_iam_auth" {
     proxy_host_name            = module.aurora-mysql-ccops-cluster.rds_cluster_endpoint
     database_user_name         = var.database_rw_user
     SPLUNK_REALM               = "us0"
-    SPLUNK_ACCESS_TOKEN        = ""
+    SPLUNK_ACCESS_TOKEN        = var.splunkaccesstoken
     AWS_LAMBDA_EXEC_WRAPPER    = "/opt/otel-instrument"
     OTEL_SERVICE_NAME          = "Database IAM AUTH Lambda"
     OTEL_RESOURCE_ATTRIBUTES   = "deployment.environment=dev"
@@ -236,7 +236,7 @@ module "lambda_compliance_execution" {
     region                    = "us-east-2"
     dynamo_table              = module.ccop_dynamodb_table.dynamodb_table_id
     SPLUNK_REALM              = "us0"
-    SPLUNK_ACCESS_TOKEN       = ""
+    SPLUNK_ACCESS_TOKEN       = var.splunkaccesstoken
     AWS_LAMBDA_EXEC_WRAPPER   = "/opt/otel-instrument"
     OTEL_SERVICE_NAME         = "Compliance Rules Execution Lambda"
     OTEL_RESOURCE_ATTRIBUTES  = "deployment.environment=dev"
@@ -275,7 +275,7 @@ module "lambda_splunk_hello" {
 
   environment = {
     SPLUNK_REALM               = "us0"
-    SPLUNK_ACCESS_TOKEN        = ""
+    SPLUNK_ACCESS_TOKEN       = var.splunkaccesstoken
     AWS_LAMBDA_EXEC_WRAPPER    = "/opt/otel-instrument"
     OTEL_SERVICE_NAME          = "HelloSplunk"
     OTEL_RESOURCE_ATTRIBUTES   = "deployment.environment=dev"

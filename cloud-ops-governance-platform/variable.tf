@@ -72,14 +72,21 @@ variable "region" {
   default     = ""
 }
 
+
 variable "ServiceNowSecret" {
   description = "Service now dev API secret"
   type        = string
-  default     = ""
+  sensitive =  true
 }
 
-variable "ObsrvLambdaToken" {
+variable "ServiceNowSecretPrd" {
+  description = "Service now dev API secret"
+  type        = string
+  sensitive =  true
+}
+
+variable "splunkaccesstoken" {
   description = "Splunk Observability Lambda Token"
   type        = string
-  default     = "REDACTED"
+  sensitive   = true
 }

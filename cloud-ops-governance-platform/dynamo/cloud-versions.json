@@ -1,0 +1,80 @@
+{
+  "item1": {
+    "account_name": "prasanthins-pcs-dev",
+    "version": 1,
+    "enabled": true,
+    "environment": "dev"
+  },
+  "item2": {
+    "account_name": "prasanthins-master-prd",
+    "version": 1,
+    "enabled": true,
+    "environment": "prd"
+  },
+  "item3": {
+    "account_name": "prasanthins-experience-dev",
+    "version": 1,
+    "enabled": true,
+    "environment": "dev"
+  },
+  "item4": {
+    "account_name": "prasanthins-innovation-dev",
+    "version": 1,
+    "enabled": true,
+    "environment": "dev"
+  },
+  "item5": {
+    "account_name": "prasanthins-finance-dev",
+    "version": 1,
+    "enabled": true,
+    "environment": "dev"
+  },
+  "item6": {
+    "account_name": "prasanthins-custserv-tst",
+    "version": 1,
+    "enabled": true,
+    "environment": "tst"
+  },
+  "item7": {
+    "account_name": "prasanthins-smrrnd-tst",
+    "version": 1,
+    "enabled": true,
+    "environment": "tst"
+  },
+  "item8": {
+    "account_name": "prasanthins-master-dev",
+    "version": 1,
+    "enabled": true,
+    "environment": "dev"
+  },
+  "item9": {
+    "account_name": "prasanthins-audit-prd",
+    "version": 1,
+    "enabled": true,
+    "environment": "prd"
+  },
+  "item10": {
+    "account_name": "prasanthins-billing-tst",
+    "version": 1,
+    "enabled": true,
+    "environment": "tst"
+  },
+  "item11": {
+    "account_name": "prasanthins-smr-dev",
+    "version": 1,
+    "enabled": true,
+    "environment": "dev"
+  },
+  "item12": {
+    "account_name": "prasanthins-pcs-tst",
+    "version": 1,
+    "enabled": true,
+    "environment": "tst"
+  },
+  "item13": {
+    "account_name": "prasanthins-commercial-dev",
+    "version": 1,
+    "enabled": true,
+    "environment": "dev"
+  }
+}

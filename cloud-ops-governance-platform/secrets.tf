@@ -33,10 +33,11 @@ module "secrets_manager_service_now_dev" {
   policy              = data.aws_iam_policy_document.service-now-dev-secret.json
 
   # Version
-  ignore_secret_changes = true
+  ignore_secret_changes = false  #flip it back to true
 
   secret_string = jsonencode({
     CCOP_User = "${var.ServiceNowSecret}"
+    # CCOP_User = var.environment == "prd" ? var.ServiceNowSecretPrd : var.ServiceNowSecret
   })
 
   # Rotation
@@ -61,7 +62,7 @@ module "secrets_manager_splunk_obsrv_dev" {
   ignore_secret_changes = true
 
   secret_string = jsonencode({
-    obsrv_lambda_token_dev = "${var.ObsrvLambdaToken}"
+    obsrv_lambda_token_dev = var.splunkaccesstoken
   })
 
   # Rotation
