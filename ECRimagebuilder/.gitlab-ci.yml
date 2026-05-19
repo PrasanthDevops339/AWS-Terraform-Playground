@@ -1,0 +1,85 @@
+stages:
+  - image-dev
+
+ecr_deploy_dev:
+  image: docker:24.0.1-dind
+  services:
+    - name: docker:dind
+      alias: docker
+  stage: image-dev
+  variables:
+    AWS_DEFAULT_REGION: us-east-2
+
+  script:
+    - apk add python3
+    - mkdir ~/.aws/
+    - touch ~/.aws/credentials
+    - python3 -m ensurepip
+    - pip3 install awscli > /dev/null
+    - pip3 install -r pipeline-scripts/requirements.txt
+    - python3 pipeline-scripts/federate-standalone.py -e dev -g platform -u $NPU_PLATFORM -p $NPP_PLATFORM
+    - export AWS_PROFILE=saml-erieins-platform-dev
+
+    # ECR Public auth always requires us-east-1 regardless of primary region
+    - aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws
+
+    - docker build -t $ecr_repository .
+
+    # Authenticate to private ECR in primary region (us-east-2)
+    - aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin $account_id.dkr.ecr.us-east-2.amazonaws.com
+
+    - DATE=$(date +%Y%m%d-%H%M%S)
+    - echo "DATE=$DATE" >> date.env
+    - docker tag $ecr_repository:latest $account_id.dkr.ecr.us-east-2.amazonaws.com/$ecr_repository:$DATE
+    - aws ecr describe-repositories --repository-names $ecr_repository --region us-east-2 || aws ecr create-repository --repository-name $ecr_repository --region us-east-2
+    - docker push $account_id.dkr.ecr.us-east-2.amazonaws.com/$ecr_repository:$DATE
+
+  allow_failure: false
+  tags:
+    - qmodocker
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
+  artifacts:
+    reports:
+      dotenv: date.env
+
+ecr_deploy_dev_use1:
+  image: docker:24.0.1-dind
+  services:
+    - name: docker:dind
+      alias: docker
+  stage: image-dev
+  script:
+    - apk add python3
+    - mkdir ~/.aws/
+    - touch ~/.aws/credentials
+    - python3 -m ensurepip
+    - pip3 install awscli > /dev/null
+    - pip3 install -r pipeline-scripts/requirements.txt
+    - python3 pipeline-scripts/federate-standalone.py -e dev -g platform -u $NPU_PLATFORM -p $NPP_PLATFORM
+    - export AWS_PROFILE=saml-erieins-platform-dev
+
+    # Authenticate to ECR Public (us-east-1 required for public registry)
+    - aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws
+
+    - docker build -t $ecr_repository .
+
+    # Authenticate to private ECR (us-east-1) to push the built image
+    - aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $account_id.dkr.ecr.us-east-1.amazonaws.com
+
+    - DATE=$(date +%Y%m%d-%H%M%S)
+    - echo "DATE=$DATE" >> date.env
+    - docker tag $ecr_repository:latest $account_id.dkr.ecr.us-east-1.amazonaws.com/$ecr_repository:$DATE
+    - aws ecr describe-repositories --repository-names $ecr_repository --region us-east-1 || aws ecr create-repository --repository-name $ecr_repository --region us-east-1
+    - docker push $account_id.dkr.ecr.us-east-1.amazonaws.com/$ecr_repository:$DATE
+
+  allow_failure: false
+  tags:
+    - qmodocker
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
+  artifacts:
+    reports:
+      dotenv: date.env
