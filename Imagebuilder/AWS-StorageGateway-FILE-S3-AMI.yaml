@@ -1,33 +1,24 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  EC2 Image Builder pipeline that sources the latest AWS Storage Gateway FILE_S3
-  AMI from the AWS-owned SSM public parameter
-  (/aws/service/storagegateway/ami/FILE_S3/latest), copies it into the Operations
-  account, tags it with source lineage metadata, and distributes it to approved
-  accounts. No OS modifications, packages, agents, or hardening components are
-  applied — copy, rename, tag, and distribute only.
+  Copies the latest AWS Storage Gateway FILE_S3 AMI from the AWS-owned SSM public
+  parameter (/aws/service/storagegateway/ami/FILE_S3/latest) into the Operations
+  account using a Lambda custom resource. No Image Builder build instance is launched
+  — copy, encrypt with CMK, tag, and share with the org only.
+  Root cause fixed: Storage Gateway AMIs have no SSM Agent, so ImageBuilder's
+  ssm:SendCommand (LaunchBuildInstance step) always returns InvalidInstanceId.
 
 # ---------------------------------------------------------------------------
 # Parameters
 # ---------------------------------------------------------------------------
 Parameters:
 
-  # Source: AWS-documented public SSM parameter for Storage Gateway FILE_S3 AMI.
-  # CloudFormation resolves this path to the current AMI ID at deploy/update time.
   StorageGatewaySsmPath:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/storagegateway/ami/FILE_S3/latest
     Description: >
       AWS-owned SSM public parameter that resolves to the Storage Gateway FILE_S3 AMI.
-      Do not change unless AWS publishes a new parameter path for this AMI stream.
-
-  SubnetId:
-    Type: AWS::EC2::Subnet::Id
-    Default: "subnet-00fewf34grg"
-
-  VPCId:
-    Type: AWS::EC2::VPC::Id
-    Default: "vpc-111111111111"
+      CloudFormation resolves this at deploy/update time. Used as a cache-buster so a
+      stack update triggers a new copy when AWS releases a new AMI version.
 
   KMSKeyUSE2:
     Type: String
@@ -41,58 +32,50 @@ Parameters:
     Type: String
     Default: "PRASAN-AWS-STORAGEGATEWAY-FILE-S3-CF"
 
-  ImageVersion:
-    Type: String
-    Default: "1.0.0"
-
-  InstanceType:
-    Type: String
-    Default: "t3.medium"
-
-  KeyPair:
-    Type: AWS::EC2::KeyPair::KeyName
-    Default: "prasainst-operations-dev-image-builder-admin"
-
-  StackName:
-    Type: String
-    Default: "PRASAN-AWS-STORAGEGATEWAY-FILE-S3-CF-Stack"
-
   OrganizationArn:
     Type: String
     Default: "arn:aws:organizations::222222222222:organization/o-iefvwevvb"
 
-  LoggingBucket:
+  DevDistributionAccountId:
     Type: String
-    Description: S3 bucket to receive Image Builder logs
-    Default: "prasainst-operations-prd-ec2-image-builder-logging-bucket-cf"
+    Default: "333333333333"
+    Description: >
+      AWS account ID that receives launch permission in dev. Only a single
+      account is targeted (not the whole org) to limit blast radius in non-prod.
 
   CostCenter:
     Type: String
-    Description: Value for the CostCenter tag
     Default: "Test-Stacks"
 
   Environment:
     Type: String
-    Description: Deployment environment (dev or prd)
-    AllowedValues:
-      - dev
-      - prd
-    Default: "dev"
+    AllowedValues: [dev, prd]
+    Default: dev
 
 # ---------------------------------------------------------------------------
 # Conditions
 # ---------------------------------------------------------------------------
 Conditions:
-  IsProd: !Equals [!Ref Environment, "prd"]
+  IsProd: !Equals [!Ref Environment, prd]
 
 # ---------------------------------------------------------------------------
 # Resources
 # ---------------------------------------------------------------------------
 Resources:
 
-  # ── IAM ────────────────────────────────────────────────────────────────────
+  # ── CloudWatch Log Group for Lambda ─────────────────────────────────────────
 
-  ImageBuilderRole:
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AppName}-ami-copy"
+      RetentionInDays: 90
+
+  # ── IAM Role ─────────────────────────────────────────────────────────────────
+
+  AmiCopyLambdaRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -100,260 +83,311 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service:
-                - ec2.amazonaws.com
-            Action:
-              - "sts:AssumeRole"
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM
-        - arn:aws:iam::aws:policy/AWSImageBuilderReadOnlyAccess
-        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
-        - arn:aws:iam::aws:policy/EC2InstanceProfileForImageBuilder
-      Path: /
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-        - PolicyName: "S3-Write-Logs"
+        - PolicyName: AmiCopyPolicy
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
-              - Effect: Allow
+              - Sid: EC2Permissions
+                Effect: Allow
                 Action:
-                  - "s3:PutObject"
-                Resource: !Sub "arn:aws:s3:::${LoggingBucket}/*"
-        - PolicyName: "SNS-Publish-Topics"
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - "sns:Publish"
+                  - ec2:CopyImage
+                  - ec2:DescribeImages
+                  - ec2:ModifyImageAttribute
+                  - ec2:CreateTags
+                  - ec2:DeregisterImage
+                  - ec2:DeleteSnapshot
                 Resource: "*"
+              - Sid: KMSPermissions
+                Effect: Allow
+                Action:
+                  - kms:CreateGrant
+                  - kms:DescribeKey
+                  - kms:ReEncrypt*
+                  - kms:GenerateDataKey*
+                Resource: "*"
+              - Sid: SSMInternalParam
+                Effect: Allow
+                Action:
+                  - ssm:PutParameter
+                  - ssm:GetParameter
+                  - ssm:AddTagsToResource
+                Resource: !Sub "arn:aws:ssm:*:${AWS::AccountId}:parameter/internal/amis/storage-gateway/*"
+              - Sid: SSMPublicParam
+                Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource: "arn:aws:ssm:*::parameter/aws/service/storagegateway/*"
 
-  ImageBuilderInstanceProfile:
-    Type: "AWS::IAM::InstanceProfile"
+  # ── Lambda Function ──────────────────────────────────────────────────────────
+  # Handles both CloudFormation Custom Resource invocations (Create/Update/Delete)
+  # and direct EventBridge scheduled invocations for weekly AMI refresh.
+
+  AmiCopyLambda:
+    Type: AWS::Lambda::Function
+    DependsOn: LambdaLogGroup
     Properties:
-      InstanceProfileName: !Sub "${AppName}ImageBuilderInstanceProfile"
-      Path: "/"
-      Roles:
-        - !Ref ImageBuilderRole
-
-  # ── Networking ─────────────────────────────────────────────────────────────
-
-  ImageBuilderSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Allow access to Image Builder instance.
-      VpcId: !Ref VPCId
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 0
-          ToPort: 65535
-          CidrIp: 10.0.0.0/8
-      SecurityGroupEgress:
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          CidrIp: 0.0.0.0/0
-          Description: "HTTPS egress for SSM and S3"
-
-  # ── CloudWatch Logs ────────────────────────────────────────────────────────
-
-  AWSStorageGatewayLogGroup:
-    Type: AWS::Logs::LogGroup
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Delete
-    Properties:
-      LogGroupName: !Sub "/aws/imagebuilder/${AppName}-Image"
-      RetentionInDays: 90
-
-  # ── Image Builder Infrastructure Configuration ────────────────────────────
-
-  InfrastructureConfiguration:
-    Type: AWS::ImageBuilder::InfrastructureConfiguration
-    Properties:
-      InstanceProfileName: !Sub "${AppName}ImageBuilderInstanceProfile"
-      Description: Infrastructure configuration for Storage Gateway FILE_S3 AMI copy
-      InstanceTypes:
-        - !Ref InstanceType
-      KeyPair: !Ref KeyPair
-      Name: !Sub "${AppName} Image - Infrastructure Configuration"
-      SubnetId: !Ref SubnetId
-      InstanceMetadataOptions:
-        HttpTokens: required
-      SecurityGroupIds:
-        - !Ref ImageBuilderSecurityGroup
-      Logging:
-        S3Logs:
-          S3BucketName: !Ref LoggingBucket
-          S3KeyPrefix: !Ref StackName
-      ResourceTags:
-        CostCenter: !Ref CostCenter
-        Purpose: ImageBuilder
-      TerminateInstanceOnFailure: true
+      FunctionName: !Sub "${AppName}-ami-copy"
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt AmiCopyLambdaRole.Arn
+      Timeout: 900
+      MemorySize: 256
+      Environment:
+        Variables:
+          APP_NAME: !Ref AppName
+          ORG_ARN: !Ref OrganizationArn
+          KMS_KEY_USE2: !Ref KMSKeyUSE2
+          KMS_KEY_USE1: !Ref KMSKeyUSE1
+          SSM_PARAM: "/internal/amis/storage-gateway/file-s3/latest"
+          ENVIRONMENT: !Ref Environment
+          DEV_ACCOUNT_ID: !Ref DevDistributionAccountId
       Tags:
-        CostCenter: !Ref CostCenter
-    DependsOn:
-      - ImageBuilderInstanceProfile
+        - Key: CostCenter
+          Value: !Ref CostCenter
+        - Key: GatewayType
+          Value: "FILE_S3"
+      Code:
+        ZipFile: |
+          import boto3, cfnresponse, json, os, time
 
-  # ── Image Recipe ───────────────────────────────────────────────────────────
-  # No components — copy-only pipeline for an AWS appliance AMI.
-  # Do NOT add OS patches, packages, agents, cloud-init changes, or hardening.
+          APP_NAME    = os.environ['APP_NAME']
+          ORG_ARN     = os.environ['ORG_ARN']
+          KMS_USE2    = os.environ['KMS_KEY_USE2']
+          KMS_USE1    = os.environ['KMS_KEY_USE1']
+          SSM_PARAM   = os.environ['SSM_PARAM']
+          ENVIRONMENT = os.environ['ENVIRONMENT']
+          DEV_ACCOUNT = os.environ['DEV_ACCOUNT_ID']
+          AMI_NAME    = f'{APP_NAME}-storagegateway-file-s3'
 
-  ImageRecipe:
-    Type: AWS::ImageBuilder::ImageRecipe
+          COMMON_TAGS = [
+              {'Key': 'GatewayType',    'Value': 'FILE_S3'},
+              {'Key': 'SourceSsmParam', 'Value': '/aws/service/storagegateway/ami/FILE_S3/latest'},
+              {'Key': 'ManagedBy',      'Value': 'CloudFormation'},
+              {'Key': 'auto-delete',    'Value': 'no'},
+              {'Key': 'Prasan_OS',      'Value': 'True'},
+          ]
+
+
+          def resolve_sg_ami(region):
+              ssm = boto3.client('ssm', region_name=region)
+              return ssm.get_parameter(
+                  Name='/aws/service/storagegateway/ami/FILE_S3/latest'
+              )['Parameter']['Value']
+
+
+          def start_copy(ec2_client, src_ami, kms_key, src_region):
+              r = ec2_client.copy_image(
+                  Name=AMI_NAME,
+                  Description=f'Ops-owned Storage Gateway FILE_S3 AMI copied from {src_ami}',
+                  SourceImageId=src_ami,
+                  SourceRegion=src_region,
+                  Encrypted=True,
+                  KmsKeyId=kms_key,
+                  CopyImageTags=True,
+              )
+              return r['ImageId']
+
+
+          def wait_available(ec2_client, ami_id, max_attempts=60, delay=15):
+              for _ in range(max_attempts):
+                  imgs = ec2_client.describe_images(ImageIds=[ami_id])['Images']
+                  if not imgs:
+                      raise RuntimeError(f'{ami_id}: image not found')
+                  state = imgs[0]['State']
+                  if state == 'available':
+                      return
+                  if state == 'failed':
+                      raise RuntimeError(f'{ami_id}: copy entered failed state')
+                  time.sleep(delay)
+              raise TimeoutError(f'{ami_id}: timed out after {max_attempts * delay}s')
+
+
+          def tag_and_share(ec2_client, ami_id, src_ami):
+              ec2_client.create_tags(Resources=[ami_id], Tags=COMMON_TAGS + [
+                  {'Key': 'Name',        'Value': f'{APP_NAME} AMI'},
+                  {'Key': 'SourceAmiId', 'Value': src_ami},
+              ])
+              if ENVIRONMENT == 'prd':
+                  # Share with the entire organisation
+                  permission = {'Add': [{'OrganizationArn': ORG_ARN}]}
+              else:
+                  # Dev: share only with the designated sample account
+                  permission = {'Add': [{'UserId': DEV_ACCOUNT}]}
+              ec2_client.modify_image_attribute(
+                  ImageId=ami_id,
+                  LaunchPermission=permission,
+              )
+
+
+          def cleanup_region(region):
+              ec2 = boto3.client('ec2', region_name=region)
+              imgs = ec2.describe_images(
+                  Owners=['self'],
+                  Filters=[
+                      {'Name': 'name',          'Values': [AMI_NAME]},
+                      {'Name': 'tag:ManagedBy', 'Values': ['CloudFormation']},
+                  ],
+              )['Images']
+              for img in imgs:
+                  snaps = [
+                      b['Ebs']['SnapshotId']
+                      for b in img.get('BlockDeviceMappings', [])
+                      if 'Ebs' in b
+                  ]
+                  try:
+                      ec2.deregister_image(ImageId=img['ImageId'])
+                  except Exception as e:
+                      print(f"deregister {img['ImageId']}: {e}")
+                  for s in snaps:
+                      try:
+                          ec2.delete_snapshot(SnapshotId=s)
+                      except Exception as e:
+                          print(f"delete snapshot {s}: {e}")
+
+
+          def handler(event, context):
+              is_cfn = 'ResponseURL' in event
+              print(json.dumps({k: v for k, v in event.items() if k != 'ResponseURL'}))
+
+              try:
+                  req_type = event.get('RequestType', 'Create')
+
+                  if req_type == 'Delete':
+                      cleanup_region('us-east-2')
+                      cleanup_region('us-east-1')
+                      if is_cfn:
+                          cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                      return
+
+                  # Resolve current source AMI in each target region independently
+                  src_use2 = resolve_sg_ami('us-east-2')
+                  src_use1 = resolve_sg_ami('us-east-1')
+                  print(f'Source AMIs — us-east-2: {src_use2}  us-east-1: {src_use1}')
+
+                  ec2_use2 = boto3.client('ec2', region_name='us-east-2')
+                  ec2_use1 = boto3.client('ec2', region_name='us-east-1')
+
+                  # Start both copies simultaneously; AWS runs them in parallel
+                  ami_use2 = start_copy(ec2_use2, src_use2, KMS_USE2, 'us-east-2')
+                  ami_use1 = start_copy(ec2_use1, src_use1, KMS_USE1, 'us-east-1')
+                  print(f'Copies started — us-east-2: {ami_use2}  us-east-1: {ami_use1}')
+
+                  # Poll both; since copies run in parallel the second wait is short
+                  wait_available(ec2_use2, ami_use2)
+                  wait_available(ec2_use1, ami_use1)
+
+                  tag_and_share(ec2_use2, ami_use2, src_use2)
+                  tag_and_share(ec2_use1, ami_use1, src_use1)
+
+                  # Update internal SSM parameter
+                  ssm = boto3.client('ssm', region_name='us-east-2')
+                  ssm.put_parameter(
+                      Name=SSM_PARAM,
+                      Value=ami_use2,
+                      Type='String',
+                      Description='Ops-owned Storage Gateway FILE_S3 AMI ID (us-east-2)',
+                      Overwrite=True,
+                  )
+                  try:
+                      ssm.add_tags_to_resource(
+                          ResourceType='Parameter',
+                          ResourceId=SSM_PARAM,
+                          Tags=[
+                              {'Key': 'GatewayType', 'Value': 'FILE_S3'},
+                              {'Key': 'ManagedBy',   'Value': 'CloudFormation'},
+                          ],
+                      )
+                  except Exception as e:
+                      print(f'add_tags_to_resource (non-fatal): {e}')
+
+                  result = {'AmiId': ami_use2, 'AmiIdUSE1': ami_use1}
+                  if is_cfn:
+                      cfnresponse.send(
+                          event, context, cfnresponse.SUCCESS, result,
+                          physicalResourceId=ami_use2,
+                      )
+                  return result
+
+              except Exception as exc:
+                  print(f'FAILED: {exc}')
+                  if is_cfn:
+                      cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(exc)})
+                  raise
+
+  # ── Custom Resource — trigger AMI copy on stack create / update ──────────────
+  # SourceAmiId resolves to the actual AMI ID (via AWS::SSM::Parameter::Value).
+  # When AWS releases a new Storage Gateway AMI, updating the stack re-triggers
+  # the Lambda because this property value changes.
+
+  AmiCopy:
+    Type: Custom::AmiCopy
     Properties:
-      Name: !Sub "${AppName} Image"
-      Description: >-
-        Copy-only recipe sourcing the Storage Gateway FILE_S3 AMI from
-        /aws/service/storagegateway/ami/FILE_S3/latest. No OS modifications applied.
-      Version: !Ref ImageVersion
-      ParentImage: !Ref StorageGatewaySsmPath
-      AdditionalInstanceConfiguration:
-        SystemsManagerAgent:
-          UninstallAfterBuild: false
-      BlockDeviceMappings:
-        - DeviceName: "/dev/xvda"
-          Ebs:
-            Encrypted: true
-            VolumeSize: 80
-            VolumeType: gp3
-            DeleteOnTermination: true
-            KmsKeyId: !Ref KMSKeyUSE2
-      Tags:
-        CostCenter: !Ref CostCenter
-        SourceSsmParam: "/aws/service/storagegateway/ami/FILE_S3/latest"
+      ServiceToken: !GetAtt AmiCopyLambda.Arn
+      SourceAmiId: !Ref StorageGatewaySsmPath
 
-  # ── Distribution Configuration ─────────────────────────────────────────────
+  # ── EventBridge Rule — scheduled weekly AMI refresh ──────────────────────────
+  # Replaces the Image Builder pipeline schedule. Invokes Lambda directly;
+  # no build instance, no SSM Agent requirement.
 
-  DistributionConfiguration:
-    Type: AWS::ImageBuilder::DistributionConfiguration
+  AmiRefreshRule:
+    Type: AWS::Events::Rule
     Properties:
-      Name: !Sub "${AppName} Image - Distribution Configuration"
-      Description: "Distribute AWS Storage Gateway FILE_S3 AMI to approved Prasan AWS accounts"
-      Distributions:
-        - Region: "us-east-2"
-          AmiDistributionConfiguration:
-            Name: "prasan-aws-storagegateway-file-s3-{{ imagebuilder:buildDate }}"
-            Description: "Operations-owned Storage Gateway FILE_S3 AMI distributed to org and OUs."
-            AmiTags:
-              auto-delete: "no"
-              Name: !Sub "${AppName} AMI"
-              image-ssm: !Sub "${AppName}"
-              Prasan_OS: "True"
-              GatewayType: "FILE_S3"
-              SourceSsmParam: "/aws/service/storagegateway/ami/FILE_S3/latest"
-              SourceAccount: !Ref AWS::AccountId
-              ManagedBy: "ImageBuilder"
-            KmsKeyId: !Ref KMSKeyUSE2
-            LaunchPermissionConfiguration:
-              OrganizationArns:
-                - !Ref OrganizationArn
-
-        - Region: "us-east-1"
-          AmiDistributionConfiguration:
-            Name: "prasan-aws-storagegateway-file-s3-{{ imagebuilder:buildDate }}"
-            Description: "Operations-owned Storage Gateway FILE_S3 AMI distributed to org and OUs."
-            AmiTags:
-              auto-delete: "no"
-              Name: !Sub "${AppName} AMI"
-              image-ssm: !Sub "${AppName}"
-              Prasan_OS: "True"
-              GatewayType: "FILE_S3"
-              SourceSsmParam: "/aws/service/storagegateway/ami/FILE_S3/latest"
-              SourceAccount: !Ref AWS::AccountId
-              ManagedBy: "ImageBuilder"
-            KmsKeyId: !Ref KMSKeyUSE1
-            LaunchPermissionConfiguration:
-              OrganizationArns:
-                - !Ref OrganizationArn
-      Tags:
-        image-ssm: !Sub "${AppName}"
-        Prasan_OS: "True"
-        GatewayType: "FILE_S3"
-        SourceSsmParam: "/aws/service/storagegateway/ami/FILE_S3/latest"
-
-  # ── Image Pipeline ─────────────────────────────────────────────────────────
-
-  ImagePipeline:
-    Type: AWS::ImageBuilder::ImagePipeline
-    Properties:
-      Description: !Sub "${AppName} Image Pipeline"
-      DistributionConfigurationArn: !If
+      Name: !Sub "${AppName}-ami-refresh"
+      Description: !Sub "Weekly Storage Gateway FILE_S3 AMI copy for ${AppName}"
+      ScheduleExpression: !If
         - IsProd
-        - !Ref DistributionConfiguration
-        - !Ref AWS::NoValue
-      ImageRecipeArn: !Ref ImageRecipe
-      InfrastructureConfigurationArn: !Ref InfrastructureConfiguration
-      Name: !Sub "${AppName} Image Pipeline"
-      Status: ENABLED
-      ImageScanningConfiguration:
-        ImageScanningEnabled: true
-      Schedule:
-        PipelineExecutionStartCondition: EXPRESSION_MATCH_ONLY
-        ScheduleExpression: !If
-          - IsProd
-          - "cron(30 6 ? * 1 *)"
-          - "cron(30 6 ? * 4 *)"
-    DependsOn:
-      - DistributionConfiguration
-      - ImageRecipe
-      - InfrastructureConfiguration
+        - "cron(30 6 ? * 1 *)"
+        - "cron(30 6 ? * 4 *)"
+      State: ENABLED
+      Targets:
+        - Id: AmiCopyLambda
+          Arn: !GetAtt AmiCopyLambda.Arn
+          Input: '{"RequestType": "Create"}'
 
-  # ── On-demand Image (initial build on stack creation) ─────────────────────
-
-  Image:
-    Type: AWS::ImageBuilder::Image
+  AmiRefreshPermission:
+    Type: AWS::Lambda::Permission
     Properties:
-      EnhancedImageMetadataEnabled: true
-      ImageRecipeArn: !Ref ImageRecipe
-      InfrastructureConfigurationArn: !Ref InfrastructureConfiguration
-      ImageScanningConfiguration:
-        ImageScanningEnabled: true
-      Tags:
-        Name: !Sub "${AppName} Image"
-        CostCenter: !Ref CostCenter
-        GatewayType: "FILE_S3"
-        SourceSsmParam: "/aws/service/storagegateway/ami/FILE_S3/latest"
-
-  # ── Internal SSM parameter — publish Operations-owned AMI ID ──────────────
-  # Downstream consumers reference this path instead of the AWS public parameter.
-
-  StorageGatewayAmiSsmParam:
-    Type: AWS::SSM::Parameter
-    Properties:
-      Name: !Sub "/internal/amis/storage-gateway/file-s3/latest"
-      Type: String
-      Value: !GetAtt Image.ImageId
-      Description: >-
-        Operations-owned Storage Gateway FILE_S3 AMI ID. Sourced from
-        /aws/service/storagegateway/ami/FILE_S3/latest via EC2 Image Builder.
-      Tags:
-        GatewayType: "FILE_S3"
-        ManagedBy: "ImageBuilder"
-        SourceSsmParam: "/aws/service/storagegateway/ami/FILE_S3/latest"
+      FunctionName: !GetAtt AmiCopyLambda.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt AmiRefreshRule.Arn
 
 # ---------------------------------------------------------------------------
 # Outputs
 # ---------------------------------------------------------------------------
 Outputs:
 
-  AMIArn:
-    Value: !Ref Image
-    Description: ARN of the produced Image Builder image resource.
-
   AMIId:
-    Value: !GetAtt Image.ImageId
-    Description: ID of the Operations-owned Storage Gateway FILE_S3 AMI.
+    Value: !GetAtt AmiCopy.AmiId
+    Description: ID of the Operations-owned Storage Gateway FILE_S3 AMI (us-east-2).
     Export:
       Name: !Sub "${AWS::StackName}-AMIId"
 
+  AMIIdUSE1:
+    Value: !GetAtt AmiCopy.AmiIdUSE1
+    Description: ID of the Operations-owned Storage Gateway FILE_S3 AMI (us-east-1).
+    Export:
+      Name: !Sub "${AWS::StackName}-AMIIdUSE1"
+
   InternalSsmParamName:
     Value: "/internal/amis/storage-gateway/file-s3/latest"
-    Description: Internal SSM parameter holding the Operations-owned AMI ID.
+    Description: Internal SSM parameter holding the Operations-owned AMI ID (us-east-2).
     Export:
       Name: !Sub "${AWS::StackName}-SsmParamName"
 
-  PipelineArn:
-    Value: !Ref ImagePipeline
-    Description: ARN of the Image Builder pipeline for scheduled refreshes.
+  LambdaFunctionArn:
+    Value: !GetAtt AmiCopyLambda.Arn
+    Description: ARN of the AMI copy Lambda — invoke manually to force an immediate refresh.
     Export:
-      Name: !Sub "${AWS::StackName}-PipelineArn"
+      Name: !Sub "${AWS::StackName}-LambdaArn"
+
+  RefreshRuleArn:
+    Value: !GetAtt AmiRefreshRule.Arn
+    Description: ARN of the EventBridge rule driving the weekly AMI refresh schedule.
+    Export:
+      Name: !Sub "${AWS::StackName}-RefreshRuleArn"

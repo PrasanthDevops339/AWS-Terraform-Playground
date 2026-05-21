@@ -93,6 +93,12 @@ variable "sg_stack_name" {
   default     = "PRASAN-AWS-STORAGEGATEWAY-FILE-S3-CF-Stack"
 }
 
+variable "dev_distribution_account_id" {
+  description = "AWS account ID that receives AMI launch permission in dev. Only this single account is targeted — not the whole org — to limit blast radius in non-prod."
+  type        = string
+  default     = "333333333333"
+}
+
 variable "environment" {
   description = "Deployment environment. Use 'prd' to enable distribution config and weekly Monday schedule."
   type        = string

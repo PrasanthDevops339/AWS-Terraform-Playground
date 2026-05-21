@@ -22,8 +22,13 @@ output "stack_id" {
 # Storage Gateway FILE_S3 outputs (only populated when enable_storage_gateway = true)
 # ---------------------------------------------------------------------------
 output "sg_ami_id" {
-  description = "ID of the Operations-owned Storage Gateway FILE_S3 AMI."
+  description = "ID of the Operations-owned Storage Gateway FILE_S3 AMI (us-east-2)."
   value       = var.enable_storage_gateway ? aws_cloudformation_stack.storage_gateway_file_s3_imagebuilder[0].outputs["AMIId"] : null
+}
+
+output "sg_ami_id_use1" {
+  description = "ID of the Operations-owned Storage Gateway FILE_S3 AMI (us-east-1)."
+  value       = var.enable_storage_gateway ? aws_cloudformation_stack.storage_gateway_file_s3_imagebuilder[0].outputs["AMIIdUSE1"] : null
 }
 
 output "sg_internal_ssm_param_name" {
@@ -31,9 +36,14 @@ output "sg_internal_ssm_param_name" {
   value       = var.enable_storage_gateway ? aws_cloudformation_stack.storage_gateway_file_s3_imagebuilder[0].outputs["InternalSsmParamName"] : null
 }
 
-output "sg_pipeline_arn" {
-  description = "ARN of the Storage Gateway Image Builder pipeline for scheduled refreshes."
-  value       = var.enable_storage_gateway ? aws_cloudformation_stack.storage_gateway_file_s3_imagebuilder[0].outputs["PipelineArn"] : null
+output "sg_lambda_arn" {
+  description = "ARN of the Lambda function that copies and refreshes the Storage Gateway AMI."
+  value       = var.enable_storage_gateway ? aws_cloudformation_stack.storage_gateway_file_s3_imagebuilder[0].outputs["LambdaFunctionArn"] : null
+}
+
+output "sg_refresh_rule_arn" {
+  description = "ARN of the EventBridge rule driving the weekly Storage Gateway AMI refresh."
+  value       = var.enable_storage_gateway ? aws_cloudformation_stack.storage_gateway_file_s3_imagebuilder[0].outputs["RefreshRuleArn"] : null
 }
 
 output "sg_stack_id" {
