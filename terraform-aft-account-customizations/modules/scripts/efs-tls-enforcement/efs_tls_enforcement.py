@@ -42,11 +42,29 @@ file system is read-only and TLS enforcement is NOT_APPLICABLE.
 Note: The previous approach of checking the 'aws:backup:source-resource-arn' tag was
 unreliable because this tag can also appear on source (writable) EFS file systems.
 
+MANAGED SERVICE EXCLUSION:
+Certain EFS file systems are created and fully managed by AWS services such as
+Amazon SageMaker. These file systems are tagged by AWS automatically and cannot
+have their resource policies modified by the account owner, so TLS enforcement
+via resource policy is not applicable to them.
+
+Exclusion is controlled by MANAGED_SERVICE_EXCLUSION_TAGS (see constants below).
+Any EFS file system that carries at least one of those tag keys is skipped.
+To add a new service exclusion in the future, append the tag key to that list.
+
+Known managed-service tag keys:
+- ManagedByAmazonSageMakerResource  (SageMaker-provisioned EFS)
+- ManagedByAwsSageMaker             (SageMaker domain/user-profile EFS)
+
+Tag data is read directly from the AWS Config configuration item — no extra
+API call is required.
+
 EVALUATION FLOW:
 1. Receive Config event for AWS::EFS::FileSystem resource
-2. If resource is deleted                     → NOT_APPLICABLE
-3. If resource is a replication destination   → NOT_APPLICABLE (read-only, skip TLS check)
-4. Otherwise                                  → evaluate TLS policy enforcement
+2. If resource is deleted                          → NOT_APPLICABLE
+3. If resource is a replication destination        → NOT_APPLICABLE (read-only, skip TLS check)
+4. If resource is managed by an excluded service   → NOT_APPLICABLE (AWS-managed, skip TLS check)
+5. Otherwise                                       → evaluate TLS policy enforcement
 
 COMPLEMENTS:
 - Guard policy (efs-validation) validates encryption-at-rest configuration
@@ -80,6 +98,21 @@ logger.setLevel(logging.INFO)
 # CONSTANTS
 # ============================================================================
 MAX_ANNOTATION_LENGTH = 256  # AWS Config annotation limit
+
+# ============================================================================
+# MANAGED SERVICE EXCLUSION TAGS
+# ============================================================================
+# EFS file systems that carry ANY of these tag keys are fully managed by an
+# AWS service and cannot have their resource policies modified by the account
+# owner. TLS enforcement is NOT_APPLICABLE for them.
+#
+# To add a new exclusion in the future, simply append the tag key here.
+# Tag values are NOT checked — the presence of the key alone is sufficient.
+# ============================================================================
+MANAGED_SERVICE_EXCLUSION_TAGS: List[str] = [
+    'ManagedByAmazonSageMakerResource',  # SageMaker-provisioned EFS (Studio/domain)
+    'ManagedByAwsSageMaker',             # SageMaker domain/user-profile EFS
+]
 
 # ============================================================================
 # LAZY CLIENT INITIALIZATION
@@ -184,6 +217,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 ordering_timestamp=ordering_timestamp
             )
         
+        # Tags from the Config item (dict of {key: value}); used for exclusion checks
+        resource_tags = configuration_item.get('tags', {})
+
         # Handle resource deletion
         if configuration_item.get('configurationItemStatus') == 'ResourceDeleted':
             compliance_type = 'NOT_APPLICABLE'
@@ -193,6 +229,17 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             # resource policies - TLS enforcement does not apply to them
             compliance_type = 'NOT_APPLICABLE'
             annotation = 'EFS is a replication destination (read-only) - TLS enforcement not applicable'
+        elif is_managed_by_excluded_service(resource_tags):
+            # EFS managed by an AWS service (e.g. SageMaker) cannot have its resource
+            # policy modified - TLS enforcement via policy is not applicable
+            matched_tag = next(
+                t for t in MANAGED_SERVICE_EXCLUSION_TAGS if t in resource_tags
+            )
+            compliance_type = 'NOT_APPLICABLE'
+            annotation = (
+                f'EFS is managed by an AWS service (tag: {matched_tag}) '
+                f'- TLS enforcement not applicable'
+            )
         else:
             # Evaluate EFS file system policy
             compliance_type, annotation = evaluate_efs_tls_policy(resource_id)
@@ -355,6 +402,33 @@ def is_efs_replication_destination(file_system_id: str) -> bool:
             f"- proceeding with evaluation"
         )
         return False
+
+
+def is_managed_by_excluded_service(tags: Dict[str, str]) -> bool:
+    """
+    Check if an EFS file system is managed by an excluded AWS service.
+
+    EFS file systems managed by services like SageMaker carry specific tag keys
+    applied automatically by AWS. These file systems cannot have their resource
+    policies modified by the account owner, so TLS enforcement is not applicable.
+
+    To exclude additional services in the future, add their tag key to
+    MANAGED_SERVICE_EXCLUSION_TAGS — no code changes needed here.
+
+    Args:
+        tags: Dict of EFS resource tags from the Config configuration item.
+
+    Returns:
+        True if the EFS carries at least one exclusion tag key, False otherwise.
+    """
+    for tag_key in MANAGED_SERVICE_EXCLUSION_TAGS:
+        if tag_key in tags:
+            logger.info(
+                f"EFS has managed-service exclusion tag '{tag_key}' "
+                f"- skipping TLS evaluation"
+            )
+            return True
+    return False
 
 
 def evaluate_efs_tls_policy(file_system_id: str) -> Tuple[str, str]:
