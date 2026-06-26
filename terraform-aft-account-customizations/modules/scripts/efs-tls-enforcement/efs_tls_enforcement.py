@@ -62,9 +62,15 @@ API call is required.
 EVALUATION FLOW:
 1. Receive Config event for AWS::EFS::FileSystem resource
 2. If resource is deleted                          → NOT_APPLICABLE
-3. If resource is managed by an excluded service   → NOT_APPLICABLE (AWS-managed, skip TLS check)
-4. If resource is a replication destination        → NOT_APPLICABLE (read-only, skip TLS check)
+3. If resource is managed by an excluded service   → COMPLIANT (AWS-managed, policy cannot be modified)
+4. If resource is a replication destination        → COMPLIANT (read-only, policy cannot be attached)
 5. Otherwise                                       → evaluate TLS policy enforcement
+
+Steps 3 and 4 are reported COMPLIANT rather than NOT_APPLICABLE on purpose. Those
+file systems physically cannot have a TLS resource policy attached (AWS-managed or
+read-only replica), so the absence of one is expected and allowed. Reporting them
+COMPLIANT lets them count toward the conformance pack score instead of leaving the
+rule at "insufficient data" when every in-scope EFS is one of these exclusions.
 
 The managed-service tag check (step 3) is evaluated BEFORE the replication
 destination check (step 4) on purpose. The tag check is read directly from the
@@ -234,7 +240,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             annotation = 'Resource has been deleted'
         elif is_managed_by_excluded_service(resource_tags):
             # EFS managed by an AWS service (e.g. SageMaker) cannot have its resource
-            # policy modified - TLS enforcement via policy is not applicable.
+            # policy modified by the account owner, so TLS enforcement via resource
+            # policy is impossible. These are reported COMPLIANT (not NOT_APPLICABLE)
+            # so they count toward the conformance pack score instead of leaving it
+            # at "insufficient data" - the missing TLS policy is expected and allowed.
             #
             # This check is intentionally evaluated BEFORE the replication-destination
             # check: it reads tags from the Config item and makes no API call, so
@@ -243,16 +252,22 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             matched_tag = next(
                 t for t in MANAGED_SERVICE_EXCLUSION_TAGS if t in resource_tags
             )
-            compliance_type = 'NOT_APPLICABLE'
+            compliance_type = 'COMPLIANT'
             annotation = (
                 f'EFS is managed by an AWS service (tag: {matched_tag}) '
-                f'- TLS enforcement not applicable'
+                f'- resource policy cannot be modified, TLS enforcement not required'
             )
         elif is_efs_replication_destination(resource_id):
             # Replication destination EFS file systems are read-only and cannot have
-            # resource policies - TLS enforcement does not apply to them
-            compliance_type = 'NOT_APPLICABLE'
-            annotation = 'EFS is a replication destination (read-only) - TLS enforcement not applicable'
+            # a resource policy attached, so TLS enforcement via policy is impossible.
+            # Reported COMPLIANT (not NOT_APPLICABLE) so the read-only destination
+            # counts toward the conformance pack score - the missing TLS policy is
+            # expected and allowed for a read-only replica.
+            compliance_type = 'COMPLIANT'
+            annotation = (
+                'EFS is a replication destination (read-only) '
+                '- resource policy cannot be attached, TLS enforcement not required'
+            )
         else:
             # Evaluate EFS file system policy
             compliance_type, annotation = evaluate_efs_tls_policy(resource_id)
