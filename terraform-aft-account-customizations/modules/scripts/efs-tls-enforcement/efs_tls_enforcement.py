@@ -62,9 +62,17 @@ API call is required.
 EVALUATION FLOW:
 1. Receive Config event for AWS::EFS::FileSystem resource
 2. If resource is deleted                          → NOT_APPLICABLE
-3. If resource is a replication destination        → NOT_APPLICABLE (read-only, skip TLS check)
-4. If resource is managed by an excluded service   → NOT_APPLICABLE (AWS-managed, skip TLS check)
+3. If resource is managed by an excluded service   → NOT_APPLICABLE (AWS-managed, skip TLS check)
+4. If resource is a replication destination        → NOT_APPLICABLE (read-only, skip TLS check)
 5. Otherwise                                       → evaluate TLS policy enforcement
+
+The managed-service tag check (step 3) is evaluated BEFORE the replication
+destination check (step 4) on purpose. The tag check is read directly from the
+Config configuration item and makes no API call, whereas the replication check
+calls describe_replication_configurations. Checking the tag first lets AWS-managed
+file systems (e.g. SageMaker) short-circuit without an unnecessary EFS API call —
+those file systems have no replication relationship, so calling the replication
+API for them only raises ReplicationNotFound and adds noise.
 
 COMPLEMENTS:
 - Guard policy (efs-validation) validates encryption-at-rest configuration
@@ -224,14 +232,14 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if configuration_item.get('configurationItemStatus') == 'ResourceDeleted':
             compliance_type = 'NOT_APPLICABLE'
             annotation = 'Resource has been deleted'
-        elif is_efs_replication_destination(resource_id):
-            # Replication destination EFS file systems are read-only and cannot have
-            # resource policies - TLS enforcement does not apply to them
-            compliance_type = 'NOT_APPLICABLE'
-            annotation = 'EFS is a replication destination (read-only) - TLS enforcement not applicable'
         elif is_managed_by_excluded_service(resource_tags):
             # EFS managed by an AWS service (e.g. SageMaker) cannot have its resource
-            # policy modified - TLS enforcement via policy is not applicable
+            # policy modified - TLS enforcement via policy is not applicable.
+            #
+            # This check is intentionally evaluated BEFORE the replication-destination
+            # check: it reads tags from the Config item and makes no API call, so
+            # AWS-managed file systems short-circuit here without triggering an
+            # (always failing) describe_replication_configurations call.
             matched_tag = next(
                 t for t in MANAGED_SERVICE_EXCLUSION_TAGS if t in resource_tags
             )
@@ -240,6 +248,11 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 f'EFS is managed by an AWS service (tag: {matched_tag}) '
                 f'- TLS enforcement not applicable'
             )
+        elif is_efs_replication_destination(resource_id):
+            # Replication destination EFS file systems are read-only and cannot have
+            # resource policies - TLS enforcement does not apply to them
+            compliance_type = 'NOT_APPLICABLE'
+            annotation = 'EFS is a replication destination (read-only) - TLS enforcement not applicable'
         else:
             # Evaluate EFS file system policy
             compliance_type, annotation = evaluate_efs_tls_policy(resource_id)
@@ -382,8 +395,9 @@ def is_efs_replication_destination(file_system_id: str) -> bool:
     Returns:
         True if EFS is a replication destination (read-only), False otherwise
     """
+    efs = get_efs_client()
     try:
-        response = get_efs_client().describe_replication_configurations(
+        response = efs.describe_replication_configurations(
             FileSystemId=file_system_id
         )
         replications = response.get('Replications', [])
@@ -396,7 +410,19 @@ def is_efs_replication_destination(file_system_id: str) -> bool:
                     )
                     return True
         return False
+    except efs.exceptions.ReplicationNotFound:
+        # Expected, normal case: the file system simply has no replication
+        # relationship, so it cannot be a replication destination. This is NOT an
+        # error and must not be logged as a warning — the majority of EFS file
+        # systems are not part of any replication configuration.
+        logger.info(
+            f"EFS {file_system_id} has no replication configuration "
+            f"- not a replication destination"
+        )
+        return False
     except Exception as e:
+        # Genuine unexpected error (throttling, access denied, etc.). Log a warning
+        # and proceed with TLS evaluation rather than failing the whole rule.
         logger.warning(
             f"Could not check replication config for {file_system_id}: {str(e)} "
             f"- proceeding with evaluation"
