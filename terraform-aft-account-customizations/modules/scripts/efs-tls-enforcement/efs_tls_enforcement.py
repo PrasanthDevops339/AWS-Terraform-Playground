@@ -59,12 +59,26 @@ Known managed-service tag keys:
 Tag data is read directly from the AWS Config configuration item — no extra
 API call is required.
 
-EVALUATION FLOW:
-1. Receive Config event for AWS::EFS::FileSystem resource
-2. If resource is deleted                          → NOT_APPLICABLE
-3. If resource is managed by an excluded service   → NOT_APPLICABLE (AWS-managed, skip TLS check)
-4. If resource is a replication destination        → NOT_APPLICABLE (read-only, skip TLS check)
-5. Otherwise                                       → evaluate TLS policy enforcement
+TRIGGER TYPES:
+This rule supports both AWS Config trigger types and dispatches on messageType:
+
+- ScheduledNotification (periodic): the Lambda enumerates EVERY EFS file system in
+  the account, evaluates each one, and reports them all in a single batched
+  put_evaluations call for the whole rule. This is the trigger that keeps the
+  conformance pack scored every cycle — the rule always produces results for every
+  file system instead of waiting for individual resource-change notifications.
+
+- ConfigurationItemChangeNotification: the Lambda evaluates the single resource in
+  the configuration item and submits one evaluation.
+
+Both paths share the same per-file-system decision logic (evaluate_efs_compliance),
+so the two triggers always agree.
+
+EVALUATION FLOW (per EFS file system):
+1. If resource is deleted                          → NOT_APPLICABLE
+2. If resource is managed by an excluded service   → NOT_APPLICABLE (AWS-managed, skip TLS check)
+3. If resource is a replication destination        → NOT_APPLICABLE (read-only, skip TLS check)
+4. Otherwise                                       → evaluate TLS policy enforcement
 
 The managed-service tag check (step 3) is evaluated BEFORE the replication
 destination check (step 4) on purpose. The tag check is read directly from the
@@ -106,6 +120,7 @@ logger.setLevel(logging.INFO)
 # CONSTANTS
 # ============================================================================
 MAX_ANNOTATION_LENGTH = 256  # AWS Config annotation limit
+MAX_EVALUATIONS_PER_CALL = 100  # AWS Config put_evaluations per-request limit
 
 # ============================================================================
 # MANAGED SERVICE EXCLUSION TAGS
@@ -171,11 +186,24 @@ def get_config_client():
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Main Lambda handler for EFS TLS enforcement validation.
-    
+
+    Dispatches based on the AWS Config message type:
+    - ScheduledNotification           → evaluate ALL EFS file systems in the account
+                                         and report them in a single batched
+                                         put_evaluations call for the whole rule.
+    - ConfigurationItemChangeNotification (and Oversized*) → evaluate the single
+                                         resource described in the configuration item.
+
+    A periodic (ScheduledNotification) trigger is what makes the conformance pack
+    score the rule every cycle: it always produces evaluation results for every EFS
+    file system, instead of waiting for individual resource-change notifications
+    (which leave the rule showing "no results / insufficient data" when nothing has
+    changed or the only file systems are NOT_APPLICABLE).
+
     Args:
-        event: AWS Config event containing configuration item
+        event: AWS Config event
         context: Lambda context object
-        
+
     Returns:
         Response dictionary with evaluation results
     """
@@ -183,97 +211,228 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Log event keys only (avoid logging full event for large payloads)
         logger.info(f"Event keys: {list(event.keys())}")
         logger.info(f"Config rule name: {event.get('configRuleName', 'unknown')}")
-        
+
         # Parse the invoking event - support both key formats
         raw_invoking_event = event.get('invokingEvent') or event.get('configRuleInvokingEvent')
-        
+
         if not raw_invoking_event:
             logger.error(f"Missing invoking event key. Keys present: {list(event.keys())}")
             raise KeyError("Missing invokingEvent or configRuleInvokingEvent in event")
-        
-        invoking_event = json.loads(raw_invoking_event)
-        configuration_item = invoking_event.get('configurationItem', {})
-        
-        # Validate configuration item exists and has required fields
-        if not configuration_item or not configuration_item.get('resourceId'):
-            logger.warning("Missing configuration item or resource ID")
-            return submit_not_applicable_evaluation(
-                event,
-                resource_type='AWS::EFS::FileSystem',
-                resource_id='UNKNOWN',
-                annotation='Missing configuration item or resource ID in event'
-            )
-        
-        # Extract essential information
-        resource_id = configuration_item.get('resourceId')
-        resource_type = configuration_item.get('resourceType')
-        
-        # Parse timestamp safely
-        ordering_timestamp = parse_ordering_timestamp(
-            configuration_item.get('configurationItemCaptureTime')
-        )
-        
-        # Handle non-target resource types gracefully (NOT_APPLICABLE instead of error)
-        if resource_type != 'AWS::EFS::FileSystem':
-            logger.info(f"Non-target resource type: {resource_type}")
-            return submit_evaluation(
-                event=event,
-                resource_type=resource_type,
-                resource_id=resource_id,
-                compliance_type='NOT_APPLICABLE',
-                annotation=f'Resource type {resource_type} is not evaluated by this rule',
-                ordering_timestamp=ordering_timestamp
-            )
-        
-        # Tags from the Config item (dict of {key: value}); used for exclusion checks
-        resource_tags = configuration_item.get('tags', {})
 
-        # Handle resource deletion
-        if configuration_item.get('configurationItemStatus') == 'ResourceDeleted':
-            compliance_type = 'NOT_APPLICABLE'
-            annotation = 'Resource has been deleted'
-        elif is_managed_by_excluded_service(resource_tags):
-            # EFS managed by an AWS service (e.g. SageMaker) cannot have its resource
-            # policy modified - TLS enforcement via policy is not applicable.
-            #
-            # This check is intentionally evaluated BEFORE the replication-destination
-            # check: it reads tags from the Config item and makes no API call, so
-            # AWS-managed file systems short-circuit here without triggering an
-            # (always failing) describe_replication_configurations call.
-            matched_tag = next(
-                t for t in MANAGED_SERVICE_EXCLUSION_TAGS if t in resource_tags
-            )
-            compliance_type = 'NOT_APPLICABLE'
-            annotation = (
-                f'EFS is managed by an AWS service (tag: {matched_tag}) '
-                f'- TLS enforcement not applicable'
-            )
-        elif is_efs_replication_destination(resource_id):
-            # Replication destination EFS file systems are read-only and cannot have
-            # resource policies - TLS enforcement does not apply to them
-            compliance_type = 'NOT_APPLICABLE'
-            annotation = 'EFS is a replication destination (read-only) - TLS enforcement not applicable'
-        else:
-            # Evaluate EFS file system policy
-            compliance_type, annotation = evaluate_efs_tls_policy(resource_id)
-        
-        # Clip annotation to AWS Config limit
-        annotation = clip_annotation(annotation)
-        
-        # Submit evaluation to AWS Config
+        invoking_event = json.loads(raw_invoking_event)
+        message_type = invoking_event.get('messageType')
+        logger.info(f"Invoking event messageType: {message_type}")
+
+        # Periodic (scheduled) invocation: evaluate every EFS file system and submit
+        # them all in one batched put_evaluations call for the whole rule.
+        if message_type == 'ScheduledNotification':
+            return handle_scheduled_event(event, invoking_event)
+
+        # Otherwise: configuration-change invocation for a single resource.
+        return handle_configuration_change_event(event, invoking_event)
+
+    except Exception:
+        logger.exception("Unhandled error during evaluation")
+        # Re-raise to ensure Lambda reports failure
+        raise
+
+
+def handle_configuration_change_event(
+    event: Dict[str, Any],
+    invoking_event: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Evaluate a single EFS file system from a configuration-change notification.
+
+    Args:
+        event: Original Lambda event (for resultToken)
+        invoking_event: Parsed invokingEvent payload
+
+    Returns:
+        Response dictionary
+    """
+    configuration_item = invoking_event.get('configurationItem', {})
+
+    # Validate configuration item exists and has required fields
+    if not configuration_item or not configuration_item.get('resourceId'):
+        logger.warning("Missing configuration item or resource ID")
+        return submit_not_applicable_evaluation(
+            event,
+            resource_type='AWS::EFS::FileSystem',
+            resource_id='UNKNOWN',
+            annotation='Missing configuration item or resource ID in event'
+        )
+
+    # Extract essential information
+    resource_id = configuration_item.get('resourceId')
+    resource_type = configuration_item.get('resourceType')
+
+    # Parse timestamp safely
+    ordering_timestamp = parse_ordering_timestamp(
+        configuration_item.get('configurationItemCaptureTime')
+    )
+
+    # Handle non-target resource types gracefully (NOT_APPLICABLE instead of error)
+    if resource_type != 'AWS::EFS::FileSystem':
+        logger.info(f"Non-target resource type: {resource_type}")
         return submit_evaluation(
             event=event,
             resource_type=resource_type,
             resource_id=resource_id,
-            compliance_type=compliance_type,
-            annotation=annotation,
+            compliance_type='NOT_APPLICABLE',
+            annotation=f'Resource type {resource_type} is not evaluated by this rule',
             ordering_timestamp=ordering_timestamp
         )
-        
-    except Exception as e:
-        logger.exception("Unhandled error during evaluation")
-        # Re-raise to ensure Lambda reports failure
-        raise
+
+    # Tags from the Config item (dict of {key: value}); used for exclusion checks
+    resource_tags = configuration_item.get('tags', {})
+    status = configuration_item.get('configurationItemStatus')
+
+    compliance_type, annotation = evaluate_efs_compliance(resource_id, resource_tags, status)
+
+    # Submit evaluation to AWS Config
+    return submit_evaluation(
+        event=event,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        compliance_type=compliance_type,
+        annotation=clip_annotation(annotation),
+        ordering_timestamp=ordering_timestamp
+    )
+
+
+def handle_scheduled_event(
+    event: Dict[str, Any],
+    invoking_event: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Evaluate ALL EFS file systems in the account for a periodic (scheduled) run.
+
+    Enumerates every EFS file system via describe_file_systems, evaluates each one
+    with the same decision logic used for change notifications, and submits the
+    results to AWS Config in a single batched put_evaluations call (chunked at the
+    100-evaluation API limit) under one resultToken for the whole rule.
+
+    Args:
+        event: Original Lambda event (for resultToken)
+        invoking_event: Parsed invokingEvent payload (for notificationCreationTime)
+
+    Returns:
+        Response dictionary summarizing the batch
+    """
+    ordering_timestamp = parse_ordering_timestamp(
+        invoking_event.get('notificationCreationTime')
+    )
+
+    file_systems = list_all_efs_file_systems()
+    logger.info(f"Scheduled evaluation: found {len(file_systems)} EFS file system(s)")
+
+    evaluations: List[Dict[str, Any]] = []
+    for fs in file_systems:
+        resource_id = fs.get('FileSystemId')
+        if not resource_id:
+            continue
+        resource_tags = tags_list_to_dict(fs.get('Tags', []))
+        compliance_type, annotation = evaluate_efs_compliance(
+            resource_id, resource_tags, status=None
+        )
+        evaluations.append({
+            'ComplianceResourceType': 'AWS::EFS::FileSystem',
+            'ComplianceResourceId': resource_id,
+            'ComplianceType': compliance_type,
+            'Annotation': clip_annotation(annotation),
+            'OrderingTimestamp': ordering_timestamp,
+        })
+
+    return submit_evaluations_batch(event, evaluations)
+
+
+def evaluate_efs_compliance(
+    resource_id: str,
+    resource_tags: Dict[str, str],
+    status: Optional[str]
+) -> Tuple[str, str]:
+    """
+    Decide the compliance result for a single EFS file system.
+
+    This is the shared decision logic used by BOTH the configuration-change path
+    and the scheduled (periodic) path, so the two triggers always agree.
+
+    Evaluation order (see module docstring for the full rationale):
+    1. Deleted resource                → NOT_APPLICABLE
+    2. Managed by an excluded service  → NOT_APPLICABLE (cheap tag check, no API call)
+    3. Replication destination         → NOT_APPLICABLE (read-only, API call)
+    4. Otherwise                       → evaluate the TLS resource policy
+
+    Args:
+        resource_id: EFS file system ID
+        resource_tags: Tags as a {key: value} dict
+        status: configurationItemStatus (None for scheduled enumeration)
+
+    Returns:
+        Tuple of (compliance_type, annotation)
+    """
+    if status == 'ResourceDeleted':
+        return 'NOT_APPLICABLE', 'Resource has been deleted'
+
+    if is_managed_by_excluded_service(resource_tags):
+        # EFS managed by an AWS service (e.g. SageMaker) cannot have its resource
+        # policy modified - TLS enforcement via policy is not applicable.
+        #
+        # This check is intentionally evaluated BEFORE the replication-destination
+        # check: it reads tags from the Config item and makes no API call, so
+        # AWS-managed file systems short-circuit here without triggering an
+        # (always failing) describe_replication_configurations call.
+        matched_tag = next(
+            t for t in MANAGED_SERVICE_EXCLUSION_TAGS if t in resource_tags
+        )
+        return 'NOT_APPLICABLE', (
+            f'EFS is managed by an AWS service (tag: {matched_tag}) '
+            f'- TLS enforcement not applicable'
+        )
+
+    if is_efs_replication_destination(resource_id):
+        # Replication destination EFS file systems are read-only and cannot have
+        # resource policies - TLS enforcement does not apply to them
+        return 'NOT_APPLICABLE', (
+            'EFS is a replication destination (read-only) '
+            '- TLS enforcement not applicable'
+        )
+
+    # Evaluate EFS file system policy
+    return evaluate_efs_tls_policy(resource_id)
+
+
+def list_all_efs_file_systems() -> List[Dict[str, Any]]:
+    """
+    Return every EFS file system in the account/region.
+
+    Uses the describe_file_systems paginator so accounts with many file systems
+    are fully enumerated. Returns the raw FileSystemDescription dicts (each with
+    'FileSystemId' and 'Tags').
+    """
+    efs = get_efs_client()
+    file_systems: List[Dict[str, Any]] = []
+    paginator = efs.get_paginator('describe_file_systems')
+    for page in paginator.paginate():
+        file_systems.extend(page.get('FileSystems', []))
+    return file_systems
+
+
+def tags_list_to_dict(tags: List[Dict[str, str]]) -> Dict[str, str]:
+    """
+    Convert an EFS API tag list ([{'Key': k, 'Value': v}, ...]) to a {k: v} dict.
+
+    The describe_file_systems API returns tags as a list, whereas the Config
+    configuration item exposes them as a dict. The exclusion checks expect a dict,
+    so normalize here.
+    """
+    result: Dict[str, str] = {}
+    for tag in tags or []:
+        key = tag.get('Key')
+        if key is not None:
+            result[key] = tag.get('Value', '')
+    return result
 
 
 def clip_annotation(text: str, max_len: int = MAX_ANNOTATION_LENGTH) -> str:
@@ -354,6 +513,75 @@ def submit_evaluation(
                 'OrderingTimestamp': ordering_timestamp.isoformat()
             }
         })
+    }
+
+
+def submit_evaluations_batch(
+    event: Dict[str, Any],
+    evaluations: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """
+    Submit a batch of evaluations to AWS Config for the whole rule in one pass.
+
+    AWS Config's put_evaluations accepts at most MAX_EVALUATIONS_PER_CALL evaluations
+    per request, so the list is chunked. All chunks share the same resultToken, so
+    Config treats them as the result of a single rule run. This is what populates the
+    conformance pack with results for every EFS file system on each scheduled cycle.
+
+    Args:
+        event: Original Lambda event (for resultToken)
+        evaluations: List of Evaluation dicts (each with an OrderingTimestamp)
+
+    Returns:
+        Response dictionary summarizing the batch
+    """
+    config = get_config_client()
+    result_token = event['resultToken']
+
+    counts = {'COMPLIANT': 0, 'NON_COMPLIANT': 0, 'NOT_APPLICABLE': 0}
+    for evaluation in evaluations:
+        counts[evaluation['ComplianceType']] = counts.get(evaluation['ComplianceType'], 0) + 1
+
+    if not evaluations:
+        # No EFS file systems in the account: still report to Config so the rule run
+        # is acknowledged (an empty evaluation set is valid and clears stale results).
+        logger.info("No EFS file systems found - submitting empty evaluation set")
+        config.put_evaluations(Evaluations=[], ResultToken=result_token)
+        return {
+            'statusCode': 200,
+            'body': json.dumps({
+                'message': 'No EFS file systems to evaluate',
+                'counts': counts
+            })
+        }
+
+    failed_evaluations: List[Dict[str, Any]] = []
+    for i in range(0, len(evaluations), MAX_EVALUATIONS_PER_CALL):
+        chunk = evaluations[i:i + MAX_EVALUATIONS_PER_CALL]
+        response = config.put_evaluations(
+            Evaluations=chunk,
+            ResultToken=result_token
+        )
+        failed_evaluations.extend(response.get('FailedEvaluations', []))
+        logger.info(
+            f"Submitted evaluation chunk {i // MAX_EVALUATIONS_PER_CALL + 1} "
+            f"({len(chunk)} evaluations); failed={len(response.get('FailedEvaluations', []))}"
+        )
+
+    logger.info(
+        f"Rule evaluation complete: total={len(evaluations)} "
+        f"compliant={counts['COMPLIANT']} non_compliant={counts['NON_COMPLIANT']} "
+        f"not_applicable={counts['NOT_APPLICABLE']} failed={len(failed_evaluations)}"
+    )
+
+    return {
+        'statusCode': 200,
+        'body': json.dumps({
+            'message': 'Rule evaluation completed successfully',
+            'total': len(evaluations),
+            'counts': counts,
+            'failedEvaluations': failed_evaluations
+        }, default=str)
     }
 
 
