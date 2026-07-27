@@ -52,8 +52,8 @@ variables:
 .before_script:
   before_script:
     - export DATA_DATE=$(date +%Y-%m-%d)
-    - export CSV_FILE_PATH="data/$DATA_DATE/reference.csv"
-    - export S3_OBJECT_KEY="$S3_BUCKET/reference/reference.csv"
+    - export CSV_FILE_PATH="data/$DATA_DATE/test.csv"
+    - export S3_OBJECT_KEY="$S3_BUCKET/reference/test.csv"
     - pip install boto3
 
 .federate-login:
@@ -85,11 +85,7 @@ upload_csv_nonprod:
     - !reference [.federate-login, script]
 
   script:
-    - python3 scripts/upload_csv_to_s3.py \
-        --bucket "$S3_BUCKET" \
-        --key "$S3_OBJECT_KEY" \
-        --file "$CSV_FILE_PATH" \
-        --region "$REGION"
+    - python3 $CI_PROJECT_DIR/scripts/upload_csv_to_s3.py --bucket "$S3_BUCKET" --key "$S3_OBJECT_KEY" --file "$CSV_FILE_PATH" --region "$REGION"
 
 upload_csv_prd:
   stage: upload
@@ -109,8 +105,4 @@ upload_csv_prd:
     - !reference [.federate-login, script]
 
   script:
-    - python3 scripts/upload_csv_to_s3.py \
-        --bucket "$S3_BUCKET" \
-        --key "$S3_OBJECT_KEY" \
-        --file "$CSV_FILE_PATH" \
-        --region "$REGION"
+    - python3 $CI_PROJECT_DIR/scripts/upload_csv_to_s3.py --bucket "$S3_BUCKET" --key "$S3_OBJECT_KEY" --file "$CSV_FILE_PATH" --region "$REGION"
