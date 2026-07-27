@@ -77,9 +77,6 @@ fi
 # ---------------------------------------------------------------------------
 section "2. Region check"
 INSTANCE_REGION=$(aws configure get region || true)
-if [[ -z "$INSTANCE_REGION" ]]; then
-  INSTANCE_REGION=$(curl -s --max-time 2 http://169.254.169.254/latest/meta-data/placement/region || echo "unknown")
-fi
 info "Instance/CLI region: ${INSTANCE_REGION:-unknown}"
 
 if BUCKET_LOC_JSON=$(aws s3api get-bucket-location --bucket "$BUCKET" --output json 2>&1); then
