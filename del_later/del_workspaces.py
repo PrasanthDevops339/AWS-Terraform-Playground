@@ -13,19 +13,16 @@ Safety model:
   - Without --yes, you get one interactive confirmation before deletion.
 
 Usage:
-    export TFE_TOKEN="xxxxxxxx.atlasv1.xxxxxxxx"
+    python3 tfe_delete_workspaces.py <host> <org-name> workspaces.txt --dry-run
+    python3 tfe_delete_workspaces.py <host> <org-name> workspaces.txt
+    python3 tfe_delete_workspaces.py <host> <org-name> workspaces.txt --force
+    python3 tfe_delete_workspaces.py <host> <org-name> workspaces.txt --yes
 
-    # See what would happen, no changes made
-    python3 tfe_delete_workspaces.py <org-name> workspaces.txt --dry-run
-
-    # Safe-delete (blocked if a workspace still manages resources)
-    python3 tfe_delete_workspaces.py <org-name> workspaces.txt
-
-    # Hard delete (skips the resource check) — use with care
-    python3 tfe_delete_workspaces.py <org-name> workspaces.txt --force
-
-    # Non-interactive (e.g. CI) — skip the confirmation prompt
-    python3 tfe_delete_workspaces.py <org-name> workspaces.txt --yes
+Token resolution (checked in order):
+    1. TFE_TOKEN env var, if set — always wins.
+    2. TF_TOKEN_<host>, using Terraform's own CLI credentials convention:
+       dots -> "_", hyphens -> "__".
+       e.g. host "tfe-dev.prasanth.com" -> TF_TOKEN_tfe__dev_prasanth_com
 
 Input file format (workspaces.txt):
     prod-network
@@ -48,14 +45,36 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-TFE_HOSTNAME = "tfe.prasanth.com"
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%dT%H:%M:%S%z",
 )
 log = logging.getLogger("tfe-delete-workspaces")
+
+
+def normalize_host(host: str) -> str:
+    return host.replace("https://", "").replace("http://", "").rstrip("/")
+
+
+def token_env_var_name(host: str) -> str:
+    encoded = host.replace(".", "_").replace("-", "__")
+    return f"TF_TOKEN_{encoded}"
+
+
+def resolve_token(host: str) -> str:
+    token = os.environ.get("TFE_TOKEN")
+    if token:
+        return token
+
+    env_var = token_env_var_name(host)
+    token = os.environ.get(env_var)
+    if token:
+        log.info("Using token from %s", env_var)
+        return token
+
+    log.error("No token found. Set TFE_TOKEN or %s in your environment.", env_var)
+    sys.exit(1)
 
 
 def build_session(token: str) -> requests.Session:
@@ -87,7 +106,6 @@ def load_workspace_names(path: str) -> list[str]:
                 continue
             names.append(line)
 
-    # de-dupe, preserve order
     seen = set()
     deduped = []
     for name in names:
@@ -102,9 +120,8 @@ def load_workspace_names(path: str) -> list[str]:
     return deduped
 
 
-def lookup_workspace(session: requests.Session, org: str, name: str) -> dict | None:
-    """Return workspace attributes (incl. resource-count) or None if not found."""
-    url = f"https://{TFE_HOSTNAME}/api/v2/organizations/{org}/workspaces/{name}"
+def lookup_workspace(session: requests.Session, host: str, org: str, name: str) -> dict | None:
+    url = f"https://{host}/api/v2/organizations/{org}/workspaces/{name}"
     resp = session.get(url, timeout=30)
     if resp.status_code == 404:
         return None
@@ -113,16 +130,14 @@ def lookup_workspace(session: requests.Session, org: str, name: str) -> dict | N
     return resp.json().get("data", {})
 
 
-def delete_workspace(session: requests.Session, org: str, name: str, force: bool) -> tuple[bool, str]:
-    """Returns (success, message)."""
+def delete_workspace(
+    session: requests.Session, host: str, org: str, name: str, force: bool
+) -> tuple[bool, str]:
     if force:
-        url = f"https://{TFE_HOSTNAME}/api/v2/organizations/{org}/workspaces/{name}"
+        url = f"https://{host}/api/v2/organizations/{org}/workspaces/{name}"
         resp = session.delete(url, timeout=30)
     else:
-        url = (
-            f"https://{TFE_HOSTNAME}/api/v2/organizations/{org}"
-            f"/workspaces/{name}/actions/safe-delete"
-        )
+        url = f"https://{host}/api/v2/organizations/{org}/workspaces/{name}/actions/safe-delete"
         resp = session.post(url, timeout=30)
 
     if resp.status_code in (200, 202, 204):
@@ -147,6 +162,7 @@ def write_report(results: list[dict], org: str) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Delete TFE workspaces listed in a text file.")
+    parser.add_argument("host", help="TFE hostname, e.g. tfe-dev.prasanth.com")
     parser.add_argument("org", help="TFE organization name")
     parser.add_argument("file", help="Text file with one workspace name per line")
     parser.add_argument(
@@ -166,19 +182,17 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    token = os.environ.get("TFE_TOKEN")
-    if not token:
-        log.error("TFE_TOKEN environment variable not set.")
-        sys.exit(1)
+    host = normalize_host(args.host)
+    token = resolve_token(host)
 
     names = load_workspace_names(args.file)
     session = build_session(token)
 
-    log.info("Resolving %s workspace name(s) against org '%s'...", len(names), args.org)
+    log.info("Resolving %s workspace name(s) against org '%s' on %s...", len(names), args.org, host)
     plan = []
     for name in names:
         try:
-            ws = lookup_workspace(session, args.org, name)
+            ws = lookup_workspace(session, host, args.org, name)
         except RuntimeError as exc:
             plan.append({"name": name, "resource_count": "", "found": False, "error": str(exc)})
             continue
@@ -228,7 +242,7 @@ def main() -> None:
     results = []
     for item in to_delete:
         name = item["name"]
-        success, detail = delete_workspace(session, args.org, name, args.force)
+        success, detail = delete_workspace(session, host, args.org, name, args.force)
         status = "deleted" if success else "skipped/failed"
         log.info("%s: %s (%s)", name, status, detail)
         results.append(

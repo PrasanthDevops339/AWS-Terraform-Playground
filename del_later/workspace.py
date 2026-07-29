@@ -4,8 +4,20 @@ tfe_list_workspaces.py
 Exports all workspaces in a TFE organization to a CSV file.
 
 Usage:
-    export TFE_TOKEN="xxxxxxxx.atlasv1.xxxxxxxx"
-    python3 tfe_list_workspaces.py <org-name> [-o output.csv]
+    # token via TFE_TOKEN, or auto-detected from TF_TOKEN_<host> (see below)
+    python3 tfe_list_workspaces.py <host> <org-name> [-o output.csv]
+
+Examples:
+    python3 tfe_list_workspaces.py tfe-dev.prasanth.com 
+    python3 tfe_list_workspaces.py tfe.prasanth.com  -o prod.csv
+
+Token resolution (checked in order):
+    1. TFE_TOKEN env var, if set — always wins.
+    2. TF_TOKEN_<host>, using Terraform's own CLI credentials convention:
+       dots -> "_", hyphens -> "__".
+       e.g. host "tfe-dev.prasanth.com" -> TF_TOKEN_tfe__dev_prasanth_com
+       This lets you keep one token per TFE instance exported (or set in your
+       CI secrets) without re-exporting TFE_TOKEN every time you switch hosts.
 
 Requires: requests  (pip install requests)
 """
@@ -23,7 +35,6 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-TFE_HOSTNAME = "tfe.prasanth.com"
 PAGE_SIZE = 100
 
 logging.basicConfig(
@@ -34,8 +45,33 @@ logging.basicConfig(
 log = logging.getLogger("tfe-list-workspaces")
 
 
+def normalize_host(host: str) -> str:
+    """Strip a scheme if the user passed one (e.g. 'https://tfe-dev.prasanth.com')."""
+    return host.replace("https://", "").replace("http://", "").rstrip("/")
+
+
+def token_env_var_name(host: str) -> str:
+    """Terraform CLI convention: TF_TOKEN_<host>, dots -> '_', hyphens -> '__'."""
+    encoded = host.replace(".", "_").replace("-", "__")
+    return f"TF_TOKEN_{encoded}"
+
+
+def resolve_token(host: str) -> str:
+    token = os.environ.get("TFE_TOKEN")
+    if token:
+        return token
+
+    env_var = token_env_var_name(host)
+    token = os.environ.get(env_var)
+    if token:
+        log.info("Using token from %s", env_var)
+        return token
+
+    log.error("No token found. Set TFE_TOKEN or %s in your environment.", env_var)
+    sys.exit(1)
+
+
 def build_session(token: str) -> requests.Session:
-    """Session with retry/backoff for transient TFE API failures."""
     session = requests.Session()
     session.headers.update(
         {
@@ -55,22 +91,22 @@ def build_session(token: str) -> requests.Session:
     return session
 
 
-def fetch_all_workspaces(session: requests.Session, org: str) -> list[dict]:
+def fetch_all_workspaces(session: requests.Session, host: str, org: str) -> list[dict]:
     """Paginate through /organizations/:org/workspaces and return raw records."""
     workspaces: list[dict] = []
     page = 1
 
     while True:
-        url = f"https://{TFE_HOSTNAME}/api/v2/organizations/{org}/workspaces"
+        url = f"https://{host}/api/v2/organizations/{org}/workspaces"
         params = {"page[size]": PAGE_SIZE, "page[number]": page}
 
         resp = session.get(url, params=params, timeout=30)
 
         if resp.status_code == 401:
-            log.error("Authentication failed — check TFE_TOKEN.")
+            log.error("Authentication failed against %s — check the token.", host)
             sys.exit(1)
         if resp.status_code == 404:
-            log.error("Organization '%s' not found on %s.", org, TFE_HOSTNAME)
+            log.error("Organization '%s' not found on %s.", org, host)
             sys.exit(1)
         if not resp.ok:
             log.error("TFE API error %s: %s", resp.status_code, resp.text[:500])
@@ -132,6 +168,7 @@ def write_csv(workspaces: list[dict], outfile: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Export TFE workspaces to CSV.")
+    parser.add_argument("host", help="TFE hostname, e.g. tfe-dev.prasanth.com")
     parser.add_argument("org", help="TFE organization name")
     parser.add_argument(
         "-o",
@@ -141,18 +178,15 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    token = os.environ.get("TFE_TOKEN")
-    if not token:
-        log.error("TFE_TOKEN environment variable not set.")
-        log.error("Generate one at: https://%s/app/settings/tokens", TFE_HOSTNAME)
-        sys.exit(1)
+    host = normalize_host(args.host)
+    token = resolve_token(host)
 
     outfile = args.output or (
         f"workspaces_{args.org}_{datetime.now(timezone.utc):%Y%m%d_%H%M%S}.csv"
     )
 
     session = build_session(token)
-    workspaces = fetch_all_workspaces(session, args.org)
+    workspaces = fetch_all_workspaces(session, host, args.org)
     write_csv(workspaces, outfile)
 
 
