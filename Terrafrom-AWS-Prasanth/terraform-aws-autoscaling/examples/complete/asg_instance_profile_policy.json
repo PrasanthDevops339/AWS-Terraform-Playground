@@ -1,0 +1,39 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": [
+        "s3:ListAllMyBuckets",
+        "s3:GetBucketLocation"
+      ],
+      "Effect": "Allow",
+      "Resource": "arn:aws:s3:::*",
+      "Sid": "1"
+    },
+    {
+      "Action": [
+        "kms:Encrypt",
+        "kms:Decrypt",
+        "kms:ReEncrypt*",
+        "kms:GenerateDataKey*",
+        "kms:DescribeKey"
+      ],
+      "Effect": "Allow",
+      "Resource": [
+        "arn:aws:ec2::${account_id}:instance/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeInstances",
+        "iam:GetInstanceProfile",
+        "iam:GetUser",
+        "iam:GetRole",
+        "iam:GetAccount*",
+        "iam:ListAccount*"
+      ],
+      "Resource": "arn:aws:ec2::${account_id}:instance/*"
+    }
+  ]
+}

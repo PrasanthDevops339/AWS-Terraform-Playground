@@ -1,0 +1,12 @@
+# Placeholder GitLab CI configuration.
+# Replace with the original pipeline when available.
+
+stages:
+  - validate
+
+terraform_validate:
+  stage: validate
+  script:
+    - terraform fmt -check -recursive
+    - terraform init -backend=false
+    - terraform validate
