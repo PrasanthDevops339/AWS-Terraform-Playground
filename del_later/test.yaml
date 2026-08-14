@@ -1,0 +1,78 @@
+include:
+  - project: "ipeline-templates"
+    ref: "main"
+    file: 'xxxx.yml'
+
+variables:
+  ENABLED_ENVIRONMENTS: dev
+  GROUP: xxxxxx
+  NONPROD_USERNAME: $xxxxxxxxxx
+  NONPROD_PASSWORD: $xxxxxxxxxxxxxxx
+
+kms-cleanup:
+  stage: .pre
+  tags: ["runner"]
+  variables:
+    ENV: dev
+    AWS_REGION: us-east-2
+    KMS_KEY_ID: mrk-#############
+    DELETION_WINDOW: "7"
+    DRY_RUN: "true"
+  script:
+    - python3 /federate.py -e $ENV -g $GROUP -u $NONPROD_USE -p $NONPROD_PASS
+    - export AWS_PROFILE=
+
+    # --- Guard: confirm identity, key state, and MRK replicas ---
+    - aws sts get-caller-identity
+    - |
+      STATE=$(aws kms describe-key --key-id $KMS_KEY_ID --region $AWS_REGION \
+        --query 'KeyMetadata.KeyState' --output text)
+      echo "Key state: $STATE"
+      if [ "$STATE" = "PendingDeletion" ]; then
+        echo "Already pending deletion — nothing to do."; exit 0
+      fi
+    - |
+      REPLICAS=$(aws kms describe-key --key-id $KMS_KEY_ID --region $AWS_REGION \
+        --query 'KeyMetadata.MultiRegionConfiguration.ReplicaKeys' --output json)
+      echo "Replica keys: $REPLICAS"
+      if [ "$REPLICAS" != "null" ] && [ "$REPLICAS" != "[]" ]; then
+        echo "ERROR: MRK has replicas. Schedule those first."; exit 1
+      fi
+
+    # --- Aliases ---
+    - |
+      ALIASES=$(aws kms list-aliases --key-id $KMS_KEY_ID --region $AWS_REGION \
+        --query 'Aliases[].AliasName' --output text)
+      echo "Aliases found: ${ALIASES:-none}"
+      for A in $ALIASES; do
+        if [ "$DRY_RUN" = "true" ]; then
+          echo "[dryrun] would delete-alias $A"
+        else
+          aws kms delete-alias --alias-name "$A" --region $AWS_REGION
+          echo "deleted alias $A"
+        fi
+      done
+
+    # --- Schedule key deletion ---
+    - |
+      if [ "$DRY_RUN" = "true" ]; then
+        echo "[dryrun] would schedule-key-deletion $KMS_KEY_ID (${DELETION_WINDOW}d)"
+      else
+        aws kms schedule-key-deletion --key-id $KMS_KEY_ID \
+          --days $DELETION_WINDOW --region $AWS_REGION
+      fi
+
+
+
+
+### if del from ststefile
+
+- ACCOUNT_ALIAS=$(aws iam list-account-aliases --query 'AccountAliases[0]' --output text)
+    - TF_BACKEND_S3_BUCKET=$ACCOUNT_ALIAS-tf-backend-use2
+    - TF_STATE_FILE_NAME=$CI_PROJECT_NAME/$ENV
+    - |
+      terraform init -reconfigure \
+        -backend-config="bucket=$TF_BACKEND_S3_BUCKET" \
+        -backend-config="key=$TF_STATE_FILE_NAME" \
+        -backend-config="region=$AWS_REGION"
+      terraform state rm 'module.test-patching-bucket-kms-key.aws_kms_key.primary[0]'
