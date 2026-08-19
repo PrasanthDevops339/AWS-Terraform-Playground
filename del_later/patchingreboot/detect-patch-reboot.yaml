@@ -1,0 +1,271 @@
+schemaVersion: '2.2'
+description: >-
+  Detect-PatchReboot — triggered by EventBridge (via Lambda) as soon as
+  AWS-RunPatchBaseline / AWS-RunPatchBaselineAssociation /
+  AWS-RunPatchBaselineWithHooks reaches a terminal status on an
+  instance. Determines whether the patch operation rebooted the box and
+  publishes both signals to a CloudWatch namespace:
+
+    PatchRunStatus  = 1   dims: InstanceId, InstanceName, Wave, Status
+    RebootOccurred  = 1|0 dims: InstanceId, InstanceName, Wave
+
+  Detection rule (all methods below are equivalent forms of it):
+    rebooted  <=>  boot_epoch > patch_start_epoch
+              <=>  uptime_seconds < (now - patch_start_epoch)
+
+  Each OS step ships the full menu of detection commands. The
+  kernel-truth method is ACTIVE; every alternative is present directly
+  beneath it, commented and labeled, so a method can be swapped in at
+  implementation time without rewriting the document.
+
+  Requires AWS CLI v2 on the instance (preinstalled on AL2023; bake
+  into RHEL and Windows golden AMIs) and cloudwatch:PutMetricData on
+  the instance profile, condition-scoped to MetricNamespace.
+  Covers Amazon Linux 2023, RHEL, and Windows Server.
+parameters:
+  PatchStartEpoch:
+    type: String
+    description: >-
+      Unix epoch (UTC seconds) when the patch command was requested.
+      Derived by the trigger Lambda from the EventBridge event's
+      requested-date-time field.
+  PatchStatus:
+    type: String
+    default: Success
+    allowedValues:
+      - Success
+      - Failed
+      - TimedOut
+      - Cancelled
+    description: >-
+      Terminal status of the patch command, taken from the EventBridge
+      event. Published as the Status dimension on PatchRunStatus.
+  InstanceName:
+    type: String
+    default: unknown
+    description: >-
+      Value of the instance's Name tag, resolved by the trigger Lambda.
+      Published as the InstanceName dimension.
+  Wave:
+    type: String
+    default: unknown
+    description: >-
+      Patch wave identifier (e.g. dev-a, prd-b) from the patch:wave
+      tag. Published as the Wave dimension.
+  MetricNamespace:
+    type: String
+    default: Custom/PatchExecution
+    description: CloudWatch namespace to publish both metrics into.
+mainSteps:
+  # ==================================================================
+  # AL2023 + RHEL — both systemd, identical primitives.
+  # ==================================================================
+  - action: aws:runShellScript
+    name: DetectRebootLinux
+    precondition:
+      StringEquals:
+        - platformType
+        - Linux
+    inputs:
+      runCommand:
+        - |
+          #!/bin/bash
+          set -uo pipefail
+          START="{{ PatchStartEpoch }}"
+          NOW=$(date +%s)
+
+          # ============================================================
+          # REBOOT DETECTION — METHOD MENU (Linux: AL2023 + RHEL)
+          # Pick one. Method 1 is active; the rest are drop-in
+          # replacements that must set BOOT (epoch) or REBOOTED直接.
+          # ============================================================
+
+          # --- METHOD 1 (ACTIVE) kernel boot epoch from /proc/stat ----
+          # Kernel-provided Unix epoch. No timezone, locale, or date
+          # parsing. Most reliable option on both AL2023 and RHEL.
+          BOOT=$(awk '/btime/ {print $2}' /proc/stat)
+
+          # --- METHOD 2  uptime seconds from /proc/uptime -------------
+          # Kernel-provided duration. Same inequality, expressed as
+          # "uptime is shorter than time elapsed since patch start".
+          # UPTIME=$(awk '{print int($1)}' /proc/uptime)
+          # BOOT=$(( NOW - UPTIME ))
+
+          # --- METHOD 3  uptime -s (systemd) --------------------------
+          # Human-readable boot time in LOCAL time. Convert explicitly.
+          # BOOT=$(date -d "$(uptime -s)" +%s)
+
+          # --- METHOD 4  who -b ---------------------------------------
+          # Boot time from utmp, LOCAL time, format varies by locale.
+          # BOOT=$(date -d "$(who -b | awk '{print $3, $4}')" +%s)
+
+          # --- METHOD 5  last reboot (wtmp) ---------------------------
+          # Reboot history. Good evidence; wtmp rotates, so not ideal
+          # as the sole source of truth.
+          # BOOT=$(date -d "$(last reboot -F | head -1 | awk '{print $6,$7,$8,$9,$10}')" +%s)
+
+          # --- METHOD 6  journalctl boot list -------------------------
+          # systemd boot sessions. Requires persistent journal storage.
+          # BOOT=$(date -d "$(journalctl --list-boots --no-pager | tail -1 | awk '{print $4,$5,$6}')" +%s)
+
+          # --- NOT A DETECTION METHOD ---------------------------------
+          # needs-restarting -r  reports a reboot is REQUIRED, not that
+          # one OCCURRED. Never use it for this decision.
+          # ============================================================
+
+          UPTIME=$(awk '{print int($1)}' /proc/uptime)
+          echo "NOW_EPOCH=${NOW}"
+          echo "BOOT_EPOCH=${BOOT}"
+          echo "UPTIME_SECONDS=${UPTIME}"
+          echo "PATCH_START_EPOCH=${START}"
+          echo "PATCH_STATUS={{ PatchStatus }}"
+
+          if [ "${BOOT}" -gt "${START}" ]; then
+            REBOOTED=true
+            RVALUE=1
+          else
+            REBOOTED=false
+            RVALUE=0
+          fi
+          echo "REBOOTED=${REBOOTED}"
+
+          # Identity + region from IMDSv2.
+          TOKEN=$(curl -sS -X PUT "http://169.254.169.254/latest/api/token" \
+            -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
+          IID=$(curl -sS -H "X-aws-ec2-metadata-token: ${TOKEN}" \
+            "http://169.254.169.254/latest/meta-data/instance-id")
+          REGION=$(curl -sS -H "X-aws-ec2-metadata-token: ${TOKEN}" \
+            "http://169.254.169.254/latest/meta-data/placement/region")
+
+          DIMS="Name=InstanceId,Value=${IID}"
+          DIMS="${DIMS},{Name=InstanceName,Value={{ InstanceName }}}"
+          DIMS="${DIMS},{Name=Wave,Value={{ Wave }}}"
+
+          PUBLISHED=false
+          if command -v aws >/dev/null 2>&1; then
+            aws cloudwatch put-metric-data \
+              --region "${REGION}" \
+              --namespace "{{ MetricNamespace }}" \
+              --metric-data \
+                "MetricName=PatchRunStatus,Value=1,Unit=Count,Dimensions=[{${DIMS}},{Name=Status,Value={{ PatchStatus }}}]" \
+                "MetricName=RebootOccurred,Value=${RVALUE},Unit=Count,Dimensions=[{${DIMS}}]" \
+              && PUBLISHED=true
+          else
+            echo "AWS CLI not found on instance"
+          fi
+          echo "METRIC_PUBLISHED=${PUBLISHED}"
+
+          # --- Forensic evidence for Splunk (best effort) -------------
+          echo "--- last reboot (wtmp) ---"
+          last reboot -F 2>/dev/null | head -3
+          echo "--- journal boots ---"
+          journalctl --list-boots --no-pager 2>/dev/null | tail -3
+
+          # Fail loud if the metric did not land.
+          [ "${PUBLISHED}" = "true" ] || exit 1
+          exit 0
+
+  # ==================================================================
+  # Windows Server
+  # ==================================================================
+  - action: aws:runPowerShellScript
+    name: DetectRebootWindows
+    precondition:
+      StringEquals:
+        - platformType
+        - Windows
+    inputs:
+      runCommand:
+        - |
+          $ErrorActionPreference = 'Stop'
+          $start = [int64]"{{ PatchStartEpoch }}"
+          $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+
+          # ============================================================
+          # REBOOT DETECTION — METHOD MENU (Windows Server)
+          # Pick one. Method 1 is active; the rest are drop-in
+          # replacements that must set $boot (epoch seconds).
+          # ============================================================
+
+          # --- METHOD 1 (ACTIVE) CIM LastBootUpTime -------------------
+          # DateTimeOffset conversion makes the timezone handling
+          # explicit. Fast and locale-independent.
+          $os = Get-CimInstance Win32_OperatingSystem
+          $boot = [DateTimeOffset]::new($os.LastBootUpTime).ToUnixTimeSeconds()
+
+          # --- METHOD 2  TickCount64 uptime ---------------------------
+          # Milliseconds since boot from the OS tick counter.
+          # $uptimeSec = [int64]([Environment]::TickCount64 / 1000)
+          # $boot = $now - $uptimeSec
+
+          # --- METHOD 3  Get-Uptime (PowerShell 6+ only) --------------
+          # Not available on Windows PowerShell 5.1 — check before use.
+          # $boot = [DateTimeOffset]::new((Get-Uptime -Since)).ToUnixTimeSeconds()
+
+          # --- METHOD 4  System event log, boot markers ---------------
+          # Event 6005 = event log service started (boot marker).
+          # $ev = Get-WinEvent -FilterHashtable @{LogName='System';Id=6005} -MaxEvents 1
+          # $boot = [DateTimeOffset]::new($ev.TimeCreated).ToUnixTimeSeconds()
+
+          # --- METHOD 5  System event log, shutdown initiator ---------
+          # Event 1074 records WHICH PROCESS initiated the shutdown, so
+          # a patch-driven reboot is directly attributable. Strongest
+          # for evidence/audit; use with Method 1 for the decision.
+          # $ev = Get-WinEvent -FilterHashtable @{LogName='System';Id=1074} -MaxEvents 1
+          # $boot = [DateTimeOffset]::new($ev.TimeCreated).ToUnixTimeSeconds()
+
+          # --- AVOID --------------------------------------------------
+          # systeminfo  (slow, locale-formatted output)
+          # wmic        (deprecated, removed in recent Windows builds)
+          # ============================================================
+
+          $uptime = $now - $boot
+          Write-Output "NOW_EPOCH=$now"
+          Write-Output "BOOT_EPOCH=$boot"
+          Write-Output "UPTIME_SECONDS=$uptime"
+          Write-Output "PATCH_START_EPOCH=$start"
+          Write-Output "PATCH_STATUS={{ PatchStatus }}"
+
+          if ($boot -gt $start) { $rebooted = 'true'; $rvalue = 1 }
+          else { $rebooted = 'false'; $rvalue = 0 }
+          Write-Output "REBOOTED=$rebooted"
+
+          # Identity + region from IMDSv2.
+          $token = Invoke-RestMethod -Method PUT `
+            -Uri 'http://169.254.169.254/latest/api/token' `
+            -Headers @{'X-aws-ec2-metadata-token-ttl-seconds' = '300'}
+          $iid = Invoke-RestMethod `
+            -Uri 'http://169.254.169.254/latest/meta-data/instance-id' `
+            -Headers @{'X-aws-ec2-metadata-token' = $token}
+          $region = Invoke-RestMethod `
+            -Uri 'http://169.254.169.254/latest/meta-data/placement/region' `
+            -Headers @{'X-aws-ec2-metadata-token' = $token}
+
+          $dims = "Name=InstanceId,Value=$iid"
+          $dims += ",{Name=InstanceName,Value={{ InstanceName }}}"
+          $dims += ",{Name=Wave,Value={{ Wave }}}"
+
+          $published = 'false'
+          if (Get-Command aws -ErrorAction SilentlyContinue) {
+              aws cloudwatch put-metric-data `
+                --region $region `
+                --namespace "{{ MetricNamespace }}" `
+                --metric-data `
+                  "MetricName=PatchRunStatus,Value=1,Unit=Count,Dimensions=[{$dims},{Name=Status,Value={{ PatchStatus }}}]" `
+                  "MetricName=RebootOccurred,Value=$rvalue,Unit=Count,Dimensions=[{$dims}]"
+              if ($LASTEXITCODE -eq 0) { $published = 'true' }
+          } else {
+              Write-Output 'AWS CLI not found on instance'
+          }
+          Write-Output "METRIC_PUBLISHED=$published"
+
+          # --- Forensic evidence for Splunk (best effort) -------------
+          $ErrorActionPreference = 'Continue'
+          Write-Output '--- shutdown/boot events (1074 initiator, 6005/6006 markers, 6008 unexpected) ---'
+          Get-WinEvent -FilterHashtable @{LogName='System'; Id=@(1074,6005,6006,6008)} -MaxEvents 6 |
+              Select-Object TimeCreated, Id, Message |
+              Format-List | Out-String -Width 200 | Write-Output
+
+          # Fail loud if the metric did not land.
+          if ($published -ne 'true') { exit 1 }
+          exit 0

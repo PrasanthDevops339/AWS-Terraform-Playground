@@ -1,0 +1,255 @@
+description: >-
+  Trigger-DetectPatchReboot — thin Automation runbook invoked directly
+  by EventBridge when AWS-RunPatchBaseline /
+  AWS-RunPatchBaselineAssociation / AWS-RunPatchBaselineWithHooks
+  reaches a terminal status on an instance. Resolves the data the
+  detection document cannot derive on its own, then dispatches
+  Detect-PatchReboot to the instance.
+
+  Why an Automation and not a direct EventBridge -> Run Command target:
+  an EventBridge RunCommandTarget accepts only literal InstanceIds or
+  tag values, and input-transformer variables do not resolve inside
+  them, so the rule cannot aim a command at the instance named in the
+  event. Automation targets DO support the input transformer, so the
+  instance id flows through as a normal runbook parameter. This also
+  avoids deploying and maintaining a Lambda function across every
+  account.
+
+  EventBridge rule (default bus, per account):
+
+    Event pattern:
+    {
+      "source": ["aws.ssm"],
+      "detail-type": ["EC2 Command Invocation Status-change Notification"],
+      "detail": {
+        "document-name": [
+          "AWS-RunPatchBaseline",
+          "AWS-RunPatchBaselineAssociation",
+          "AWS-RunPatchBaselineWithHooks"
+        ],
+        "status": ["Success", "Failed", "TimedOut", "Cancelled"]
+      }
+    }
+
+    Input transformer paths:
+      instanceId    $.detail.instance-id
+      commandId     $.detail.command-id
+      patchStatus   $.detail.status
+      requestedTime $.detail.requested-date-time
+
+    Input template:
+    {
+      "InstanceId": [<instanceId>],
+      "CommandId": [<commandId>],
+      "PatchStatus": [<patchStatus>],
+      "RequestedTime": [<requestedTime>]
+    }
+
+  Target: this runbook, with an EventBridge role granting
+  ssm:StartAutomationExecution and iam:PassRole on the Automation
+  execution role.
+
+  Automation execution role needs:
+    ssm:ListCommands           (resolve Install vs Scan)
+    ec2:DescribeInstances      (resolve Name and patch:wave tags)
+    ssm:SendCommand            (Detect-PatchReboot document + instances)
+    cloudwatch:PutMetricData   (fallback path, scoped to the namespace)
+schemaVersion: '0.3'
+assumeRole: '{{ AutomationAssumeRole }}'
+parameters:
+  InstanceId:
+    type: String
+    description: Instance the patch command ran on (from the event).
+  CommandId:
+    type: String
+    description: Patch command id (from the event); used to resolve Operation.
+  PatchStatus:
+    type: String
+    default: Success
+    description: Terminal status of the patch command (from the event).
+  RequestedTime:
+    type: String
+    default: ''
+    description: >-
+      Event requested-date-time (ISO 8601). This is when the patch
+      command was requested and serves as the reboot-detection anchor.
+  AutomationAssumeRole:
+    type: String
+    description: Automation execution role ARN.
+  MetricNamespace:
+    type: String
+    default: Custom/PatchExecution
+    description: CloudWatch namespace for patch and reboot metrics.
+mainSteps:
+  # ------------------------------------------------------------------
+  # 1. Resolve what the event does not carry: the Operation (Install
+  #    vs Scan), the Name and wave tags, and the start epoch.
+  # ------------------------------------------------------------------
+  - name: ResolveContext
+    action: aws:executeScript
+    nextStep: BranchOnOperation
+    inputs:
+      Runtime: python3.11
+      Handler: handler
+      InputPayload:
+        InstanceId: '{{ InstanceId }}'
+        CommandId: '{{ CommandId }}'
+        RequestedTime: '{{ RequestedTime }}'
+      Script: |
+        import boto3
+        import re
+        from datetime import datetime, timezone
+
+        def handler(event, context):
+            instance_id = event['InstanceId']
+            command_id = event['CommandId']
+
+            # Patch start anchor. The event's requested-date-time is
+            # when the patch command was issued.
+            raw = (event.get('RequestedTime') or '').strip()
+            try:
+                start = int(datetime.fromisoformat(
+                    raw.replace('Z', '+00:00')).timestamp())
+            except ValueError:
+                start = int(datetime.now(timezone.utc).timestamp())
+
+            # Operation is absent from the event payload; look it up so
+            # Scan runs never trigger detection.
+            operation = 'Unknown'
+            try:
+                cmds = boto3.client('ssm').list_commands(
+                    CommandId=command_id).get('Commands', [])
+                if cmds:
+                    vals = cmds[0].get('Parameters', {}).get('Operation', [])
+                    if vals:
+                        operation = vals[0]
+            except Exception:
+                pass
+
+            # Metric dimensions from tags.
+            name, wave = instance_id, 'unknown'
+            try:
+                res = boto3.client('ec2').describe_instances(
+                    InstanceIds=[instance_id])
+                tags = {t['Key']: t['Value'] for t in
+                        res['Reservations'][0]['Instances'][0].get('Tags', [])}
+                name = tags.get('Name', instance_id)
+                wave = tags.get('patch:wave', 'unknown')
+            except Exception:
+                pass
+
+            # Sanitize for safe SSM parameter / shell interpolation.
+            name = re.sub(r'[^A-Za-z0-9._-]', '_', name)[:255]
+            wave = re.sub(r'[^A-Za-z0-9._-]', '_', wave)[:255]
+
+            return {
+                'Operation': operation,
+                'InstanceName': name,
+                'Wave': wave,
+                'StartEpoch': start,
+            }
+    outputs:
+      - Name: Operation
+        Selector: $.Payload.Operation
+        Type: String
+      - Name: InstanceName
+        Selector: $.Payload.InstanceName
+        Type: String
+      - Name: Wave
+        Selector: $.Payload.Wave
+        Type: String
+      - Name: StartEpoch
+        Selector: $.Payload.StartEpoch
+        Type: Integer
+
+  # ------------------------------------------------------------------
+  # 2. Scan runs never install and never reboot — stop here so they
+  #    generate no metrics and no app-team noise.
+  # ------------------------------------------------------------------
+  - name: BranchOnOperation
+    action: aws:branch
+    inputs:
+      Choices:
+        - NextStep: EndScanRun
+          Variable: '{{ ResolveContext.Operation }}'
+          StringEquals: Scan
+      Default: RunDetection
+
+  - name: EndScanRun
+    action: aws:sleep
+    isEnd: true
+    inputs:
+      Duration: PT1S
+
+  # ------------------------------------------------------------------
+  # 3. Dispatch detection. The document decides reboot vs no-reboot and
+  #    publishes PatchRunStatus + RebootOccurred itself. It exits
+  #    nonzero if the metric fails to land, routing to the fallback.
+  # ------------------------------------------------------------------
+  - name: RunDetection
+    action: aws:runCommand
+    isEnd: true
+    onFailure: step:PublishFallbackMetric
+    timeoutSeconds: 300
+    inputs:
+      DocumentName: Detect-PatchReboot
+      InstanceIds:
+        - '{{ InstanceId }}'
+      Parameters:
+        PatchStartEpoch:
+          - '{{ ResolveContext.StartEpoch }}'
+        PatchStatus:
+          - '{{ PatchStatus }}'
+        InstanceName:
+          - '{{ ResolveContext.InstanceName }}'
+        Wave:
+          - '{{ ResolveContext.Wave }}'
+        MetricNamespace:
+          - '{{ MetricNamespace }}'
+
+  # ------------------------------------------------------------------
+  # 4. Instance unreachable or on-instance publish failed: publish the
+  #    patch status centrally plus a detection-gap metric, so a broken
+  #    or offline instance still appears in the namespace instead of
+  #    silently vanishing.
+  # ------------------------------------------------------------------
+  - name: PublishFallbackMetric
+    action: aws:executeScript
+    isEnd: true
+    inputs:
+      Runtime: python3.11
+      Handler: handler
+      InputPayload:
+        InstanceId: '{{ InstanceId }}'
+        InstanceName: '{{ ResolveContext.InstanceName }}'
+        Wave: '{{ ResolveContext.Wave }}'
+        PatchStatus: '{{ PatchStatus }}'
+        Namespace: '{{ MetricNamespace }}'
+      Script: |
+        import boto3
+
+        def handler(event, context):
+            dims = [
+                {'Name': 'InstanceId', 'Value': event['InstanceId']},
+                {'Name': 'InstanceName', 'Value': event['InstanceName']},
+                {'Name': 'Wave', 'Value': event['Wave']},
+            ]
+            boto3.client('cloudwatch').put_metric_data(
+                Namespace=event['Namespace'],
+                MetricData=[
+                    {
+                        'MetricName': 'PatchRunStatus',
+                        'Value': 1.0,
+                        'Unit': 'Count',
+                        'Dimensions': dims + [
+                            {'Name': 'Status', 'Value': event['PatchStatus']}],
+                    },
+                    {
+                        'MetricName': 'RebootDetectionFailed',
+                        'Value': 1.0,
+                        'Unit': 'Count',
+                        'Dimensions': dims,
+                    },
+                ],
+            )
+            return {}
