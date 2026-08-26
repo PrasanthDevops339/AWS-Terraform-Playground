@@ -1,0 +1,56 @@
+[
+  {
+    "Name": "AWSManagedRulesCommonRuleSet",
+    "Priority": 300,
+    "Statement": {
+      "ManagedRuleGroupStatement": {
+        "VendorName": "AWS",
+        "Name": "AWSManagedRulesCommonRuleSet"
+      }
+    },
+    "VisibilityConfig": {
+      "SampledRequestsEnabled": ${sampled_requests_enabled},
+      "CloudWatchMetricsEnabled": ${cloudwatch_metrics_enabled},
+      "MetricName": "AWSManagedRulesCommonRuleSet-${waf_name}"
+    },
+    "OverrideAction": {
+      "None": {}
+    }
+  },
+  {
+    "Name": "AWSManagedRulesAmazonIpReputationList",
+    "Priority": 310,
+    "Statement": {
+      "ManagedRuleGroupStatement": {
+        "VendorName": "AWS",
+        "Name": "AWSManagedRulesAmazonIpReputationList"
+      }
+    },
+    "VisibilityConfig": {
+      "SampledRequestsEnabled": ${sampled_requests_enabled},
+      "CloudWatchMetricsEnabled": ${cloudwatch_metrics_enabled},
+      "MetricName": "AWSManagedRulesAmazonIpReputationList-${waf_name}"
+    },
+    "OverrideAction": {
+      "None": {}
+    }
+  },
+  {
+    "Name": "AWSManagedRulesKnownBadInputsRuleSet",
+    "Priority": 320,
+    "Statement": {
+      "ManagedRuleGroupStatement": {
+        "VendorName": "AWS",
+        "Name": "AWSManagedRulesKnownBadInputsRuleSet"
+      }
+    },
+    "VisibilityConfig": {
+      "SampledRequestsEnabled": ${sampled_requests_enabled},
+      "CloudWatchMetricsEnabled": ${cloudwatch_metrics_enabled},
+      "MetricName": "AWSManagedRulesKnownBadInputsRuleSet-${waf_name}"
+    },
+    "OverrideAction": {
+      "None": {}
+    }
+  }
+]
