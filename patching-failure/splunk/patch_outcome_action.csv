@@ -1,0 +1,9 @@
+patch_outcome,status_details,action
+patched,Success,"Patch run completed. Check SSM Patch Compliance for installed/missing counts."
+failed,Failed,"Patch ran and failed. Read the stdout for this command_id."
+failed,Execution Timed Out,"Patch started but did not finish. Check instance load and the execution timeout."
+not-attempted,Terminated,"Never attempted -- the command halted at its error threshold. Re-run. See max_errors."
+not-attempted,Undeliverable,"Unreachable by SSM. Check agent and connectivity, then re-run."
+not-attempted,Delivery Timed Out,"Command never delivered. Check agent and connectivity, then re-run."
+not-attempted,Invalid Platform,"Document does not match this OS. Targeting defect."
+not-attempted,Access Denied,"Instance profile or permissions defect. Fix before re-running."
