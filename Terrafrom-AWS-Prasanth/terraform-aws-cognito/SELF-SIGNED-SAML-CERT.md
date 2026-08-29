@@ -1,11 +1,15 @@
 # Self-Signed SAML Signing Certificate in the Complete Example
 
-How `examples/complete` stopped shipping an expiring certificate, what changed
-in the module to support it, and an honest account of the alternatives — the
-`hashicorp/local` route *is* possible, contrary to how this is usually
-described, and [section 5](#5-doing-this-without-changing-the-cognito-module)
-documents five ways to solve this **without changing the Cognito module at
-all**, if that is a constraint for you.
+How `examples/complete` stopped shipping an expiring certificate — **without
+changing the Cognito module at all** — and an honest account of the
+alternatives that were considered and rejected.
+
+The implemented solution is Option B in
+[section 5](#5-doing-this-without-changing-the-cognito-module): generate the
+certificate with the `tls` provider, write the metadata to disk with
+`local_file`, and pass the path in a form that defers the module's read to
+apply time. The module's `main.tf`, `data.tf`, `variables.tf`, and
+`versions.tf` are untouched.
 
 ---
 
@@ -84,9 +88,9 @@ saml_metadata = templatefile("${path.module}/files/metadata.xml.tftpl", {
 })
 ```
 
-## 3. What changed in the module
+## 3. Handing the metadata to the unmodified module
 
-The module read its metadata from disk and only from disk:
+The module reads its metadata from disk, and that behaviour is unchanged:
 
 ```hcl
 data "local_file" "saml_metadata" {
@@ -94,33 +98,64 @@ data "local_file" "saml_metadata" {
 }
 ```
 
-Generated metadata never touches the disk, so the module needed a second,
-optional way in. The change is backward compatible:
-
-| File | Change |
-|------|--------|
-| `variables.tf` | New optional `saml_metadata_content`. `samlmetadatafile` is now typed `string` with `default = null`, plus a validation that **exactly one** of the two is set. |
-| `data.tf` | `data.local_file.saml_metadata` gained `count`, so no file is read when content is passed inline. |
-| `main.tf` | New `local.saml_metadata` coalesces the two sources and feeds `provider_details.MetadataFile`. |
-| `versions.tf` | Declared the previously implicit `hashicorp/local` provider; added `required_version = ">= 1.3"`. |
+So the rendered XML has to become a real file. `saml.tf` writes it:
 
 ```hcl
-locals {
-  saml_metadata = coalesce(
-    var.saml_metadata_content,
-    one(data.local_file.saml_metadata[*].content),
-  )
+resource "local_file" "saml_metadata" {
+  filename = "${path.module}/generated/metadata.xml"
+  content  = local.saml_metadata
 }
 ```
 
-Existing callers passing `samlmetadatafile` are unaffected.
+`generated/` is gitignored — it is derived state, not source.
 
----
+### The one subtlety: how the path is passed
 
-## 4. Why not just write the file with the `local` provider?
+This is the part that looks wrong and is not. The example passes:
 
-The obvious alternative is to keep the module untouched, write the rendered
-metadata to disk with `local_file`, and pass the path in:
+```hcl
+samlmetadatafile = local_file.saml_metadata.id == "" ? "" : local_file.saml_metadata.filename
+```
+
+instead of the obvious `local_file.saml_metadata.filename`. The reason is
+[section 4b](#4b-across-a-module-boundary-it-fails-at-plan): the plain filename
+is a *statically known string*, so it crosses into the module carrying no
+dependency, and the module's data source reads it at **plan** time — before the
+file exists. On a clean checkout that is a hard failure.
+
+`local_file.saml_metadata.id` is known-after-apply, which makes the whole
+conditional unknown at plan, so Terraform defers the module's read to apply.
+
+**Verified against the real module.** With `generated/` absent, planning the
+example produces zero local-file errors. Switching that one line to the plain
+`.filename` and re-planning produces:
+
+```
+Error: Read local file data source error
+
+  with module.cognitotest.data.local_file.saml_metadata,
+  on ../../data.tf line 5, in data "local_file" "saml_metadata":
+```
+
+Same config, same absent file, one line different. That line is load-bearing,
+which is why it carries a comment in `main.tf`.
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `examples/complete/saml.tf` | New — `tls` key + certificate, metadata rendering, `local_file` writer |
+| `examples/complete/files/metadata.xml.tftpl` | Replaces the deleted static `metadata.xml` |
+| `examples/complete/main.tf` | Passes the deferred path; random domain suffix; placeholder URLs |
+| `examples/complete/version.tf` | Added `tls`, `random`, `local` providers |
+| `examples/complete/.gitignore` | New — ignores `generated/` |
+
+**Module files changed: none.**
+
+## 4. Why the `local` provider needs care across a module boundary
+
+This section explains *why* section 3's odd-looking expression exists. The
+obvious way to write it is:
 
 ```hcl
 resource "local_file" "saml_metadata" {
@@ -134,10 +169,12 @@ module "cognitotest" {
 }
 ```
 
-**Correction to a common belief: this is not impossible.** It is frequently
-described as a hard chicken-and-egg problem, and that framing is wrong. But it
-fails by default, and the fix has a cost that isn't obvious. Here is what
-actually happens, verified by running each case.
+and that **fails on a clean checkout**.
+
+**Correction to a common belief: this is not a dead end.** It is frequently
+described as an unsolvable chicken-and-egg problem, and that framing is wrong —
+the approach works fine once you understand where the dependency is lost. Here
+is what actually happens, verified by running each case.
 
 ### 4a. Within a single module, it works
 
@@ -213,34 +250,36 @@ user pool's `name`, the pool name — and everything derived from it, including
 tags — goes `(known after apply)`. You trade a readable plan for a workaround,
 on a module whose whole job is to be reviewed before apply.
 
-### 4d. The other costs
+### 4d. The costs we accepted
 
-- **It writes a generated artifact into the repo.** That means a `.gitignore`
-  entry, or a dirty working tree in CI, for a file that is pure derived state.
+Writing the file to disk is not free, and these apply to the implemented
+solution too:
+
+- **It writes a generated artifact into the repo.** Handled with a `.gitignore`
+  entry for `generated/`, but it is a file that is pure derived state.
 - **It needs a writable working directory.** Terraform Cloud and most CI
-  runners give you one, but it's a filesystem dependency the run didn't
+  runners give you one, but it is a filesystem dependency the run did not
   previously have.
 - **It adds a resource whose only purpose is to launder a value** from memory,
   onto disk, and back into memory in the same run.
 
+These were judged cheaper than changing the module's public interface.
+
 ### Verdict on this option
 
-`local_file` + `depends_on` is a legitimate option, and its real advantage is
-that it requires **no module change at all**. If you cannot modify the module,
-it is one of several workable choices — see section 5.
-
-We chose `saml_metadata_content` because we *could* change the module, and
-passing a string to a string input is the direct expression of the intent. It
-keeps every other data source readable at plan time, writes nothing to disk, and
-adds no resource. The trade is one new variable on the module's public surface.
+`depends_on` works and needs no module change, but it is the blunt version of
+what we actually want. Option B in the next section achieves the same deferral
+while affecting only the one data source that needs it, so that is what the
+example uses.
 
 ---
 
 ## 5. Doing this without changing the Cognito module
 
-Everything below leaves `main.tf`, `data.tf`, and `variables.tf` in the module
-untouched. All of them were run before being written down; the plan output and
-errors quoted are verbatim.
+Everything below leaves the module's `main.tf`, `data.tf`, `variables.tf`, and
+`versions.tf` untouched. **Option B is what the example implements.** All of
+these were run before being written down; the plan output and errors quoted are
+verbatim.
 
 ### Option A — `local_file` + `depends_on` on the module call
 
@@ -248,7 +287,7 @@ Covered in 4c. Works, needs no module change, but defers **every** data source
 in the module — including `aws_caller_identity` and `aws_iam_account_alias` —
 so the user pool name and its tags read `(known after apply)`.
 
-### Option B — `local_file` with a plan-unknown path (recommended if you cannot touch the module)
+### Option B — `local_file` with a plan-unknown path ✅ CHOSEN
 
 The problem in 4b is that the path is a *statically known* string, so the child
 module reads it eagerly. You can make the path unknown at plan time without
@@ -281,10 +320,11 @@ and — unlike Option A — the unrelated data source in the module is **not**
 listed as deferred; it still resolves at plan time. `terraform apply` then
 completes normally.
 
-This is strictly more surgical than `depends_on`. The cost is that it is
-non-obvious: without the comment, the next reader will "simplify" it back to
-`local_file.saml_metadata.filename` and break the clean-checkout plan. If you
-use it, keep the comment.
+This is strictly more surgical than `depends_on`, which is why it is the
+implemented solution. The cost is that it is non-obvious: without the comment,
+the next reader will "simplify" it back to `local_file.saml_metadata.filename`
+and break the clean-checkout plan. That is why `main.tf` carries an eight-line
+comment over one line of code.
 
 ### Option C — generate the certificate outside Terraform
 
@@ -361,16 +401,23 @@ applies. Documented here only so you recognise it if you see it.
 
 | Option | Module change | Plan readable | Writes to disk | Works on TFE |
 |--------|---------------|---------------|----------------|--------------|
-| `saml_metadata_content` (chosen) | Yes | Full | No | Yes |
+| **B — plan-unknown path ✅** | **No** | **Full except the metadata read** | **Yes** | **Yes** |
 | A — `depends_on` | No | Pool name/tags unknown | Yes | Yes |
-| B — plan-unknown path | No | Full except the metadata read | Yes | Yes |
 | C — external script | No | Full | Yes (pre-committed or hooked) | Only with a pre-plan hook |
 | D — long-lived committed cert | No | Full | Already in git | Yes |
 | E — two-phase `-target` | No | Full | Yes | No |
+| `saml_metadata_content` input | **Yes** | Full | No | Yes |
 
-If you cannot change the module, **Option B** is the best of these: it is the
-only one that keeps the rest of the plan intact, works on a clean checkout, and
-needs no out-of-band step. Its weakness is legibility, which a comment fixes.
+**Option B is the best available without touching the module**: it is the only
+one that keeps the rest of the plan intact, works on a clean checkout, needs no
+out-of-band step, and runs unmodified on TFE. Its weakness is legibility, which
+the comment in `main.tf` addresses.
+
+The last row — adding a `saml_metadata_content` variable to the module — is
+marginally cleaner in isolation, since it writes nothing to disk and needs no
+trick. It was implemented first and then reverted: it changes the module's
+public interface for the benefit of an example, and keeping the module stable
+was worth more than avoiding one non-obvious line in example code.
 
 ---
 
@@ -415,7 +462,25 @@ before being written down, rather than reasoned about:
   SEQUENCE, and parses under `openssl x509`. The `-subj` RDN-separator failure
   is quoted from the run that hit it.
 
-One correction worth recording: an early version of this document was going to
-claim the `local` provider approach was impossible. Testing it showed that is
-wrong in the single-module case and merely inconvenient across a module
-boundary. The claim was dropped rather than published.
+The implemented solution was additionally A/B tested against the **real**
+module, with `generated/` absent, using dummy AWS credentials (the AWS data
+sources fail on credentials, but Terraform still reports every other plan-time
+error, so a local-file failure would appear alongside them):
+
+| `samlmetadatafile` set to | `Read local file data source error` count |
+|---------------------------|-------------------------------------------|
+| `...id == "" ? "" : ...filename` (implemented) | **0** |
+| `local_file.saml_metadata.filename` (naive) | **1**, at `../../data.tf line 5` |
+
+Same configuration, same absent file, one line different.
+
+Two corrections worth recording:
+
+- An early version of this document was going to claim the `local` provider
+  approach was impossible. Testing showed that is wrong in the single-module
+  case and merely inconvenient across a module boundary. The claim was dropped
+  rather than published.
+- An early verification of Option C reported success against an **empty**
+  certificate — the `openssl` call had silently failed and an empty string
+  base64-decodes without complaint. The assertions above (length, DER SEQUENCE
+  byte, `openssl x509` exit code) were added in response.

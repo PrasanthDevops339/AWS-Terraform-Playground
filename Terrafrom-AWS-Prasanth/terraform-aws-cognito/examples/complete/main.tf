@@ -17,11 +17,27 @@ module "waf" {
 module "cognitotest" {
   source = "../.."
 
-  cognito_name          = "testcomplete"
-  domain_name           = "testcomplete-${random_string.domain_suffix.result}"
-  saml_metadata_content = local.saml_metadata
-  app_client_name       = "appclienttestcomplete"
-  web_acl_arn           = module.waf.arn
+  cognito_name = "testcomplete"
+  domain_name  = "testcomplete-${random_string.domain_suffix.result}"
+  # DO NOT "simplify" this to local_file.saml_metadata.filename.
+  #
+  # That filename is a statically known string, so it crosses into the module
+  # as a plain path with no dependency attached - and the module's
+  # `data "local_file"` then reads it at PLAN time, before the file exists:
+  #
+  #   Error: Read local file data source error
+  #   +Original Error: open ./generated/metadata.xml: no such file or directory
+  #
+  # Routing through .id (known-after-apply) makes the whole expression unknown
+  # at plan, so the module defers that read to apply. Unlike `depends_on` on
+  # the module call, this defers ONLY the metadata read - the module's
+  # aws_caller_identity / aws_iam_account_alias data sources still resolve at
+  # plan time, keeping the user pool name and tags visible in the plan.
+  #
+  # See SELF-SIGNED-SAML-CERT.md section 5, Option B.
+  samlmetadatafile = local_file.saml_metadata.id == "" ? "" : local_file.saml_metadata.filename
+  app_client_name  = "appclienttestcomplete"
+  web_acl_arn      = module.waf.arn
 
   # Placeholder URLs - no one owns or serves these hosts.
   callback_urls = [

@@ -1,9 +1,5 @@
 locals {
   account_alias = data.aws_iam_account_alias.current.account_alias
-  saml_metadata = coalesce(
-    var.saml_metadata_content,
-    one(data.local_file.saml_metadata[*].content),
-  )
   base_attribute_mapping = {
     "username"      = "SAMLAccountName"
     "custom:groups" = "groups"
@@ -106,7 +102,7 @@ resource "aws_cognito_identity_provider" "main" {
   provider_type = "SAML"
 
   provider_details = {
-    MetadataFile = local.saml_metadata
+    MetadataFile = data.local_file.saml_metadata.content
   }
 
   attribute_mapping = merge(

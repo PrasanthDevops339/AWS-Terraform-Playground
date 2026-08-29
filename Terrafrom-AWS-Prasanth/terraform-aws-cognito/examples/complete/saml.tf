@@ -4,8 +4,9 @@
 # The example previously shipped a static metadata.xml whose signing
 # certificate had expired, so `terraform apply` failed inside Cognito. Instead
 # of committing another certificate with a fixed expiry, the example mints a
-# throwaway self-signed certificate on every run with the `tls` provider and
-# renders the IdP metadata around it.
+# throwaway self-signed certificate on every run with the `tls` provider,
+# renders the IdP metadata around it, and writes it to disk for the module to
+# read. The module itself is unchanged.
 #
 # Nothing here is a real identity provider: the entity ID and SSO URL point at
 # example.com, and the private key lives only in this example's state. Never
@@ -52,4 +53,18 @@ locals {
     sso_url             = local.saml_sso_url
     signing_certificate = local.saml_signing_certificate
   })
+}
+
+###############################################################################
+# Hand the rendered metadata to the module
+#
+# The module reads its metadata from disk via `data "local_file"`, so the
+# rendered XML has to become a real file first.
+###############################################################################
+
+resource "local_file" "saml_metadata" {
+  filename = "${path.module}/generated/metadata.xml"
+  content  = local.saml_metadata
+
+  # Generated at apply time and gitignored - it is derived state, not source.
 }

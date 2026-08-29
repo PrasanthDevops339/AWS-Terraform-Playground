@@ -1,19 +1,18 @@
 # Changelog
 
-## 2.1.0
+## Unreleased
 
-- Added `saml_metadata_content`, an optional input that accepts the SAML
-  metadata XML inline instead of reading it from disk. Exactly one of
-  `saml_metadata_content` or `samlmetadatafile` must be set; `samlmetadatafile`
-  now defaults to `null` and is otherwise unchanged, so existing callers are
-  unaffected.
-- Declared the implicit `hashicorp/local` provider dependency and added
-  `required_version = ">= 1.3"`.
-- The complete example no longer ships a static `files/metadata.xml` whose
+No module changes. Example-only fix:
+
+- `examples/complete` no longer ships a static `files/metadata.xml` whose SAML
   signing certificate had expired. It now generates a throwaway self-signed
-  certificate with the `hashicorp/tls` provider and renders the metadata around
-  it, and suffixes the hosted UI domain prefix with a random string so repeated
-  applies do not collide on the globally unique namespace.
+  certificate with the `hashicorp/tls` provider, renders the metadata around it,
+  and writes it to a gitignored `generated/` directory for the module to read.
+- The hosted UI domain prefix is suffixed with a random string, since Cognito
+  prefix domains are globally unique and repeated applies collided.
+- The module's public interface is unchanged; the example still passes
+  `samlmetadatafile`. See `SELF-SIGNED-SAML-CERT.md` for why the path is routed
+  through `local_file.saml_metadata.id`.
 
 ## 2.0.0
 

@@ -28,12 +28,25 @@ the same clock.
 Instead, [`saml.tf`](saml.tf) mints a throwaway RSA key and self-signed
 certificate with the [`hashicorp/tls`](https://registry.terraform.io/providers/hashicorp/tls/latest/docs)
 provider and renders `files/metadata.xml.tftpl` around it, so the example is
-valid on every run. The rendered XML is passed to the module through the
-`saml_metadata_content` input rather than a file on disk.
+valid on every run. The rendered XML is written to `generated/metadata.xml`
+(gitignored) and passed to the module through the existing `samlmetadatafile`
+input.
+
+**The module is not modified by any of this.** One subtlety makes that possible:
+the path is passed as
+
+```hcl
+samlmetadatafile = local_file.saml_metadata.id == "" ? "" : local_file.saml_metadata.filename
+```
+
+rather than the obvious `local_file.saml_metadata.filename`, which would fail at
+plan time on a clean checkout. Do not simplify it - see
+[`SELF-SIGNED-SAML-CERT.md`](../../SELF-SIGNED-SAML-CERT.md) section 5.
 
 **Do not copy this for a real federation setup.** The private key is generated
 by Terraform and stored in plaintext in this example's state; a real identity
-provider supplies its own metadata, which you pass via `samlmetadatafile`.
+provider supplies its own metadata, which you commit and point
+`samlmetadatafile` at directly.
 
 ## Run
 
