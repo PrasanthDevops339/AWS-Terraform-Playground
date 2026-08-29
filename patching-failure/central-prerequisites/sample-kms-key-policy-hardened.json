@@ -1,0 +1,16 @@
+{
+  "Sid": "AllowPatchOutcomeWritersFromOrg",
+  "Effect": "Allow",
+  "Principal": "*",
+  "Action": ["kms:GenerateDataKey", "kms:Encrypt"],
+  "Resource": "*",
+  "Condition": {
+    "StringEquals": {
+      "aws:PrincipalOrgID": "o-abcd1234ef",
+      "kms:ViaService": "s3.us-east-1.amazonaws.com"
+    },
+    "ArnLike": {
+      "aws:PrincipalArn": "arn:aws:iam::*:role/patch-outcome-s3-writer"
+    }
+  }
+}

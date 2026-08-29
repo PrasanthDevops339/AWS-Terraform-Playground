@@ -1,0 +1,52 @@
+{
+  "Version": "2012-10-17",
+  "Id": "central-patching-bucket-policy",
+  "Statement": [
+    {
+      "Sid": "DenyInsecureTransport",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::central-patching-logs-bucket",
+        "arn:aws:s3:::central-patching-logs-bucket/*"
+      ],
+      "Condition": {
+        "Bool": { "aws:SecureTransport": "false" }
+      }
+    },
+    {
+      "Sid": "ExistingPatchingSolutionStdoutWriters",
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::central-patching-logs-bucket/patchingsolution/*",
+      "Condition": {
+        "StringEquals": { "aws:PrincipalOrgID": "o-abcd1234ef" }
+      }
+    },
+    {
+      "Sid": "ExistingS3ToFirehoseReader",
+      "Effect": "Allow",
+      "Principal": { "AWS": "arn:aws:iam::111111111111:role/s3tofirehose-ingest" },
+      "Action": ["s3:GetObject", "s3:ListBucket"],
+      "Resource": [
+        "arn:aws:s3:::central-patching-logs-bucket",
+        "arn:aws:s3:::central-patching-logs-bucket/*"
+      ]
+    },
+    {
+      "Sid": "AllowPatchOutcomeWritersFromOrg",
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::central-patching-logs-bucket/patchingsolution-events/outcomes/*",
+      "Condition": {
+        "StringEquals": { "aws:PrincipalOrgID": "o-abcd1234ef" },
+        "ArnLike": {
+          "aws:PrincipalArn": "arn:aws:iam::*:role/patch-outcome-s3-writer"
+        }
+      }
+    }
+  ]
+}

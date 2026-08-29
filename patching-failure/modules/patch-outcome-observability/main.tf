@@ -1,13 +1,26 @@
-locals {
-  # Derive region/account/partition from a resource ARN this module owns
-  # rather than the deprecated data.aws_region.current.name (removed in
-  # provider 6.x; .region does not exist on the data source in 5.x).
-  log_group_arn_parts = split(":", aws_cloudwatch_log_group.this.arn)
-  partition           = local.log_group_arn_parts[1]
-  region              = local.log_group_arn_parts[3]
-  account_id          = local.log_group_arn_parts[4]
+data "aws_iam_account_alias" "current" {}
+data "aws_caller_identity" "current" {}
+data "aws_partition" "current" {}
+data "aws_region" "current" {}
 
-  function_name = "${var.name_prefix}-writer"
+locals {
+  # Provider floor is now >= 6.0.0 (raised by the shared terraform-aws-sqs
+  # module), where data.aws_region exposes .region -- so the ARN-splitting
+  # workaround the 5.x/6.x straddle needed is no longer required.
+  partition  = data.aws_partition.current.partition
+  region     = data.aws_region.current.region
+  account_id = data.aws_caller_identity.current.account_id
+
+  # The shared terraform-aws-lambda module prefixes every function name with the
+  # account alias, so the real function -- and therefore its auto-created log
+  # group -- is "<alias>-<name_prefix>-writer". This module owns that log group
+  # explicitly (for retention), so the name must match exactly.
+  function_name = "${data.aws_iam_account_alias.current.account_alias}-${var.name_prefix}-writer"
+
+  lambda_package_bucket = coalesce(
+    var.lambda_package_bucket_name,
+    "${var.name_prefix}-pkg-${local.account_id}",
+  )
 
   rule_definitions = {
     invocation_success = {
@@ -23,21 +36,72 @@ locals {
       statuses    = var.command_failure_statuses
     }
   }
+
+  # One Lambda permission per EventBridge rule (SSM rules + the canary). The
+  # shared module creates these from allowed_triggers -- EventBridge -> Lambda
+  # is a resource policy, not an IAM role.
+  allowed_triggers = merge(
+    {
+      for key, rule in aws_cloudwatch_event_rule.ssm : key => {
+        statement_id = "AllowEventBridge-${key}"
+        principal    = "events.amazonaws.com"
+        source_arn   = rule.arn
+      }
+    },
+    var.enable_canary ? {
+      canary = {
+        statement_id = "AllowEventBridge-canary"
+        principal    = "events.amazonaws.com"
+        source_arn   = aws_cloudwatch_event_rule.canary[0].arn
+      }
+    } : {},
+  )
 }
 
 # --------------------------------------------------------------------------
-# Lambda package
+# Lambda deployment-package bucket -- one per member account. The shared
+# terraform-aws-lambda module deploys only from S3 or a container image; it
+# cannot take a local zip. This bucket holds that zip.
 # --------------------------------------------------------------------------
 
-data "archive_file" "this" {
-  type        = "zip"
-  source_file = "${path.module}/src/handler.py"
-  output_path = "${path.module}/build/handler.zip"
+resource "aws_s3_bucket" "lambda_package" {
+  bucket        = local.lambda_package_bucket
+  force_destroy = true
+  tags          = var.tags
+}
+
+resource "aws_s3_bucket_public_access_block" "lambda_package" {
+  bucket = aws_s3_bucket.lambda_package.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_ownership_controls" "lambda_package" {
+  bucket = aws_s3_bucket.lambda_package.id
+
+  rule {
+    object_ownership = "BucketOwnerEnforced"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "lambda_package" {
+  bucket = aws_s3_bucket.lambda_package.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm     = var.local_kms_key_arn != null ? "aws:kms" : "AES256"
+      kms_master_key_id = var.local_kms_key_arn
+    }
+    bucket_key_enabled = true
+  }
 }
 
 # --------------------------------------------------------------------------
-# Lambda log group -- created before the function so Terraform owns it
-# instead of Lambda auto-creating it with no explicit retention.
+# Lambda log group -- created before the function so Terraform owns it with an
+# explicit retention instead of Lambda auto-creating it.
 # --------------------------------------------------------------------------
 
 resource "aws_cloudwatch_log_group" "this" {
@@ -97,10 +161,10 @@ data "aws_iam_policy_document" "writer" {
   }
 
   statement {
-    sid       = "TargetDlq"
+    sid       = "LambdaDlq"
     effect    = "Allow"
     actions   = ["sqs:SendMessage"]
-    resources = [aws_sqs_queue.lambda_dlq.arn]
+    resources = [module.lambda_dlq.queue_arn]
   }
 
   statement {
@@ -128,47 +192,56 @@ resource "aws_iam_role_policy" "writer" {
 }
 
 # --------------------------------------------------------------------------
-# Lambda function
+# Lambda function -- sourced from the shared terraform-aws-lambda module.
 # --------------------------------------------------------------------------
 
-resource "aws_lambda_function" "this" {
-  function_name = local.function_name
-  role          = aws_iam_role.writer.arn
-  handler       = "handler.handler"
-  runtime       = "python3.13"
-  memory_size   = 128
-  timeout       = 30
+module "writer_lambda" {
+  source = "../../../Terrafrom-AWS-Prasanth/terraform-aws-lambda"
 
-  filename         = data.archive_file.this.output_path
-  source_code_hash = data.archive_file.this.output_base64sha256
+  lambda_name        = "${var.name_prefix}-writer"
+  lambda_description = "Writes one patch-outcome record per SSM RunPatchBaseline terminal event to the central bucket."
+  lambda_role_arn    = aws_iam_role.writer.arn
+  lambda_handler     = "handler.handler"
+  runtime            = "python3.13"
+  memory_size        = 128
+  timeout            = 30
+  architectures      = ["x86_64"]
+  ephemeral_storage  = 512
 
-  reserved_concurrent_executions = var.reserved_concurrency
+  reserved_concurrent_executions = var.reserved_concurrency == null ? -1 : var.reserved_concurrency
 
-  environment {
-    variables = {
-      BUCKET_NAME           = var.archive_bucket_name
-      S3_PREFIX             = var.archive_s3_prefix
-      KMS_KEY_ARN           = var.archive_kms_key_arn
-      OBJECT_ACL            = var.archive_object_acl == null ? "" : var.archive_object_acl
-      ENRICH                = tostring(var.enable_enrichment)
-      INCLUDE_INSTANCE_TAGS = tostring(var.include_instance_tags)
-      LOG_LEVEL             = var.log_level
-    }
+  environment = {
+    BUCKET_NAME           = var.archive_bucket_name
+    S3_PREFIX             = var.archive_s3_prefix
+    KMS_KEY_ARN           = var.archive_kms_key_arn == null ? "" : var.archive_kms_key_arn
+    OBJECT_ACL            = var.archive_object_acl == null ? "" : var.archive_object_acl
+    ENRICH                = tostring(var.enable_enrichment)
+    INCLUDE_INSTANCE_TAGS = tostring(var.include_instance_tags)
+    LOG_LEVEL             = var.log_level
   }
 
-  depends_on = [aws_cloudwatch_log_group.this]
+  # Package: zip src/ and upload to the per-account bucket. source_code_hash
+  # is set from the archive hash inside the module, so code changes redeploy.
+  upload_to_s3       = true
+  lambda_script_dir  = "${path.module}/src"
+  lambda_bucket_name = aws_s3_bucket.lambda_package.id
+
+  create_lambda_permission = true
+  allowed_triggers         = local.allowed_triggers
 
   tags = var.tags
+
+  depends_on = [aws_cloudwatch_log_group.this]
 }
 
 resource "aws_lambda_function_event_invoke_config" "this" {
-  function_name                = aws_lambda_function.this.function_name
+  function_name                = module.writer_lambda.lambda_name
   maximum_retry_attempts       = 2
   maximum_event_age_in_seconds = 21600
 
   destination_config {
     on_failure {
-      destination = aws_sqs_queue.lambda_dlq.arn
+      destination = module.lambda_dlq.queue_arn
     }
   }
 }
@@ -178,7 +251,7 @@ resource "aws_lambda_function_event_invoke_config" "this" {
 # default bus (AWS service events are delivered there only).
 # --------------------------------------------------------------------------
 
-resource "aws_cloudwatch_event_rule" "this" {
+resource "aws_cloudwatch_event_rule" "ssm" {
   for_each = local.rule_definitions
 
   name  = "${var.name_prefix}-${replace(each.key, "_", "-")}"
@@ -196,25 +269,15 @@ resource "aws_cloudwatch_event_rule" "this" {
   tags = var.tags
 }
 
-resource "aws_cloudwatch_event_target" "this" {
+resource "aws_cloudwatch_event_target" "ssm" {
   for_each = local.rule_definitions
 
-  rule = aws_cloudwatch_event_rule.this[each.key].name
-  arn  = aws_lambda_function.this.arn
+  rule = aws_cloudwatch_event_rule.ssm[each.key].name
+  arn  = module.writer_lambda.lambda_arn
 
   dead_letter_config {
-    arn = aws_sqs_queue.target_dlq.arn
+    arn = module.target_dlq.queue_arn
   }
-}
-
-resource "aws_lambda_permission" "this" {
-  for_each = local.rule_definitions
-
-  statement_id  = "AllowEventBridge-${each.key}"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.this.function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.this[each.key].arn
 }
 
 # Canary -- always enabled, proves the plumbing without impersonating a real
@@ -236,41 +299,44 @@ resource "aws_cloudwatch_event_target" "canary" {
   count = var.enable_canary ? 1 : 0
 
   rule = aws_cloudwatch_event_rule.canary[0].name
-  arn  = aws_lambda_function.this.arn
+  arn  = module.writer_lambda.lambda_arn
 
   dead_letter_config {
-    arn = aws_sqs_queue.target_dlq.arn
+    arn = module.target_dlq.queue_arn
   }
-}
-
-resource "aws_lambda_permission" "canary" {
-  count = var.enable_canary ? 1 : 0
-
-  statement_id  = "AllowEventBridge-canary"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.this.function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.canary[0].arn
 }
 
 # --------------------------------------------------------------------------
 # Two DLQs -- different failure points, both required. See BUILD-INSTRUCTIONS
 # section 6: with no metrics tier these plus the canary are the entire safety
-# net.
+# net. Sourced from the shared terraform-aws-sqs module.
 # --------------------------------------------------------------------------
 
-resource "aws_sqs_queue" "target_dlq" {
-  name                      = "${var.name_prefix}-target-dlq"
+module "target_dlq" {
+  source = "../../../Terrafrom-AWS-Prasanth/terraform-aws-sqs"
+
+  queue_name                = "${var.name_prefix}-target-dlq"
   message_retention_seconds = 1209600
-  sqs_managed_sse_enabled   = true
-  tags                      = var.tags
+
+  # Standalone queue, not a redrive target of a "main" queue.
+  enable_dlq = false
+
+  # The shared module's only built-in policy is a deny-non-TLS statement; the
+  # EventBridge allow-policy this queue needs is attached separately below.
+  enable_secure_transport = false
+
+  tags = var.tags
 }
 
-resource "aws_sqs_queue" "lambda_dlq" {
-  name                      = "${var.name_prefix}-lambda-dlq"
+module "lambda_dlq" {
+  source = "../../../Terrafrom-AWS-Prasanth/terraform-aws-sqs"
+
+  queue_name                = "${var.name_prefix}-lambda-dlq"
   message_retention_seconds = 1209600
-  sqs_managed_sse_enabled   = true
-  tags                      = var.tags
+  enable_dlq                = false
+  enable_secure_transport   = false
+
+  tags = var.tags
 }
 
 data "aws_iam_policy_document" "target_dlq" {
@@ -278,7 +344,7 @@ data "aws_iam_policy_document" "target_dlq" {
     sid       = "AllowEventBridgeSend"
     effect    = "Allow"
     actions   = ["sqs:SendMessage"]
-    resources = [aws_sqs_queue.target_dlq.arn]
+    resources = [module.target_dlq.queue_arn]
 
     principals {
       type        = "Service"
@@ -300,6 +366,6 @@ data "aws_iam_policy_document" "target_dlq" {
 }
 
 resource "aws_sqs_queue_policy" "target_dlq" {
-  queue_url = aws_sqs_queue.target_dlq.id
+  queue_url = module.target_dlq.queue_url
   policy    = data.aws_iam_policy_document.target_dlq.json
 }

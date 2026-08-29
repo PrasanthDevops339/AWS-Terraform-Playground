@@ -1,19 +1,24 @@
 output "event_rule_arns" {
   description = "ARNs of all EventBridge rules created (three SSM rules plus the canary, if enabled)."
   value = merge(
-    { for k, r in aws_cloudwatch_event_rule.this : k => r.arn },
+    { for k, r in aws_cloudwatch_event_rule.ssm : k => r.arn },
     var.enable_canary ? { canary = aws_cloudwatch_event_rule.canary[0].arn } : {}
   )
 }
 
 output "lambda_function_arn" {
   description = "ARN of the patch outcome writer Lambda."
-  value       = aws_lambda_function.this.arn
+  value       = module.writer_lambda.lambda_arn
 }
 
 output "lambda_function_name" {
-  description = "Name of the patch outcome writer Lambda."
-  value       = aws_lambda_function.this.function_name
+  description = "Name of the patch outcome writer Lambda (account-alias prefixed by the shared module)."
+  value       = module.writer_lambda.lambda_name
+}
+
+output "lambda_package_bucket" {
+  description = "Name of the per-account S3 bucket holding the Lambda deployment zip."
+  value       = aws_s3_bucket.lambda_package.id
 }
 
 output "lambda_log_group_name" {
@@ -28,12 +33,12 @@ output "writer_role_arn" {
 
 output "target_dlq_url" {
   description = "URL of the queue that catches EventBridge-could-not-invoke-Lambda failures."
-  value       = aws_sqs_queue.target_dlq.id
+  value       = module.target_dlq.queue_url
 }
 
 output "lambda_dlq_url" {
   description = "URL of the queue that catches Lambda-ran-and-threw failures (bucket policy, KMS grant, S3 errors)."
-  value       = aws_sqs_queue.lambda_dlq.id
+  value       = module.lambda_dlq.queue_url
 }
 
 output "archive_s3_destination" {

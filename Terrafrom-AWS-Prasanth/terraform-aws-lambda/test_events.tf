@@ -10,17 +10,20 @@ locals {
     })
   ]
 
-  test_events_str = "${join("", local.test_events_str_array)}"
+  test_events_str = join("", local.test_events_str_array)
 }
 
 resource "aws_schemas_schema" "test_event_schema" {
   count = length(var.test_events) > 0 ? 1 : 0
 
-  name          = "${element(concat(aws_lambda_function.main.*.function_name, [""]), 0)}-schema"
+  name          = "_${element(concat(aws_lambda_function.main.*.function_name, [""]), 0)}-schema"
   registry_name = "lambda-testevent-schemas"
   type          = "OpenApi3"
 
-  content     = templatefile("${path.module}/templates/test_events_template.json", {})
-  test_events = local.test_events_str
+  # The examples array is interpolated into the OpenAPI document itself;
+  # aws_schemas_schema has no separate test_events argument.
+  content = templatefile("${path.module}/templates/test_events_template.json", {
+    test_events = local.test_events_str
+  })
 }
 

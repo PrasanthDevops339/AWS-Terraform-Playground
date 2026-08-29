@@ -107,6 +107,35 @@ output (and in `central-prerequisites/README.md`) for the bucket owner to
 merge by hand — this module never creates or edits the bucket, the bucket
 policy, or the KMS key itself.
 
+### The two changes the central account makes
+
+| # | Where | Statement | Required? |
+|---|---|---|---|
+| 1 | Bucket policy | `Allow s3:PutObject` on `<bucket>/<prefix>/*` — nothing wider, no read, no list, no delete | **Always** |
+| 2 | KMS key policy | `Allow kms:GenerateDataKey` / `kms:Encrypt` / `kms:DescribeKey` — never `kms:Decrypt` | Only when the bucket is SSE-KMS with a customer-managed key |
+
+Both carry the same two conditions (`aws:PrincipalOrgID` + `ArnLike` on the
+role name). `kms:GenerateDataKey` is the one that actually does the work: S3
+calls it on the writer's behalf for every SSE-KMS `PutObject`, which is why
+the Lambda itself never talks to KMS directly.
+
+Three things can make those two statements insufficient, and two of them fail
+**silently** — HTTP 200 on every write, objects in the bucket, nothing usable
+downstream:
+
+- **ACLs enabled on the bucket** (`ObjectWriter`) with no
+  `bucket-owner-full-control` on the put: the bucket owner ends up unable to
+  read its own objects. Silent.
+- **`archive_kms_key_arn` pointing at a key that is not the bucket's own key**:
+  the objects land encrypted under something the `s3tofirehose` reader has no
+  `kms:Decrypt` on. Silent.
+- **An existing `Deny`** — on `aws:SourceVpce` (the writer Lambda is not in a
+  VPC), a specific SSE key id, or a fixed account list — beats the new Allow.
+  Loud, at least: `AccessDenied` in the Lambda DLQ.
+
+`central-prerequisites/README.md` is the runbook: preflight commands, the
+exact JSON, the Deny table, and the canary-based verification.
+
 ## 5. Where it lands and how Splunk reads it
 
 Records land under `patchingsolution-events/outcomes/`, a **sibling** of

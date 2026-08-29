@@ -314,6 +314,12 @@ Plus **`central_prerequisites`** — a map rendering the two statements the buck
 
 Two conditions deliberately: `aws:PrincipalOrgID` bounds it to the organisation, `ArnLike` on `aws:PrincipalArn` bounds it to the one role name. Either alone is too loose.
 
+The KMS statement is needed **only** when the bucket's default encryption is SSE-KMS with a customer-managed key; on an SSE-S3 bucket, leave `archive_kms_key_arn = null` and merge statement 1 alone. `kms:GenerateDataKey` is the action that does the work — S3 calls it on the writer's behalf for each `PutObject`; the Lambda never calls KMS directly, so the statement can optionally be pinned with `"kms:ViaService": "s3.<region>.amazonaws.com"` (drop `kms:DescribeKey` if you do).
+
+**If the bucket has ACLs enabled** (`ObjectWriter` / `BucketOwnerPreferred` — open question 1), statement 1 is not sufficient on its own. Three coordinated changes are needed: `archive_object_acl = "bucket-owner-full-control"` in every member account, `s3:PutObjectAcl` added to the bucket-policy `Action` list with a `"s3:x-amz-acl": "bucket-owner-full-control"` condition, **and `s3:PutObjectAcl` added to the module's `S3WriteOnly` IAM statement** — a `PutObject` carrying an `x-amz-acl` header needs both permissions. The preferred fix is to switch the bucket to `BucketOwnerEnforced` and keep `archive_object_acl` null. Note that on a `BucketOwnerEnforced` bucket, sending an ACL fails the put outright with `AccessControlListNotSupported`.
+
+`central-prerequisites/README.md` is the bucket owner's runbook for all of this: preflight commands, both statements, the Deny patterns that silently override them (`aws:SourceVpce` in particular — the writer Lambda is not in a VPC), and canary-based verification.
+
 ---
 
 ## 11. Validation the agent must run
