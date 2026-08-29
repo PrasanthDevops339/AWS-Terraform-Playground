@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.1.0
+
+- Added `saml_metadata_content`, an optional input that accepts the SAML
+  metadata XML inline instead of reading it from disk. Exactly one of
+  `saml_metadata_content` or `samlmetadatafile` must be set; `samlmetadatafile`
+  now defaults to `null` and is otherwise unchanged, so existing callers are
+  unaffected.
+- Declared the implicit `hashicorp/local` provider dependency and added
+  `required_version = ">= 1.3"`.
+- The complete example no longer ships a static `files/metadata.xml` whose
+  signing certificate had expired. It now generates a throwaway self-signed
+  certificate with the `hashicorp/tls` provider and renders the metadata around
+  it, and suffixes the hosted UI domain prefix with a random string so repeated
+  applies do not collide on the globally unique namespace.
+
 ## 2.0.0
 
 - **Breaking:** `web_acl_arn` is now a required variable (no default). Every

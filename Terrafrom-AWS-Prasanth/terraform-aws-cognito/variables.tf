@@ -62,7 +62,20 @@ variable "provider_name" {
 }
 
 variable "samlmetadatafile" {
-  description = "Path to the saml metadatafile and give the exact path where is your metadatafile. "
+  description = "Path to the SAML metadata file. Give the exact path to your metadata file. Leave null when supplying `saml_metadata_content` instead."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = (var.samlmetadatafile == null) != (var.saml_metadata_content == null)
+    error_message = "Set exactly one of samlmetadatafile or saml_metadata_content."
+  }
+}
+
+variable "saml_metadata_content" {
+  description = "SAML metadata XML passed inline instead of read from disk. Useful when the metadata is generated during the run (for example a self-signed signing certificate in an example or test)."
+  type        = string
+  default     = null
 }
 
 variable "deletion_protection" {

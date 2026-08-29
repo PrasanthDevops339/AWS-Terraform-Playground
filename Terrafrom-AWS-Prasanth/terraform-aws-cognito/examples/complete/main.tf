@@ -1,3 +1,12 @@
+# Cognito hosted-UI prefix domains are globally unique across every AWS
+# account, so a hardcoded placeholder collides. The suffix keeps the example
+# applyable; the domain itself is never used by anything.
+resource "random_string" "domain_suffix" {
+  length  = 8
+  special = false
+  upper   = false
+}
+
 module "waf" {
   source = "../../../terraform-aws-waf"
 
@@ -8,18 +17,19 @@ module "waf" {
 module "cognitotest" {
   source = "../.."
 
-  cognito_name     = "testcomplete"
-  domain_name      = "prasantestcomplete"
-  samlmetadatafile = "${path.module}/files/metadata.xml"
-  app_client_name  = "appclienttestcomplete"
-  web_acl_arn      = module.waf.arn
+  cognito_name          = "testcomplete"
+  domain_name           = "testcomplete-${random_string.domain_suffix.result}"
+  saml_metadata_content = local.saml_metadata
+  app_client_name       = "appclienttestcomplete"
+  web_acl_arn           = module.waf.arn
 
+  # Placeholder URLs - no one owns or serves these hosts.
   callback_urls = [
-    "https://prasa-dev-test.prasanth.com/oauth2/idpresponse"
+    "https://app.example.com/oauth2/idpresponse"
   ]
 
   logout_urls = [
-    "https://testportal.prasanth.com/_layouts/SignOut.aspx"
+    "https://app.example.com/_layouts/SignOut.aspx"
   ]
 
   deletion_protection = "INACTIVE"
