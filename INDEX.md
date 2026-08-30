@@ -12,7 +12,7 @@ AWS-Terraform-Playground/
 │   ├── 📄 README.md                      # SCP documentation & usage
 │   └── 📝 block-rds-byol.json           # Block RDS BYOL policy
 └── ⚙️ Terrafrom-AWS-Prasanth/            # Core Terraform modules
-    ├── 🐳 terraform-aws-ecs-fargate/     # Container orchestration
+    ├── 🐳 terraform-aws-ecs/             # Container orchestration (Fargate + EC2)
     │   ├── 📄 README.md                  # ECS module documentation
     │   ├── ⚙️ ecs-cluster.tf             # ECS cluster configuration
     │   ├── ⚙️ ecs-service.tf             # ECS service configuration
@@ -93,7 +93,7 @@ Service Control Policies for organizational governance and compliance.
 
 ### 🐳 ECS Fargate Module
 
-**Location:** `Terrafrom-AWS-Prasanth/terraform-aws-ecs-fargate/`
+**Location:** `Terrafrom-AWS-Prasanth/terraform-aws-ecs/`
 
 #### 📋 Core Components
 
@@ -253,7 +253,7 @@ Service Control Policies for organizational governance and compliance.
 #### 🌐 Web Application Development
 1. **Start here:** [ECS Fargate Module](#-ecs-fargate-module)
 2. **Database:** [RDS Module](#️-rds-database-module)
-3. **Example:** `terraform-aws-ecs-fargate/examples/complete/`
+3. **Example:** `terraform-aws-ecs/examples/complete/`
 
 #### ⚡ Serverless Development
 1. **Start here:** [Lambda Module](#-lambda-function-module)
@@ -273,7 +273,7 @@ Service Control Policies for organizational governance and compliance.
 
 | Technology | Module | Documentation | Examples |
 |------------|--------|---------------|----------|
-| 🐳 Docker/Containers | ECS Fargate | `terraform-aws-ecs-fargate/README.md` | `examples/complete/` |
+| 🐳 Docker/Containers | ECS (Fargate + EC2) | `terraform-aws-ecs/README.md` | `examples/complete/` |
 | ⚡ Serverless | Lambda | `terraform-aws-lambda/README.md` | `examples/complete/` |
 | 🗄️ Databases | RDS | View examples | Multiple engine examples |
 | 🔐 Governance | SCP | `aws-scp-policys/README.md` | Policy files |
@@ -383,7 +383,8 @@ Each module follows consistent documentation patterns:
 
 - 📖 **Main Documentation:** [README.md](README.md)
 - 🔐 **SCP Policies:** [aws-scp-policys/README.md](aws-scp-policys/README.md)
-- 🐳 **ECS Fargate:** [terraform-aws-ecs-fargate/README.md](Terrafrom-AWS-Prasanth/terraform-aws-ecs-fargate/README.md)
+- 🐳 **ECS (Fargate + EC2):** [terraform-aws-ecs/README.md](Terrafrom-AWS-Prasanth/terraform-aws-ecs/README.md)
+- 🚀 **ECS deployment patterns:** [ecs-deployment-patterns/README.md](ecs-deployment-patterns/README.md)
 - ⚡ **Lambda Functions:** [terraform-aws-lambda/README.md](Terrafrom-AWS-Prasanth/terraform-aws-lambda/README.md)
 
 ---

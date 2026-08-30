@@ -43,7 +43,7 @@ AWS-Terraform-Playground/
 │   ├── 📋 requirements.txt               # Python dependencies
 │   └── 📝 example_usage.sh              # Usage examples
 └── ⚙️ Terrafrom-AWS-Prasanth/            # Terraform modules
-    ├── 🐳 terraform-aws-ecs-fargate/     # ECS Fargate module
+    ├── 🐳 terraform-aws-ecs/             # ECS module (Fargate + EC2 launch types)
     ├── ⚡ terraform-aws-lambda/          # Lambda function module
     ├── 📁 terraform-aws-lambda-old/      # Legacy Lambda module
     └── 🗄️ terraform-aws-rds/             # RDS database module
@@ -163,7 +163,7 @@ cd AWS-Terraform-Playground
 ### 2. Choose Your Module
 Navigate to the desired module directory:
 ```bash
-cd Terrafrom-AWS-Prasanth/terraform-aws-ecs-fargate  # For ECS Fargate
+cd Terrafrom-AWS-Prasanth/terraform-aws-ecs  # For ECS (Fargate or EC2)
 cd Terrafrom-AWS-Prasanth/terraform-aws-lambda      # For Lambda
 cd Terrafrom-AWS-Prasanth/terraform-aws-rds         # For RDS
 ```
@@ -186,7 +186,8 @@ terraform apply
 - 📋 **[INDEX.md](INDEX.md)** - Detailed navigation and component guide
 - 🔐 **[SCP Policies](aws-scp-policys/README.md)** - Service Control Policy documentation
 - 🧹 **[Cleanup Scripts](aws-cleanup-scripts/README.md)** - ECR and AMI cleanup utilities
-- 🐳 **[ECS Fargate](Terrafrom-AWS-Prasanth/terraform-aws-ecs-fargate/README.md)** - Container orchestration
+- 🐳 **[ECS](Terrafrom-AWS-Prasanth/terraform-aws-ecs/README.md)** - Container orchestration, Fargate and EC2 launch types
+- 🚀 **[ECS deployment patterns](ecs-deployment-patterns/README.md)** - Worked examples of every ECS launch type and deployment type
 - ⚡ **[Lambda](Terrafrom-AWS-Prasanth/terraform-aws-lambda/README.md)** - Serverless functions
 - 🗄️ **[RDS](Terrafrom-AWS-Prasanth/terraform-aws-rds/)** - Database solutions
 
@@ -194,7 +195,7 @@ terraform apply
 
 | Use Case | Components | Example Path |
 |----------|------------|--------------|
-| 🌐 Web Application | ECS + RDS + ALB | `terraform-aws-ecs-fargate/examples/complete/` |
+| 🌐 Web Application | ECS + RDS + ALB | `terraform-aws-ecs/examples/complete/` |
 | ⚡ Serverless API | Lambda + RDS | `terraform-aws-lambda/examples/complete/` |
 | 🗄️ Database Migration | RDS + Snapshots | `terraform-aws-rds/examples/postgres-db-instance/` |
 | 🔄 Multi-Region Setup | RDS Cross-Region | `terraform-aws-rds/examples/cross-region-snapshot-copy/` |
