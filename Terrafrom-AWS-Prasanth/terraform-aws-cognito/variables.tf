@@ -1,7 +1,15 @@
 variable "region" {
-  description = "(Optional) AWS Region for the regional resources in this module. If null, resources use the region configured on the aws provider. Requires AWS provider 6.x."
+  description = "Optional AWS Region for regional resources. If null, resources use the configured provider region."
   type        = string
   default     = null
+
+  validation {
+    condition = (
+      var.region == null ||
+      contains(["us-east-1", "us-east-2"], var.region)
+    )
+    error_message = "Region must be null, 'us-east-1', or 'us-east-2'."
+  }
 }
 
 variable "cognito_name" {

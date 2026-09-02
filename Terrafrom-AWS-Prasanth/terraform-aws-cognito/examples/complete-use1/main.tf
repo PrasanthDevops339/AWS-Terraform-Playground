@@ -1,19 +1,13 @@
-# Cognito hosted-UI prefix domains are globally unique across every AWS
-# account, so a hardcoded placeholder collides. The suffix keeps the example
-# applyable; the domain itself is never used by anything.
-#
-# It also has to differ from the complete example's prefix, since both examples
-# can be deployed into the same account at the same time.
+# Cognito prefix domains are globally unique, so the suffix keeps repeated
+# applies - and the ../complete example - from colliding.
 resource "random_string" "domain_suffix" {
   length  = 8
   special = false
   upper   = false
 }
 
-# The Web ACL, the user pool and the association must all share a Region, so
-# the WAF module gets the same `region` value as the cognito module below.
-# terraform-aws-waf takes its own `region` input, so no aliased provider is
-# needed - it resolves this through local.resource_region internally.
+# Same region as the cognito module below: AWS requires the Web ACL, the pool
+# and the association to share one.
 module "waf" {
   source = "../../../terraform-aws-waf"
 
@@ -23,11 +17,8 @@ module "waf" {
   scope    = "REGIONAL"
 }
 
-# The provider in version.tf is configured for us-east-2. This single `region`
-# input is what puts the user pool, its domain, the SAML IdP, the app client
-# and the WAF association in us-east-1 instead - with no aliased provider
-# anywhere in this example, which is the point of AWS provider 6.x enhanced
-# region support.
+# Provider is us-east-2 (version.tf); this `region` input is what moves every
+# resource to us-east-1.
 module "cognitotest" {
   source = "../.."
 
@@ -35,27 +26,11 @@ module "cognitotest" {
 
   cognito_name = "testuseast1"
   domain_name  = "testuseast1-${random_string.domain_suffix.result}"
-  # DO NOT "simplify" this to local_file.saml_metadata.filename.
-  #
-  # That filename is a statically known string, so it crosses into the module
-  # as a plain path with no dependency attached - and the module's
-  # `data "local_file"` then reads it at PLAN time, before the file exists:
-  #
-  #   Error: Read local file data source error
-  #   +Original Error: open ./generated/metadata.xml: no such file or directory
-  #
-  # Routing through .id (known-after-apply) makes the whole expression unknown
-  # at plan, so the module defers that read to apply. Unlike `depends_on` on
-  # the module call, this defers ONLY the metadata read - the module's
-  # aws_caller_identity / aws_iam_account_alias data sources still resolve at
-  # plan time, keeping the user pool name and tags visible in the plan.
-  #
-  # See SELF-SIGNED-SAML-CERT.md section 5, Option B.
+  # DO NOT simplify to local_file.saml_metadata.filename - it breaks at plan.
+  # See ../complete/main.tf and SELF-SIGNED-SAML-CERT.md section 5.
   samlmetadatafile = local_file.saml_metadata.id == "" ? "" : local_file.saml_metadata.filename
   app_client_name  = "appclienttestuseast1"
 
-  # Sourced from the us-east-1 Web ACL above. Passing a us-east-2 ARN here
-  # fails the module's precondition at plan time rather than at apply.
   web_acl_arn = module.waf.arn
 
   # Placeholder URLs - no one owns or serves these hosts.

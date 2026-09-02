@@ -3,8 +3,7 @@ variable "account_id" {
 }
 
 locals {
-  # The Region the module's resources are pushed to, deliberately different
-  # from the us-east-2 provider Region in version.tf. Kept as a local so the
-  # module input and the aliased WAF provider can never drift apart.
+  # Shared by both module calls so they cannot drift. The cognito module only
+  # accepts null, "us-east-1" or "us-east-2".
   target_region = "us-east-1"
 }

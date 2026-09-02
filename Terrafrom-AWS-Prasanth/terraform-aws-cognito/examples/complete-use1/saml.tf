@@ -1,17 +1,6 @@
-###############################################################################
-# Placeholder SAML signing identity
-#
-# The example previously shipped a static metadata.xml whose signing
-# certificate had expired, so `terraform apply` failed inside Cognito. Instead
-# of committing another certificate with a fixed expiry, the example mints a
-# throwaway self-signed certificate on every run with the `tls` provider,
-# renders the IdP metadata around it, and writes it to disk for the module to
-# read. The module itself is unchanged.
-#
-# Nothing here is a real identity provider: the entity ID and SSO URL point at
-# example.com, and the private key lives only in this example's state. Never
-# reuse this pattern for a real federation setup.
-###############################################################################
+# Copy of ../complete/saml.tf - see that file and SELF-SIGNED-SAML-CERT.md for
+# why the certificate is generated rather than committed. Throwaway identity:
+# never reuse this for a real federation setup.
 
 resource "tls_private_key" "saml_signing" {
   algorithm = "RSA"
@@ -26,8 +15,6 @@ resource "tls_self_signed_cert" "saml_signing" {
     organization = "Terraform AWS Cognito Example"
   }
 
-  # Long-lived on purpose: the point of generating it here is that the example
-  # never goes stale the way the committed certificate did.
   validity_period_hours = 87600 # 10 years
   early_renewal_hours   = 720   # regenerate 30 days before expiry
 
@@ -55,16 +42,8 @@ locals {
   })
 }
 
-###############################################################################
-# Hand the rendered metadata to the module
-#
-# The module reads its metadata from disk via `data "local_file"`, so the
-# rendered XML has to become a real file first.
-###############################################################################
-
+# The module reads metadata from disk, so the rendered XML has to become a file.
 resource "local_file" "saml_metadata" {
   filename = "${path.module}/generated/metadata.xml"
   content  = local.saml_metadata
-
-  # Generated at apply time and gitignored - it is derived state, not source.
 }

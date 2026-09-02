@@ -14,9 +14,8 @@ module "waf" {
   scope    = "REGIONAL"
 }
 
-# This example deliberately does NOT set the module's `region` input, so every
-# resource lands in the provider's Region (us-east-2). See ../complete-use1 for
-# the cross-Region arrangement.
+# No `region` input on purpose - everything lands in the provider's us-east-2.
+# ../complete-use1 is the cross-Region example.
 module "cognitotest" {
   source = "../.."
 

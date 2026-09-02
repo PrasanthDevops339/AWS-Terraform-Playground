@@ -31,7 +31,8 @@ module "cognito" {
 
 - AWS provider **>= 6.0.0**. The module sets the resource-level `region`
   argument, which is 6.x only.
-- Terraform **>= 1.2** (`lifecycle { precondition }`).
+- Terraform **>= 1.3** (`lifecycle { precondition }` needs 1.2+, `startswith()`
+  needs 1.3+).
 
 ## Inputs
 
@@ -44,6 +45,15 @@ module "cognito" {
   resources. When `null`, every resource uses the Region configured on the
   `aws` provider, which is the pre-existing behaviour. Set it to deploy the
   pool outside the provider's Region without declaring an aliased provider.
+
+  **Allowed values: `null`, `"us-east-1"`, `"us-east-2"`.** A `validation`
+  block rejects anything else at plan time. This is an allow-list of the
+  Regions this platform deploys into, not an AWS limitation — widen the
+  `contains([...])` list in `variables.tf` when a new Region is approved.
+
+  Note the allow-list constrains `region` only. It does not constrain the
+  Region the `aws` provider is configured for, so leaving `region` null in a
+  provider configured for some other Region still works.
 
 ### Deploying to a non-default Region
 

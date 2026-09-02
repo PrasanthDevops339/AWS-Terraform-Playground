@@ -1,10 +1,7 @@
 locals {
   account_alias = data.aws_iam_account_alias.current.account_alias
 
-  # The Region this module's resources actually land in: var.region when set,
-  # otherwise whatever the aws provider is configured for. Used only by the
-  # WAF association preconditions - the resources themselves pass var.region
-  # straight through and let the provider resolve null.
+  # Region the resources actually land in. Used by the WAF preconditions only.
   effective_region = data.aws_region.current.region
 
   base_attribute_mapping = {
@@ -169,27 +166,16 @@ resource "aws_wafv2_web_acl_association" "main" {
   resource_arn = aws_cognito_user_pool.main.arn
   web_acl_arn  = var.web_acl_arn
 
-  # A Web ACL that does not match the pool produces an opaque AWS error at
-  # apply. Both checks below turn that into a plan-time failure naming the
-  # actual problem. They are deferred to apply when web_acl_arn is not yet
-  # known (a Web ACL created in the same run), which is correct.
+  # A mismatched Web ACL fails at apply with an opaque AWS error; catch it here.
   lifecycle {
-    # Scope check. Only a REGIONAL-scope Web ACL can be associated with a
-    # Cognito user pool. terraform-aws-waf forces scope = "CLOUDFRONT" ACLs
-    # into us-east-1, so a caller who sets scope = "CLOUDFRONT" and
-    # region = "us-east-1" on both modules passes the Region check below while
-    # still being unassociable. The scope lives in the ARN's resource path:
-    # "regional/webacl/..." vs "global/webacl/...".
+    # ARN path segment is "regional/webacl/..." or "global/webacl/...".
     precondition {
       condition     = startswith(split(":", var.web_acl_arn)[5], "regional/")
       error_message = "web_acl_arn must be a REGIONAL-scope Web ACL; got '${var.web_acl_arn}'. A CLOUDFRONT-scope Web ACL cannot be associated with a Cognito User Pool. Set scope = \"REGIONAL\" on the WAF module."
     }
 
-    # Region check, against the Region this module's resources actually land in
-    # rather than against var.region. Both this module and terraform-aws-waf
-    # take independent `region` inputs, so the Web ACL can be moved without the
-    # pool and vice versa - including when var.region here is null and only the
-    # WAF module was given a region.
+    # Compared against effective_region, not var.region: terraform-aws-waf has
+    # its own `region`, so the ACL can move while var.region here stays null.
     precondition {
       condition     = split(":", var.web_acl_arn)[3] == local.effective_region
       error_message = "web_acl_arn is a Web ACL in ${split(":", var.web_acl_arn)[3]}, but this module's resources are in ${local.effective_region}. The Web ACL, the user pool, and the association must all be in the same Region - pass the same region value to the WAF module and to this one."

@@ -1,6 +1,5 @@
-# Mirrors ../complete-use1/output.tf so the two examples can be compared
-# directly. This one asserts the OPPOSITE result: with no `region` input set,
-# the pool must stay in the provider's Region.
+# Mirrors ../complete-use1/output.tf, asserting the opposite: with no `region`
+# set, the pool stays in the provider's Region.
 output "user_pool_arn" {
   description = "ARN of the user pool. Confirm the Region field reads us-east-2."
   value       = module.cognitotest.aws_cognito_user_pool_arn

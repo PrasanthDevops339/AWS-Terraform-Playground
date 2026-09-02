@@ -4,9 +4,7 @@ terraform {
 
   required_providers {
     aws = {
-      source = "hashicorp/aws"
-      # Matches the module floor: the resource-level `region` argument the
-      # module uses is AWS provider 6.x only.
+      source  = "hashicorp/aws"
       version = ">= 6.0.0"
     }
     tls = {

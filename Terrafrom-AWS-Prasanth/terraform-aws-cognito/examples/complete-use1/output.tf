@@ -1,6 +1,4 @@
-# The user pool ARN carries its Region in the 4th field, so this is the
-# cheapest proof that `region` actually moved the resources. After apply it
-# must read us-east-1, not the us-east-2 the provider is configured for.
+# user_pool_region vs provider_region is the proof that `region` took effect.
 output "user_pool_arn" {
   description = "ARN of the user pool. Confirm the Region field reads us-east-1."
   value       = module.cognitotest.aws_cognito_user_pool_arn

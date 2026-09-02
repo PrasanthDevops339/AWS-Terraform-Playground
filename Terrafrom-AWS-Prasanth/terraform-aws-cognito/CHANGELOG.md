@@ -27,6 +27,12 @@ release.
   `aws_cognito_user_pool_domain`, `aws_cognito_identity_provider`,
   `aws_cognito_user_pool_client` and `aws_wafv2_web_acl_association`.
 
+  A `validation` block restricts it to **`null`, `"us-east-1"` or
+  `"us-east-2"`** — the Regions this platform deploys into. This is an
+  allow-list, not an AWS limitation; widen the `contains([...])` list in
+  `variables.tf` when another Region is approved. It constrains the input only,
+  not the Region the `aws` provider is configured for.
+
   Deliberately **not** applied to `data.aws_caller_identity` or
   `data.aws_iam_account_alias` — the AWS provider classifies IAM and STS as
   global services and excludes them from enhanced region support, so adding
@@ -236,6 +242,12 @@ module "cognito" {
 Both modules take independent `region` inputs, so moving one without the other
 is possible in either direction. The preconditions catch it at plan time. See
 `examples/complete-use1`.
+
+This module's `region` accepts only `null`, `"us-east-1"` or `"us-east-2"`;
+anything else fails validation at plan time. `terraform-aws-waf` has no such
+allow-list, so it will happily build a Web ACL in a Region this module refuses
+— the mismatch surfaces as a validation error here rather than a confusing WAF
+error.
 
 ### Rollback
 

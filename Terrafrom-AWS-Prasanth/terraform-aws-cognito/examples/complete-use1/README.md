@@ -26,6 +26,16 @@ Do not "fix" the provider to us-east-1. Doing so turns this example into a
 duplicate of [`complete`](../complete) that happens to run elsewhere, and
 silently removes the only coverage the module has for `region`.
 
+## Why us-east-1 specifically
+
+The module's `region` variable has a `validation` block allowing only `null`,
+`"us-east-1"` and `"us-east-2"`. The provider here is on us-east-2, so
+us-east-1 is the only remaining value that produces a cross-Region deployment.
+Point `local.target_region` at anything outside that allow-list and the plan
+fails with `Region must be null, 'us-east-1', or 'us-east-2'.` — widen the
+`contains([...])` list in the module's `variables.tf` first if a new Region is
+approved.
+
 Everything else — the generated self-signed SAML certificate, the placeholder
 callback URLs, the schemas — is identical to the complete example. See
 [`../complete/README.md`](../complete/README.md) for why the certificate is
