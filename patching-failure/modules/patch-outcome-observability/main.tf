@@ -37,6 +37,39 @@ locals {
     }
   }
 
+  # The writer function's core configuration, declared here rather than inline
+  # in the module block below. The shared terraform-aws-lambda module exports
+  # only lambda_name / lambda_arn / lambda_s3_key -- it deliberately does not
+  # re-export what it was handed -- so this local is what the tests assert on.
+  # Every field is configuration-derived (literal or variable), so it is fully
+  # known at plan: the assertions run offline against a mock provider.
+  writer_lambda_config = {
+    runtime       = "python3.13"
+    handler       = "handler.handler"
+    memory_size   = 128
+    timeout       = 30
+    architectures = ["x86_64"]
+
+    # AWS rejects a lowercase "zip". The shared module's package_type default
+    # is "zip", so this must be passed explicitly and capitalised.
+    package_type = "Zip"
+
+    ephemeral_storage = 512
+
+    # The shared module maps null -> unreserved; -1 is its sentinel for that.
+    reserved_concurrent_executions = var.reserved_concurrency == null ? -1 : var.reserved_concurrency
+
+    environment = {
+      BUCKET_NAME           = var.archive_bucket_name
+      S3_PREFIX             = var.archive_s3_prefix
+      KMS_KEY_ARN           = var.archive_kms_key_arn == null ? "" : var.archive_kms_key_arn
+      OBJECT_ACL            = var.archive_object_acl == null ? "" : var.archive_object_acl
+      ENRICH                = tostring(var.enable_enrichment)
+      INCLUDE_INSTANCE_TAGS = tostring(var.include_instance_tags)
+      LOG_LEVEL             = var.log_level
+    }
+  }
+
   # One Lambda permission per EventBridge rule (SSM rules + the canary). The
   # shared module creates these from allowed_triggers -- EventBridge -> Lambda
   # is a resource policy, not an IAM role.
@@ -201,24 +234,17 @@ module "writer_lambda" {
   lambda_name        = "${var.name_prefix}-writer"
   lambda_description = "Writes one patch-outcome record per SSM RunPatchBaseline terminal event to the central bucket."
   lambda_role_arn    = aws_iam_role.writer.arn
-  lambda_handler     = "handler.handler"
-  runtime            = "python3.13"
-  memory_size        = 128
-  timeout            = 30
-  architectures      = ["x86_64"]
-  ephemeral_storage  = 512
+  lambda_handler     = local.writer_lambda_config.handler
+  runtime            = local.writer_lambda_config.runtime
+  memory_size        = local.writer_lambda_config.memory_size
+  timeout            = local.writer_lambda_config.timeout
+  architectures      = local.writer_lambda_config.architectures
+  package_type       = local.writer_lambda_config.package_type
+  ephemeral_storage  = local.writer_lambda_config.ephemeral_storage
 
-  reserved_concurrent_executions = var.reserved_concurrency == null ? -1 : var.reserved_concurrency
+  reserved_concurrent_executions = local.writer_lambda_config.reserved_concurrent_executions
 
-  environment = {
-    BUCKET_NAME           = var.archive_bucket_name
-    S3_PREFIX             = var.archive_s3_prefix
-    KMS_KEY_ARN           = var.archive_kms_key_arn == null ? "" : var.archive_kms_key_arn
-    OBJECT_ACL            = var.archive_object_acl == null ? "" : var.archive_object_acl
-    ENRICH                = tostring(var.enable_enrichment)
-    INCLUDE_INSTANCE_TAGS = tostring(var.include_instance_tags)
-    LOG_LEVEL             = var.log_level
-  }
+  environment = local.writer_lambda_config.environment
 
   # Package: zip src/ and upload to the per-account bucket. source_code_hash
   # is set from the archive hash inside the module, so code changes redeploy.

@@ -62,22 +62,3 @@ output "lambda_s3_key" {
   value       = element(concat([local.lambda_s3_key], [""]), 0)
 }
 
-output "lambda_function_name" {
-  description = "The name of the lambda function (alias of lambda_name, for consumers expecting *_function_name)"
-  value       = element(concat(aws_lambda_function.main.*.function_name, [""]), 0)
-}
-
-output "lambda_config" {
-  description = "Curated view of the deployed function's core configuration, so consumers can assert on what they asked for without reaching into module internals."
-  value = length(aws_lambda_function.main) > 0 ? {
-    runtime                        = aws_lambda_function.main[0].runtime
-    handler                        = aws_lambda_function.main[0].handler
-    memory_size                    = aws_lambda_function.main[0].memory_size
-    timeout                        = aws_lambda_function.main[0].timeout
-    package_type                   = aws_lambda_function.main[0].package_type
-    architectures                  = aws_lambda_function.main[0].architectures
-    reserved_concurrent_executions = aws_lambda_function.main[0].reserved_concurrent_executions
-    environment                    = try(aws_lambda_function.main[0].environment[0].variables, {})
-  } : null
-}
-

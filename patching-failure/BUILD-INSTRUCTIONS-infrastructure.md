@@ -278,7 +278,9 @@ Allowed retention values: `1,3,5,7,14,30,60,90,120,150,180,365,400,545,731,1096,
 
 ## 10. Outputs
 
-`event_rule_arns`, `lambda_function_arn`, `lambda_function_name`, `lambda_log_group_name`, `writer_role_arn`, `target_dlq_url`, `lambda_dlq_url`, `archive_s3_destination`, `canary_command`.
+`event_rule_arns`, `lambda_function_arn`, `lambda_function_name`, `lambda_log_group_name`, `lambda_package_bucket`, `writer_lambda_config`, `writer_role_arn`, `target_dlq_url`, `lambda_dlq_url`, `archive_s3_destination`, `canary_command`.
+
+`writer_lambda_config` is the function contract this module hands the shared `terraform-aws-lambda` module — runtime, handler, sizing, package type and the environment map. It exists so the contract is asserted in one place (and by the test suite) instead of being read back out of the child module's resources.
 
 Plus **`central_prerequisites`** — a map rendering the two statements the bucket owner merges (also write them into `central-prerequisites/README.md`):
 

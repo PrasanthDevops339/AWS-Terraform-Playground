@@ -95,12 +95,7 @@ variable "image_uri" {
 variable "package_type" {
   description = "(Optional) The Lambda deployment package type. Valid options: Zip or Image"
   type        = string
-  default     = "Zip"
-
-  validation {
-    condition     = contains(["Zip", "Image"], var.package_type)
-    error_message = "package_type must be exactly \"Zip\" or \"Image\" (case-sensitive)."
-  }
+  default     = "zip"
 }
 
 variable "lambda_package_path" {

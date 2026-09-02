@@ -218,6 +218,16 @@ creates, inside itself:
 Key inputs we pass:
 
 - `lambda_role_arn` = the `writer` role above.
+- The whole function shape — runtime, handler, memory, timeout,
+  architectures, package type, ephemeral storage, reserved concurrency and
+  `environment` — comes from **`local.writer_lambda_config`** rather than
+  being written inline here. That local is the single declaration of the
+  function contract, and it is also published as the `writer_lambda_config`
+  output so callers and the test suite can assert on it without reaching into
+  the child module's resources.
+- `package_type = "Zip"` is passed **explicitly**. The shared module's default
+  is the lowercase `"zip"`, which the AWS API rejects — leave it defaulted and
+  the plan looks clean but the apply fails.
 - `environment` = tells `src/handler.py` where to write
   (`BUCKET_NAME`, `S3_PREFIX`, `KMS_KEY_ARN`), and how to behave (`ENRICH`,
   `INCLUDE_INSTANCE_TAGS`, `LOG_LEVEL`).

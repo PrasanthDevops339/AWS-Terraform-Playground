@@ -117,8 +117,9 @@ terraform -chdir=modules/patch-outcome-observability test
 ```
 
 - `defaults.tftest.hcl` -- resource shape and wiring under default inputs
-  (3 SSM rules + canary, DLQ naming, Lambda contract via the `lambda_config`
-  output, locked-down package bucket, pinned role name, `central_prerequisites`).
+  (3 SSM rules + canary, DLQ naming, Lambda contract via the
+  `writer_lambda_config` output, locked-down package bucket, pinned role name,
+  `central_prerequisites`).
 - `toggles.tftest.hcl` -- every feature flag: dormant deploy, canary off,
   enrichment/tag env passthrough, `name_prefix` derivation, KMS key routing.
 - `validation.tftest.hcl` -- every `variable` guard rail via `expect_failures`,
@@ -127,9 +128,17 @@ terraform -chdir=modules/patch-outcome-observability test
 Test notes for the mock provider: `aws_iam_policy_document` JSON, the account
 alias, and `aws_lambda_function.function_name` (Optional+Computed) are all
 unknowable at mock plan, so the test files pin them with `override_data` /
-`override_resource` and assert Lambda internals through the shared module's
-`lambda_config` output. A real-provider `plan` is still the final check before
-arming a fleet.
+`override_resource`.
+
+The Lambda contract is asserted through this module's own
+`writer_lambda_config` output rather than by reaching into the shared module's
+resources. That output is `local.writer_lambda_config`, the single place the
+function's runtime, handler, sizing, package type and environment are declared
+before being handed to `module.writer_lambda`. Every field is
+configuration-derived, so it is fully known at plan and needs no mock. This
+asserts *what the module asks for*, not what AWS accepted — no weaker than
+before, since a mocked plan never reached AWS either. A real-provider `plan` is
+still the final check before arming a fleet.
 
 ## Refactor notes
 
@@ -137,11 +146,29 @@ arming a fleet.
   `aws_cloudwatch_event_rule.ssm` (and `.ssm` target) to read cleanly next to
   the `.canary` siblings. No `moved` blocks are shipped -- this module has not
   been deployed anywhere yet.
-- The shared `terraform-aws-lambda` module had to be repaired to be usable at
-  all (an unescaped-quote syntax error, a broken `aws_schemas_schema`
-  argument, an invalid `package_type` default, and unpinned providers). Two
-  small outputs (`lambda_config`, `lambda_function_name`) were added so
-  consumers can assert on what they deployed.
+- **The shared `terraform-aws-lambda` module is kept as close to untouched as
+  possible.** Exactly two upstream lines were changed, and only because the
+  module is otherwise unusable by *any* consumer:
+  - `variables.tf` — escaped the `architectures` description. It had an
+    unescaped `"` inside a quoted string, giving
+    `Error: Missing newline after argument`. The module does not **parse**, so
+    no consumer can even `init`.
+  - `test_events.tf` — moved `test_events` into the `templatefile` vars map.
+    `aws_schemas_schema` has no `test_events` argument, so `validate` fails on
+    the schema check regardless of `count = 0`; and the template requires a
+    `${test_events}` key that `templatefile(…, {})` never supplied.
+
+  Both are pre-existing upstream bugs that only surfaced because this module
+  became the first real consumer. Everything else this module needs is
+  compensated for **from this side** rather than by editing shared code:
+
+  - `package_type = "Zip"` is passed explicitly. The upstream default is the
+    lowercase `"zip"`, which AWS rejects — it plans clean and fails at apply.
+  - The AWS/`archive` provider floors live in this module's `versions.tf`.
+    Provider requirements aggregate across the whole configuration tree, so a
+    child module that under-declares is harmless once the caller pins them.
+  - The Lambda contract is asserted via this module's `writer_lambda_config`
+    output, so no output has to be added upstream for testability.
 
 ## Usage
 

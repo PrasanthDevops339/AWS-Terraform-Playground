@@ -16,6 +16,11 @@ output "lambda_function_name" {
   value       = module.writer_lambda.lambda_name
 }
 
+output "writer_lambda_config" {
+  description = "Core configuration this module hands the shared terraform-aws-lambda module (runtime, handler, sizing, package type, environment). Exposed so callers and tests can assert on the function contract without reaching into the shared module's internals."
+  value       = local.writer_lambda_config
+}
+
 output "lambda_package_bucket" {
   description = "Name of the per-account S3 bucket holding the Lambda deployment zip."
   value       = aws_s3_bucket.lambda_package.id

@@ -130,32 +130,32 @@ run "lambda_contract" {
   command = plan
 
   assert {
-    condition     = module.writer_lambda.lambda_config.runtime == "python3.13"
+    condition     = output.writer_lambda_config.runtime == "python3.13"
     error_message = "Lambda runtime must be python3.13"
   }
 
   assert {
-    condition     = module.writer_lambda.lambda_config.handler == "handler.handler"
+    condition     = output.writer_lambda_config.handler == "handler.handler"
     error_message = "Lambda handler must be handler.handler"
   }
 
   assert {
-    condition     = module.writer_lambda.lambda_config.timeout == 30 && module.writer_lambda.lambda_config.memory_size == 128
+    condition     = output.writer_lambda_config.timeout == 30 && output.writer_lambda_config.memory_size == 128
     error_message = "Lambda must be 128 MB / 30 s"
   }
 
   assert {
-    condition     = module.writer_lambda.lambda_config.package_type == "Zip"
+    condition     = output.writer_lambda_config.package_type == "Zip"
     error_message = "Lambda must be a Zip package"
   }
 
   assert {
-    condition     = module.writer_lambda.lambda_config.environment["BUCKET_NAME"] == var.archive_bucket_name
+    condition     = output.writer_lambda_config.environment["BUCKET_NAME"] == var.archive_bucket_name
     error_message = "BUCKET_NAME env var must be the archive bucket"
   }
 
   assert {
-    condition     = module.writer_lambda.lambda_config.environment["S3_PREFIX"] == "patchingsolution-events/outcomes"
+    condition     = output.writer_lambda_config.environment["S3_PREFIX"] == "patchingsolution-events/outcomes"
     error_message = "S3_PREFIX env var must default to the sibling outcomes prefix"
   }
 

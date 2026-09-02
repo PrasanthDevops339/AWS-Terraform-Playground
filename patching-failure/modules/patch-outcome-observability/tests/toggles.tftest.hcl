@@ -114,7 +114,7 @@ run "kms_key_set_flows_into_the_lambda_env" {
   }
 
   assert {
-    condition     = module.writer_lambda.lambda_config.environment["KMS_KEY_ARN"] == "arn:aws:kms:us-east-1:123456789012:key/11111111-1111-1111-1111-111111111111"
+    condition     = output.writer_lambda_config.environment["KMS_KEY_ARN"] == "arn:aws:kms:us-east-1:123456789012:key/11111111-1111-1111-1111-111111111111"
     error_message = "archive_kms_key_arn must be passed to the handler as KMS_KEY_ARN"
   }
 }
@@ -128,12 +128,12 @@ run "enrichment_and_tag_toggles_reach_the_handler" {
   }
 
   assert {
-    condition     = module.writer_lambda.lambda_config.environment["ENRICH"] == "false"
+    condition     = output.writer_lambda_config.environment["ENRICH"] == "false"
     error_message = "enable_enrichment = false must set ENRICH=false"
   }
 
   assert {
-    condition     = module.writer_lambda.lambda_config.environment["INCLUDE_INSTANCE_TAGS"] == "false"
+    condition     = output.writer_lambda_config.environment["INCLUDE_INSTANCE_TAGS"] == "false"
     error_message = "include_instance_tags = false must set INCLUDE_INSTANCE_TAGS=false"
   }
 }
@@ -167,7 +167,7 @@ run "reserved_concurrency_passes_through_when_set" {
   }
 
   assert {
-    condition     = module.writer_lambda.lambda_config.reserved_concurrent_executions == 5
+    condition     = output.writer_lambda_config.reserved_concurrent_executions == 5
     error_message = "reserved_concurrency must pass through to the function when set"
   }
 }
