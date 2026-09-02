@@ -1,3 +1,9 @@
+variable "region" {
+  description = "(Optional) AWS Region for the regional resources in this module. If null, resources use the region configured on the aws provider. Requires AWS provider 6.x."
+  type        = string
+  default     = null
+}
+
 variable "cognito_name" {
   description = "(Required) Name of the user pool"
   type        = string

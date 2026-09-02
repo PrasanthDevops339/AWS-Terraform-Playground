@@ -1,27 +1,40 @@
 # Cognito hosted-UI prefix domains are globally unique across every AWS
 # account, so a hardcoded placeholder collides. The suffix keeps the example
 # applyable; the domain itself is never used by anything.
+#
+# It also has to differ from the complete example's prefix, since both examples
+# can be deployed into the same account at the same time.
 resource "random_string" "domain_suffix" {
   length  = 8
   special = false
   upper   = false
 }
 
+# The Web ACL, the user pool and the association must all share a Region, so
+# the WAF module gets the same `region` value as the cognito module below.
+# terraform-aws-waf takes its own `region` input, so no aliased provider is
+# needed - it resolves this through local.resource_region internally.
 module "waf" {
   source = "../../../terraform-aws-waf"
 
-  waf_name = "testcomplete"
+  region = local.target_region
+
+  waf_name = "testuseast1"
   scope    = "REGIONAL"
 }
 
-# This example deliberately does NOT set the module's `region` input, so every
-# resource lands in the provider's Region (us-east-2). See ../complete-use1 for
-# the cross-Region arrangement.
+# The provider in version.tf is configured for us-east-2. This single `region`
+# input is what puts the user pool, its domain, the SAML IdP, the app client
+# and the WAF association in us-east-1 instead - with no aliased provider
+# anywhere in this example, which is the point of AWS provider 6.x enhanced
+# region support.
 module "cognitotest" {
   source = "../.."
 
-  cognito_name = "testcomplete"
-  domain_name  = "testcomplete-${random_string.domain_suffix.result}"
+  region = local.target_region
+
+  cognito_name = "testuseast1"
+  domain_name  = "testuseast1-${random_string.domain_suffix.result}"
   # DO NOT "simplify" this to local_file.saml_metadata.filename.
   #
   # That filename is a statically known string, so it crosses into the module
@@ -39,8 +52,11 @@ module "cognitotest" {
   #
   # See SELF-SIGNED-SAML-CERT.md section 5, Option B.
   samlmetadatafile = local_file.saml_metadata.id == "" ? "" : local_file.saml_metadata.filename
-  app_client_name  = "appclienttestcomplete"
-  web_acl_arn      = module.waf.arn
+  app_client_name  = "appclienttestuseast1"
+
+  # Sourced from the us-east-1 Web ACL above. Passing a us-east-2 ARN here
+  # fails the module's precondition at plan time rather than at apply.
+  web_acl_arn = module.waf.arn
 
   # Placeholder URLs - no one owns or serves these hosts.
   callback_urls = [

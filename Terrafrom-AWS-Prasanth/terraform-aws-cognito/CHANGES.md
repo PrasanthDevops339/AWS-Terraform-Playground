@@ -1,5 +1,10 @@
 # Mandatory WAF Association — Change Notes (v2.0.0)
 
+> **Scope of this document.** These are the design notes for the WAF
+> association only. v2.0.0 also ships AWS provider 6.x `region` support, which
+> is not covered here. For the full release and the upgrade steps, see
+> [`CHANGELOG.md`](CHANGELOG.md) — it is the document to follow when upgrading.
+
 ## Why this change
 
 Security standard: every Cognito user pool must be WAF-protected. Before
@@ -19,7 +24,7 @@ module must now supply a Web ACL ARN — so the module version bumps to
 |---|---|
 | `variables.tf` | Added new **required** variable `web_acl_arn` (no default). |
 | `main.tf` | Added `resource "aws_wafv2_web_acl_association" "main"`, linking `aws_cognito_user_pool.main.arn` → `var.web_acl_arn`. |
-| `versions.tf` | Bumped the `aws` provider constraint from unpinned to `>= 5.26.0`. |
+| `versions.tf` | Bumped the `aws` provider constraint from unpinned. The released floor is `>= 6.0.0`, set by the `region` work shipping in the same version — this change alone needed only `>= 5.26.0`. |
 | `examples/complete/main.tf` | Added a `module "waf"` block (source `../../../terraform-aws-waf`, `scope = "REGIONAL"`) and passed `web_acl_arn = module.waf.arn` into `module "cognitotest"`. |
 | `CHANGELOG.md` | Added the `## 2.0.0` entry documenting the breaking change. |
 | `README.md` | Documented the new required `web_acl_arn` input. |

@@ -13,7 +13,7 @@ This example demonstrates the `terraform-aws-cognito` module with:
 Nothing in this example points at infrastructure anyone owns or uses:
 
 | Value | Placeholder | Note |
-|-------|-------------|------|
+| --- | --- | --- |
 | SAML entity ID / SSO URL | `https://idp.example.com/...` | Never contacted; no real IdP behind it |
 | Callback / logout URLs | `https://app.example.com/...` | Cognito only stores them |
 | Hosted UI domain prefix | `testcomplete-<random>` | Prefix domains are globally unique, so the suffix keeps repeated applies from colliding |
@@ -48,6 +48,17 @@ by Terraform and stored in plaintext in this example's state; a real identity
 provider supplies its own metadata, which you commit and point
 `samlmetadatafile` at directly.
 
+## Region
+
+This example sets **no** `region` input on either module, so the user pool, the
+Web ACL, and everything else land in the AWS provider's Region (us-east-2).
+That is the point of it — it is the baseline that proves the module's `region`
+support did not change behaviour for callers who do not use it.
+
+Do not add `region` here. [`../complete-use1`](../complete-use1) is the
+cross-Region example; if this one also set `region`, nothing in the repo would
+cover the default path.
+
 ## Run
 
 ```bash
@@ -55,3 +66,14 @@ terraform init
 terraform plan
 terraform apply
 ```
+
+## Validating the result
+
+```hcl
+user_pool_region = "us-east-2"
+provider_region  = "us-east-2"
+```
+
+The two must be **equal** here. In [`../complete-use1`](../complete-use1) the
+same two outputs must **differ** — that pairing is what demonstrates the
+`region` input works and is genuinely optional.

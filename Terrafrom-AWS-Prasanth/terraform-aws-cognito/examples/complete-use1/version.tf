@@ -5,8 +5,8 @@ terraform {
   required_providers {
     aws = {
       source = "hashicorp/aws"
-      # Matches the module floor: the resource-level `region` argument the
-      # module uses is AWS provider 6.x only.
+      # The resource-level `region` argument this example exercises is AWS
+      # provider 6.x only.
       version = ">= 6.0.0"
     }
     tls = {
@@ -26,6 +26,14 @@ terraform {
   cloud {}
 }
 
+###############################################################################
+# Primary provider - us-east-2
+#
+# The whole point of this example is that the provider Region and the Region
+# the Cognito resources land in are DIFFERENT. Leave this as us-east-2; the
+# module's `region` input in main.tf is what moves the pool to us-east-1.
+###############################################################################
+
 provider "aws" {
   region = "us-east-2"
 
@@ -43,3 +51,8 @@ provider "aws" {
     }
   }
 }
+
+# There is deliberately no second, aliased provider here. Both the cognito
+# module and terraform-aws-waf take their own `region` input, so this whole
+# example runs off the single us-east-2 provider above - which is the point of
+# AWS provider 6.x enhanced region support.

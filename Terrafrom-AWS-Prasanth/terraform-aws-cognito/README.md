@@ -27,6 +27,12 @@ module "cognito" {
 }
 ```
 
+## Requirements
+
+- AWS provider **>= 6.0.0**. The module sets the resource-level `region`
+  argument, which is 6.x only.
+- Terraform **>= 1.2** (`lifecycle { precondition }`).
+
 ## Inputs
 
 - `web_acl_arn` (required) — ARN of a REGIONAL-scope AWS WAFv2 Web ACL, in
@@ -34,6 +40,74 @@ module "cognito" {
   `aws_wafv2_web_acl_association`. Every user pool must be WAF-protected;
   there is no default. Source this from a shared `terraform-aws-waf` module
   instance's `arn` output.
+- `region` (optional, default `null`) — AWS Region for the module's regional
+  resources. When `null`, every resource uses the Region configured on the
+  `aws` provider, which is the pre-existing behaviour. Set it to deploy the
+  pool outside the provider's Region without declaring an aliased provider.
+
+### Deploying to a non-default Region
+
+```hcl
+provider "aws" {
+  region = "us-east-2"
+}
+
+module "cognito" {
+  source = "tfe.example.com/org/cognito/aws"
+
+  region = "us-east-1" # pool, domain, IdP, client and WAF association
+
+  # ...existing required inputs...
+}
+```
+
+`region` is applied to `aws_cognito_user_pool`, `aws_cognito_user_pool_domain`,
+`aws_cognito_identity_provider`, `aws_cognito_user_pool_client` and
+`aws_wafv2_web_acl_association`. It is deliberately **not** applied to the
+`aws_caller_identity` or `aws_iam_account_alias` data sources — IAM and STS are
+global services that the AWS provider excludes from enhanced region support.
+
+**The Web ACL must be REGIONAL-scope and in the same Region.** Two
+`precondition` blocks on the association enforce this at plan time rather than
+letting it surface as an opaque apply-time AWS error:
+
+- the Web ACL's Region must equal the Region this module's resources land in —
+  `region` when set, the provider's Region when not;
+- the Web ACL must be REGIONAL-scope. A CLOUDFRONT-scope ACL cannot be
+  associated with a user pool, and `terraform-aws-waf` places CLOUDFRONT ACLs
+  in us-east-1, so scope has to be checked separately from Region.
+
+This matters because **both modules take independent `region` inputs**: moving
+one without the other is now possible in either direction, including leaving
+`region` unset here while the WAF module is given one.
+
+`terraform-aws-waf` takes its own `region` input, so pass the same value to
+both modules and no aliased provider is needed anywhere:
+
+```hcl
+module "waf" {
+  source = "tfe.example.com/org/waf/aws"
+  region = "us-east-1"
+  scope  = "REGIONAL"
+  # ...
+}
+
+module "cognito" {
+  source      = "tfe.example.com/org/cognito/aws"
+  region      = "us-east-1"
+  web_acl_arn = module.waf.arn
+  # ...
+}
+```
+
+[`examples/complete-use1`](examples/complete-use1) shows this in full.
+
+## Examples
+
+| Example | Provider Region | Resource Region |
+| --- | --- | --- |
+| [`complete`](examples/complete) | us-east-2 | us-east-2 — `region` not set |
+| [`complete-use1`](examples/complete-use1) | us-east-2 | us-east-1 — via `region` |
 
 ## Outputs
 
