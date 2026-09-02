@@ -6,7 +6,7 @@ output "user_pool_arn" {
 
 output "user_pool_region" {
   description = "Region parsed out of the user pool ARN. Should equal us-east-1."
-  value       = split(":", module.cognitotest.aws_cognito_user_pool_arn)[3]
+  value       = provider::aws::arn_parse(module.cognitotest.aws_cognito_user_pool_arn).region
 }
 
 output "web_acl_arn" {

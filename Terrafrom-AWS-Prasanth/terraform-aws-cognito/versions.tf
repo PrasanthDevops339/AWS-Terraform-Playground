@@ -1,6 +1,7 @@
 terraform {
-  # 1.3+ for startswith(); 6.0.0+ for the resource-level `region` argument.
-  required_version = ">= 1.3"
+  # 1.8+ for provider-defined functions (provider::aws::arn_parse);
+  # 6.0.0+ for the resource-level `region` argument.
+  required_version = ">= 1.8"
 
   required_providers {
     aws = {

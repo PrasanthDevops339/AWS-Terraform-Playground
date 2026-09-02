@@ -4,6 +4,10 @@ locals {
   # Region the resources actually land in. Used by the WAF preconditions only.
   effective_region = data.aws_region.current.region
 
+  # Named ARN fields for the WAF preconditions. arn_parse errors on a malformed
+  # ARN, so a bad web_acl_arn fails here rather than silently mis-parsing.
+  web_acl = provider::aws::arn_parse(var.web_acl_arn)
+
   base_attribute_mapping = {
     "username"      = "SAMLAccountName"
     "custom:groups" = "groups"
@@ -168,17 +172,22 @@ resource "aws_wafv2_web_acl_association" "main" {
 
   # A mismatched Web ACL fails at apply with an opaque AWS error; catch it here.
   lifecycle {
-    # ARN path segment is "regional/webacl/..." or "global/webacl/...".
     precondition {
-      condition     = startswith(split(":", var.web_acl_arn)[5], "regional/")
+      condition     = local.web_acl.service == "wafv2"
+      error_message = "web_acl_arn must be a WAFv2 Web ACL ARN; got a '${local.web_acl.service}' ARN: '${var.web_acl_arn}'."
+    }
+
+    # WAFv2 encodes scope in the resource path: "regional/..." or "global/...".
+    precondition {
+      condition     = startswith(local.web_acl.resource, "regional/")
       error_message = "web_acl_arn must be a REGIONAL-scope Web ACL; got '${var.web_acl_arn}'. A CLOUDFRONT-scope Web ACL cannot be associated with a Cognito User Pool. Set scope = \"REGIONAL\" on the WAF module."
     }
 
     # Compared against effective_region, not var.region: terraform-aws-waf has
     # its own `region`, so the ACL can move while var.region here stays null.
     precondition {
-      condition     = split(":", var.web_acl_arn)[3] == local.effective_region
-      error_message = "web_acl_arn is a Web ACL in ${split(":", var.web_acl_arn)[3]}, but this module's resources are in ${local.effective_region}. The Web ACL, the user pool, and the association must all be in the same Region - pass the same region value to the WAF module and to this one."
+      condition     = local.web_acl.region == local.effective_region
+      error_message = "web_acl_arn is a Web ACL in ${local.web_acl.region}, but this module's resources are in ${local.effective_region}. The Web ACL, the user pool, and the association must all be in the same Region - pass the same region value to the WAF module and to this one."
     }
   }
 }
