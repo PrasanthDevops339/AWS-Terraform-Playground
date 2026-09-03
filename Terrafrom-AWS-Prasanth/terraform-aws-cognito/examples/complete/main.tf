@@ -10,12 +10,15 @@ resource "random_string" "domain_suffix" {
 module "waf" {
   source = "../../../terraform-aws-waf"
 
-  waf_name = "testcomplete"
-  scope    = "REGIONAL"
+  waf_name                   = "testcomplete"
+  scope                      = "REGIONAL"
+  create_ip_set              = false
+  cloudwatch_metrics_enabled = true
+  sampled_requests_enabled   = true
 }
 
-# No `region` input on purpose - everything lands in the provider's us-east-2.
-# ../complete-use1 is the cross-Region example.
+# No `region` input on purpose - this pool lands in the provider's us-east-2.
+# main-use1.tf is the same call with region set, landing in us-east-1.
 module "cognitotest" {
   source = "../.."
 

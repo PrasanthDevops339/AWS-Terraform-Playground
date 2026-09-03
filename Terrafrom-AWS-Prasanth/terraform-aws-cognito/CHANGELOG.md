@@ -12,8 +12,9 @@ release.
   through a new `aws_wafv2_web_acl_association.main` resource.
 - Minimum `hashicorp/aws` provider raised from unpinned to **`>= 6.0.0`**. The
   resource-level `region` argument exists only in AWS provider 6.x.
-- `required_version = ">= 1.3"` added to `versions.tf` (previously unset), for
-  the `lifecycle { precondition }` blocks and `startswith()`.
+- `required_version = ">= 1.8"` added to `versions.tf` (previously unset), for
+  the provider-defined function `provider::aws::arn_parse` used by the
+  preconditions.
 
 ### Added
 
@@ -37,31 +38,36 @@ release.
   `data.aws_iam_account_alias` — the AWS provider classifies IAM and STS as
   global services and excludes them from enhanced region support, so adding
   `region` there is a configuration error.
-- **Two `precondition` blocks** on `aws_wafv2_web_acl_association.main`, each
+- **Three `precondition` blocks** on `aws_wafv2_web_acl_association.main`, each
   turning an opaque apply-time AWS error into a named plan-time failure:
+  - *Service.* The ARN must be a `wafv2` ARN, catching an ALB or API Gateway
+    ARN passed by mistake.
+  - *Scope.* The Web ACL must be REGIONAL-scope, read from the ARN's
+    `regional/` vs `global/` resource path. `terraform-aws-waf` forces
+    `scope = "CLOUDFRONT"` ACLs into us-east-1, so a CLOUDFRONT ACL paired with
+    `region = "us-east-1"` would satisfy the Region check while still being
+    unassociable.
   - *Region.* The Web ACL's Region must equal the Region this module's
     resources land in. Compared against `local.effective_region`
     (`data.aws_region.current.region`, which resolves `var.region` when set and
     the provider Region when null), not against `var.region` directly.
     `terraform-aws-waf` has its own `region` input, so the Web ACL can be moved
     while `var.region` here stays null — a `var.region`-only check misses that.
-  - *Scope.* The Web ACL must be REGIONAL-scope, read from the ARN's
-    `regional/` vs `global/` path segment. `terraform-aws-waf` forces
-    `scope = "CLOUDFRONT"` ACLs into us-east-1, so a CLOUDFRONT ACL paired with
-    `region = "us-east-1"` would satisfy the Region check while still being
-    unassociable.
+
+  All three read named fields from `provider::aws::arn_parse(var.web_acl_arn)`
+  rather than positional `split(":", ...)` indices, so they do not depend on
+  ARN field ordering and fail cleanly on a malformed ARN.
 - `data "aws_region" "current"` (taking `region = var.region`), the only new
   data source, supporting the Region precondition.
 
 ### Examples
 
-- `examples/complete` — the baseline. Sets no `region`, so everything lands in
-  the provider's Region. Gained an `output.tf` asserting
-  `user_pool_region == provider_region`.
-- `examples/complete-use1` — new. Provider configured for us-east-2, `region`
-  set to us-east-1, proving the input end to end. Passes the same region to
-  `terraform-aws-waf`, so the whole example runs off one provider
-  configuration with no aliases.
+- `examples/complete` deploys the module **twice** from one provider
+  configuration (us-east-2, no aliases): `main.tf` sets no `region` and stays
+  in us-east-2, while `main-use1.tf` sets `region = "us-east-1"` and moves
+  there. One apply covers both the default path and the cross-Region path.
+  `main-use1.tf` reuses the SAML material from `saml.tf` rather than
+  generating a second certificate.
 - `examples/complete` no longer ships a static `files/metadata.xml` whose SAML
   signing certificate had expired. It generates a throwaway self-signed
   certificate with the `hashicorp/tls` provider, renders the metadata around
@@ -111,14 +117,14 @@ resolve it here, before continuing.
 
 Commit `.terraform.lock.hcl` on its own.
 
-### Step 2 — Confirm your Terraform runtime is 1.3+
+### Step 2 — Confirm your Terraform runtime is 1.8+
 
 ```console
 terraform version
 ```
 
-`required_version = ">= 1.3"` is new. 1.3 shipped in 2022, so this is usually a
-formality, but a pinned CI image may still be older.
+`required_version = ">= 1.8"` is new — 1.8 is where provider-defined functions
+landed. Usually a formality, but a pinned CI image may still be older.
 
 ### Step 3 — Provision or identify a REGIONAL Web ACL
 
@@ -174,7 +180,8 @@ import {
 }
 ```
 
-`import` blocks need Terraform 1.5+. On 1.3 or 1.4:
+`import` blocks need Terraform 1.5+, so they are available on any runtime that
+satisfies this module's 1.8 floor. The CLI equivalent:
 
 ```console
 terraform import 'module.cognito.aws_wafv2_web_acl_association.main' \
@@ -241,7 +248,7 @@ module "cognito" {
 
 Both modules take independent `region` inputs, so moving one without the other
 is possible in either direction. The preconditions catch it at plan time. See
-`examples/complete-use1`.
+`main-use1.tf` in `examples/complete`.
 
 This module's `region` accepts only `null`, `"us-east-1"` or `"us-east-2"`;
 anything else fails validation at plan time. `terraform-aws-waf` has no such

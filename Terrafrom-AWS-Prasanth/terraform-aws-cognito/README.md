@@ -31,8 +31,8 @@ module "cognito" {
 
 - AWS provider **>= 6.0.0**. The module sets the resource-level `region`
   argument, which is 6.x only.
-- Terraform **>= 1.3** (`lifecycle { precondition }` needs 1.2+, `startswith()`
-  needs 1.3+).
+- Terraform **>= 1.8**, for the provider-defined function
+  `provider::aws::arn_parse` used by the WAF preconditions.
 
 ## Inputs
 
@@ -77,15 +77,19 @@ module "cognito" {
 `aws_caller_identity` or `aws_iam_account_alias` data sources — IAM and STS are
 global services that the AWS provider excludes from enhanced region support.
 
-**The Web ACL must be REGIONAL-scope and in the same Region.** Two
+**The Web ACL must be a REGIONAL-scope WAFv2 ACL in the same Region.** Three
 `precondition` blocks on the association enforce this at plan time rather than
 letting it surface as an opaque apply-time AWS error:
 
-- the Web ACL's Region must equal the Region this module's resources land in —
-  `region` when set, the provider's Region when not;
+- the ARN must be a `wafv2` ARN — an ALB ARN passed by mistake is rejected;
 - the Web ACL must be REGIONAL-scope. A CLOUDFRONT-scope ACL cannot be
   associated with a user pool, and `terraform-aws-waf` places CLOUDFRONT ACLs
-  in us-east-1, so scope has to be checked separately from Region.
+  in us-east-1, so scope is checked separately from Region;
+- the Web ACL's Region must equal the Region this module's resources land in —
+  `region` when set, the provider's Region when not.
+
+All three read named fields from `provider::aws::arn_parse`, so they do not
+depend on ARN field ordering and fail cleanly on a malformed ARN.
 
 This matters because **both modules take independent `region` inputs**: moving
 one without the other is now possible in either direction, including leaving
@@ -110,14 +114,17 @@ module "cognito" {
 }
 ```
 
-[`examples/complete-use1`](examples/complete-use1) shows this in full.
+[`examples/complete`](examples/complete) shows this in full, in `main-use1.tf`.
 
 ## Examples
 
-| Example | Provider Region | Resource Region |
-| --- | --- | --- |
-| [`complete`](examples/complete) | us-east-2 | us-east-2 — `region` not set |
-| [`complete-use1`](examples/complete-use1) | us-east-2 | us-east-1 — via `region` |
+A single example, [`complete`](examples/complete), deploys the module twice
+from one provider configuration:
+
+| File | Provider Region | `region` input | Resource Region |
+| --- | --- | --- | --- |
+| `main.tf` | us-east-2 | not set | us-east-2 |
+| `main-use1.tf` | us-east-2 | `"us-east-1"` | us-east-1 |
 
 ## Outputs
 

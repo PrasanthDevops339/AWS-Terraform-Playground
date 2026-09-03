@@ -48,16 +48,33 @@ by Terraform and stored in plaintext in this example's state; a real identity
 provider supplies its own metadata, which you commit and point
 `samlmetadatafile` at directly.
 
-## Region
+## Two deployments, two Regions
 
-This example sets **no** `region` input on either module, so the user pool, the
-Web ACL, and everything else land in the AWS provider's Region (us-east-2).
-That is the point of it — it is the baseline that proves the module's `region`
-support did not change behaviour for callers who do not use it.
+This directory deploys the module **twice**, from one provider configuration:
 
-Do not add `region` here. [`../complete-use1`](../complete-use1) is the
-cross-Region example; if this one also set `region`, nothing in the repo would
-cover the default path.
+| File | `region` input | Lands in |
+| --- | --- | --- |
+| [`main.tf`](main.tf) | not set | us-east-2 — the provider's Region |
+| [`main-use1.tf`](main-use1.tf) | `"us-east-1"` | us-east-1 |
+
+The provider is configured for us-east-2 only ([`version.tf`](version.tf)), and
+there are **no aliased providers**. Removing that boilerplate is the point of
+AWS provider 6.x enhanced region support.
+
+Both cases are covered in one apply:
+
+- `main.tf` proves the default path still works — a caller who never sets
+  `region` is unaffected.
+- `main-use1.tf` proves `region` actually moves resources, which is only
+  demonstrable because the provider Region differs from it.
+
+Do not set `region` in `main.tf`, and do not change the provider to us-east-1.
+Either one collapses the two cases into the same test and silently removes the
+coverage.
+
+`main-use1.tf` reuses the SAML certificate and metadata from
+[`saml.tf`](saml.tf) rather than generating a second one — one throwaway IdP
+identity serves both pools.
 
 ## Run
 
@@ -70,10 +87,33 @@ terraform apply
 ## Validating the result
 
 ```hcl
-user_pool_region = "us-east-2"
-provider_region  = "us-east-2"
+user_pool_region      = "us-east-2"   # main.tf         - follows the provider
+user_pool_region_use1 = "us-east-1"   # main-use1.tf    - moved by `region`
+provider_region       = "us-east-2"
 ```
 
-The two must be **equal** here. In [`../complete-use1`](../complete-use1) the
-same two outputs must **differ** — that pairing is what demonstrates the
-`region` input works and is genuinely optional.
+`user_pool_region` must **equal** `provider_region`; `user_pool_region_use1`
+must **differ** from it. That pairing is the whole assertion.
+
+If `user_pool_region_use1` comes back as us-east-2, `region` did not take
+effect — check that the AWS provider actually resolved to 6.x, since the
+resource-level `region` argument does not exist in 5.x.
+
+Confirm each pool's WAF association landed:
+
+```bash
+aws wafv2 get-web-acl-for-resource --region us-east-2 \
+  --resource-arn "$(terraform output -raw user_pool_arn)"
+
+aws wafv2 get-web-acl-for-resource --region us-east-1 \
+  --resource-arn "$(terraform output -raw user_pool_arn_use1)"
+```
+
+## Cleanup
+
+This directory creates **two** user pools and **two** Web ACLs.
+
+```bash
+terraform plan -destroy   # review every resource before destroying
+terraform destroy
+```
