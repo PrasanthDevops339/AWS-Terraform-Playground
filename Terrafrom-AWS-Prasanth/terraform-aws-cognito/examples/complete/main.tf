@@ -24,6 +24,21 @@ module "cognitotest" {
 
   cognito_name = "testcomplete"
   domain_name  = "testcomplete-${random_string.domain_suffix.result}"
+
+  # #########################################################################
+  # EXAMPLE ONLY - DO NOT COPY THIS LINE INTO APPLICATION CODE.
+  #
+  # The metadata this points at is built from a THROWAWAY SELF-SIGNED
+  # certificate generated in saml.tf. It exists only so this example can be
+  # applied without a real identity provider.
+  #
+  # In application code, point straight at your real IdP's metadata file:
+  #
+  #     samlmetadatafile = "${path.module}/files/metadata.xml"
+  #
+  # No tls_* resources, no local_file, no conditional below. See saml.tf.
+  # #########################################################################
+  #
   # DO NOT "simplify" this to local_file.saml_metadata.filename.
   #
   # That filename is a statically known string, so it crosses into the module

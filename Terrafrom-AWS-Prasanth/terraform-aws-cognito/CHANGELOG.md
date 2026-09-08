@@ -59,6 +59,12 @@ release.
   ARN field ordering and fail cleanly on a malformed ARN.
 - `data "aws_region" "current"` (taking `region = var.region`), the only new
   data source, supporting the Region precondition.
+- **`web_acl_association_create_timeout`** (default `20m`) and a `timeouts`
+  block on the association. A newly created Web ACL takes seconds to minutes to
+  propagate, and AWS returns `WAFUnavailableEntityException` until it has. The
+  provider retries inside this window, but its 5m default is not always enough
+  when the Web ACL is created in the same apply
+  ([provider issue #29080](https://github.com/hashicorp/terraform-provider-aws/issues/29080)).
 
 ### Examples
 

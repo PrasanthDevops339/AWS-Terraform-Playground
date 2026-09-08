@@ -1,4 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ###########################################################################
+  ####  EXAMPLE ONLY - FAKE IDENTITY PROVIDER. DO NOT USE IN AN APP.  ####
+  ###########################################################################
+
+  This is NOT real SAML metadata. It is rendered at apply time by
+  examples/complete/saml.tf around a THROWAWAY SELF-SIGNED certificate whose
+  private key sits in plaintext in Terraform state. It exists only so the
+  example module can be applied without a real identity provider.
+
+  Application teams: delete this template. Use the metadata XML your real IdP
+  (Entra ID, Okta, PingFederate, ADFS, ...) publishes, and point the module's
+  `samlmetadatafile` input at that file.
+-->
 <EntityDescriptor
     xmlns="urn:oasis:names:tc:SAML:2.0:metadata"
     entityID="${entity_id}">
@@ -10,7 +24,9 @@
     <KeyDescriptor use="signing">
       <KeyInfo xmlns="http://www.w3.org/2000/09/xmldsig#">
         <X509Data>
-          <X509Certificate>${signing_certificate}</X509Certificate>
+          <!-- EXAMPLE ONLY: throwaway self-signed cert from saml.tf, trusted by
+             nobody. A real IdP puts its own signing certificate here. -->
+        <X509Certificate>${signing_certificate}</X509Certificate>
         </X509Data>
       </KeyInfo>
     </KeyDescriptor>

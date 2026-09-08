@@ -1,5 +1,24 @@
 # Self-Signed SAML Signing Certificate in the Complete Example
 
+> ## ⛔ EXAMPLE SCAFFOLDING — NOT AN APPLICATION PATTERN
+>
+> **Every HCL snippet in this document is example-only. Do not copy any of it
+> into application code.** It exists so `examples/complete` can be applied
+> without a real identity provider.
+>
+> Application teams point `samlmetadatafile` at the metadata XML their real IdP
+> (Entra ID / Azure AD, Okta, PingFederate, ADFS …) publishes:
+>
+> ```hcl
+> samlmetadatafile = "${path.module}/files/metadata.xml" # issued by your IdP
+> ```
+>
+> No `tls_private_key`, no `tls_self_signed_cert`, no `local_file`, and none of
+> the plan-time deferral trickery in section 3. A Terraform-generated SAML
+> signing key is stored **in plaintext in state**, so anyone who can read state
+> can forge assertions for any user in the pool. That is acceptable for a
+> disposable example IdP and unacceptable anywhere else.
+
 How `examples/complete` stopped shipping an expiring certificate — **without
 changing the Cognito module at all** — and an honest account of the
 alternatives that were considered and rejected.
@@ -32,6 +51,8 @@ lapses. The fix has to remove the fixed expiry date, not reset it.
 key and a self-signed certificate on every run with the
 [`hashicorp/tls`](https://registry.terraform.io/providers/hashicorp/tls/latest/docs)
 provider, then renders the SAML metadata around it:
+
+**⛔ Example only — do not copy the block below into application code.**
 
 ```hcl
 resource "tls_private_key" "saml_signing" {

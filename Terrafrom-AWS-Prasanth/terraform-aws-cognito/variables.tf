@@ -12,6 +12,12 @@ variable "region" {
   }
 }
 
+variable "web_acl_association_create_timeout" {
+  description = "How long to keep retrying the WAF Web ACL association. A newly created Web ACL takes seconds to minutes to propagate, and AWS returns WAFUnavailableEntityException until it has; the provider retries within this window. Raise it if applies still fail on a freshly created Web ACL."
+  type        = string
+  default     = "20m"
+}
+
 variable "cognito_name" {
   description = "(Required) Name of the user pool"
   type        = string

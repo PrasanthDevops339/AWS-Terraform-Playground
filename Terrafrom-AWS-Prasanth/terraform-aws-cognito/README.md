@@ -41,6 +41,12 @@ module "cognito" {
   `aws_wafv2_web_acl_association`. Every user pool must be WAF-protected;
   there is no default. Source this from a shared `terraform-aws-waf` module
   instance's `arn` output.
+- `web_acl_association_create_timeout` (optional, default `"20m"`) — how long
+  to keep retrying the WAF association. A newly created Web ACL takes seconds to
+  minutes to propagate; AWS returns `WAFUnavailableEntityException` until it
+  has, and the provider's 5m default is not always enough when the Web ACL is
+  created in the same apply. Raise this rather than adding an aliased provider —
+  the region plumbing is not what fails here.
 - `region` (optional, default `null`) — AWS Region for the module's regional
   resources. When `null`, every resource uses the Region configured on the
   `aws` provider, which is the pre-existing behaviour. Set it to deploy the
@@ -125,6 +131,24 @@ from one provider configuration:
 | --- | --- | --- | --- |
 | `main.tf` | us-east-2 | not set | us-east-2 |
 | `main-use1.tf` | us-east-2 | `"us-east-1"` | us-east-1 |
+
+### ⛔ Do not copy the example's SAML setup
+
+The example **generates a throwaway self-signed SAML certificate** in
+[`examples/complete/saml.tf`](examples/complete/saml.tf) so it can be applied
+without a real identity provider. That is example scaffolding, **not** a
+pattern for application code — the signing key ends up in plaintext in
+Terraform state.
+
+In your application, point `samlmetadatafile` straight at the metadata XML your
+real IdP (Entra ID / Azure AD, Okta, PingFederate, ADFS …) publishes:
+
+```hcl
+samlmetadatafile = "${path.module}/files/metadata.xml" # issued by your IdP
+```
+
+No `tls_private_key`, no `tls_self_signed_cert`, no `local_file`, and none of
+the example's `local_file.saml_metadata.id == "" ? …` deferral expression.
 
 ## Outputs
 

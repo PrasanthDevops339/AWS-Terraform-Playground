@@ -170,6 +170,14 @@ resource "aws_wafv2_web_acl_association" "main" {
   resource_arn = aws_cognito_user_pool.main.arn
   web_acl_arn  = var.web_acl_arn
 
+  # A newly created Web ACL takes seconds-to-minutes to propagate, and AWS
+  # returns WAFUnavailableEntityException until it has. The provider retries
+  # inside this window; the 5m default is not always enough when the ACL is
+  # created in the same apply.
+  timeouts {
+    create = var.web_acl_association_create_timeout
+  }
+
   # A mismatched Web ACL fails at apply with an opaque AWS error; catch it here.
   lifecycle {
     precondition {

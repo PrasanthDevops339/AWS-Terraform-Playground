@@ -42,8 +42,14 @@ module "cognitotest_use1" {
   cognito_name = "testcompleteuse1"
   domain_name  = "testcompleteuse1-${random_string.domain_suffix_use1.result}"
 
-  # Same generated SAML metadata as the us-east-2 pool - see saml.tf. The `.id`
-  # routing is load-bearing; see the note in main.tf before changing it.
+  # #########################################################################
+  # EXAMPLE ONLY - DO NOT COPY THIS LINE INTO APPLICATION CODE.
+  # Same throwaway self-signed SAML metadata as the us-east-2 pool - see
+  # saml.tf. Application code points `samlmetadatafile` directly at the
+  # metadata file its real IdP issued, with no generation step.
+  # #########################################################################
+  #
+  # The `.id` routing is load-bearing; see the note in main.tf before changing it.
   samlmetadatafile = local_file.saml_metadata.id == "" ? "" : local_file.saml_metadata.filename
   app_client_name  = "appclienttestcompleteuse1"
   web_acl_arn      = module.waf_use1.arn
