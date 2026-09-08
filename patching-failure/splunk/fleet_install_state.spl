@@ -1,0 +1,6 @@
+index=aws_patching sourcetype="aws:ssm:patch:outcome" schema_version=2 record_type="invocation" operation="Install" earliest=-35d
+| sort 0 - _indextime
+| dedup account region event_id
+| sort 0 - _time - _indextime
+| dedup account region instance_id
+| table _time account region instance_id command_id patch_outcome status status_details recommended_action

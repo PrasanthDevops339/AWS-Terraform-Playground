@@ -1,279 +1,269 @@
-"""
-Patch outcome record writer -- minimal payload.
+"""Schema-v2 SSM patch outcomes; enrichment is optional, S3 delivery is not.
 
-Runs in every member account. Reads an SSM Run Command terminal-status event and
-writes one small, flat JSON object to the central patching bucket (cross-account).
-
-Emits a record for EVERY terminal outcome, not only failures. Without a success
-record, searching Splunk for an instance that patched cleanly returns nothing --
-and "nothing" is indistinguishable from "never in scope" or "the pipeline broke".
-Ops must be able to look up any instance and see patched / failed / not-attempted
-with the command id.
-
-    patch_outcome = "patched"        the document ran and succeeded
-                    "failed"         it ran on the instance and failed
-                    "not-attempted"  the instance was never touched
-
-Sizing principle
-----------------
-Success needs no enrichment at all: it worked, there is nothing to explain. Zero
-API calls, smallest record, highest volume.
-
-For `failed` instances, AWS-RunPatchBaseline stdout already exists and carries the
-error, the patch summary, everything -- and it is already indexed in Splunk. Those
-records only need the join key and the classification.
-
-For `not-attempted` instances (Terminated / Undeliverable) NO stdout object was
-ever written, because the instance was never touched. That record is the only
-evidence the instance was in scope and got skipped, so it must stand alone.
-
-Record size is therefore inverse to stdout availability. Nothing stdout already
-carries is duplicated here.
-
-Rules
------
-  * The write MUST happen. Every enrichment call is independent and best-effort;
-    a failure degrades the record, it never loses it.
-  * The S3 put is deliberately NOT wrapped in try/except -- an exception is how
-    the Lambda async failure destination gets exercised.
-  * Fields are flat. Splunk needs no FIELDALIAS stanzas.
+The Lambda runs on the main Python thread in the managed Linux runtime. A
+POSIX timer bounds all enrichment (including SDK work) to ten seconds, leaving
+at least twenty seconds of the configured timeout for writing the record.
 """
 
 import json
 import logging
 import os
+import signal
 import time
+from collections import OrderedDict
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 import boto3
 from botocore.config import Config
 
-LOG = logging.getLogger()
+LOG = logging.getLogger(__name__)
 LOG.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
-_CFG = Config(retries={"max_attempts": 3, "mode": "adaptive"})
-S3 = boto3.client("s3", config=Config(retries={"max_attempts": 5, "mode": "adaptive"}))
+# SDK retries must not multiply the handler's short eventual-consistency retry.
+_CFG = Config(connect_timeout=1, read_timeout=2,
+              retries={"total_max_attempts": 1, "mode": "standard"})
+S3 = boto3.client("s3", config=Config(
+    connect_timeout=2, read_timeout=3,
+    retries={"total_max_attempts": 3, "mode": "standard"},
+))
 SSM = boto3.client("ssm", config=_CFG)
 EC2 = boto3.client("ec2", config=_CFG)
 
 BUCKET = os.environ["BUCKET_NAME"]
 PREFIX = os.environ["S3_PREFIX"].strip("/")
 KMS_KEY_ARN = os.environ.get("KMS_KEY_ARN") or None
-# Only when the bucket has ACLs ENABLED. With BucketOwnerEnforced, leave unset.
 OBJECT_ACL = os.environ.get("OBJECT_ACL") or None
 ENRICH = os.environ.get("ENRICH", "true").lower() == "true"
-
-# Turn OFF if Splunk already has an instance-id -> owner lookup. Doing the
-# enrichment at search time saves ~160 bytes per record, one API call per
-# invocation, and avoids stale tags frozen into an immutable object.
 INCLUDE_TAGS = os.environ.get("INCLUDE_INSTANCE_TAGS", "true").lower() == "true"
+SCHEMA_VERSION = 2
+ENRICHMENT_SECONDS = 10.0
+WRITE_RESERVE_SECONDS = 20.0
+CALL_SECONDS = 3.0
+CACHE_TTL_SECONDS = 15.0
+_CMD_CACHE = OrderedDict()
 
-SCHEMA_VERSION = 1
-
-# StatusDetails -> the only distinction that changes what a team does next.
-#
-# "Terminated" means the parent command breached its error threshold and the
-# system cancelled this invocation: the instance was NEVER TOUCHED. Under the
-# zero-tolerance rate-control policy this is routine, high-volume, and a
-# FAILURE -- the instance is unpatched. It needs a re-run, not an investigation.
-NOT_ATTEMPTED = {
-    "Terminated", "Undeliverable", "Delivery Timed Out",
-    "Invalid Platform", "Access Denied", "Cancelled",
+CANONICAL = {
+    "success": "Success", "failed": "Failed", "cancelled": "Cancelled",
+    "timedout": "TimedOut", "terminated": "Terminated",
+    "undeliverable": "Undeliverable", "deliverytimedout": "Delivery Timed Out",
+    "executiontimedout": "Execution Timed Out", "invalidplatform": "Invalid Platform",
+    "accessdenied": "Access Denied", "incomplete": "Incomplete",
+    "rateexceeded": "Rate Exceeded", "noinstancesintag": "No Instances In Tag",
 }
-FAILED = {"Failed", "Execution Timed Out"}
-SUCCEEDED = {"Success"}
-
-# ListCommands results keyed by command-id. The ~37 invocations of one halted
-# command share warm containers and all ask about the same command.
-_CMD_CACHE = {}
-
-
-# ---------------------------------------------------------------- helpers
-
-def _safe(value, default="unknown", limit=128):
-    """S3-key-safe token. Never let an event field inject a path separator."""
-    if not value:
-        return default
-    cleaned = "".join(c if (c.isalnum() or c in "-_.") else "-" for c in str(value))
-    return cleaned[:limit] or default
+NOT_ATTEMPTED = {"terminated", "undeliverable", "deliverytimedout",
+                 "invalidplatform", "accessdenied"}
+CONTEXT_FIELDS = {
+    "TargetCount": "target_count", "ErrorCount": "error_count",
+    "CompletedCount": "completed_count", "MaxErrors": "max_errors",
+    "MaxConcurrency": "max_concurrency", "Comment": "command_comment",
+}
 
 
-def _classify(status_details, event_status):
-    """-> patched | failed | not-attempted | unknown
+class _EnrichmentDeadline(BaseException):
+    """Bypass best-effort Exception handlers and stop the whole enrichment phase."""
 
-    Success is decided from the event alone; no enrichment is needed or made.
-    """
-    if event_status in SUCCEEDED:
-        return "patched"
-    if status_details in NOT_ATTEMPTED:
+
+def _expired(signum, frame):
+    raise _EnrichmentDeadline()
+
+
+@contextmanager
+def _budget(context):
+    remaining = context.get_remaining_time_in_millis() / 1000 if context else 30.0
+    seconds = max(0.0, min(ENRICHMENT_SECONDS, remaining - WRITE_RESERVE_SECONDS))
+    deadline = time.monotonic() + seconds
+    if seconds == 0:
+        yield deadline
+        return
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    previous_timer = signal.getitimer(signal.ITIMER_REAL)
+    started = time.monotonic()
+    signal.signal(signal.SIGALRM, _expired)
+    try:
+        signal.setitimer(signal.ITIMER_REAL, seconds)
+        yield deadline
+    except _EnrichmentDeadline:
+        LOG.warning("Enrichment budget exhausted; writing available fields")
+    except Exception:
+        LOG.exception("Enrichment unavailable; writing available fields")
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+        if previous_timer[0]:
+            signal.setitimer(signal.ITIMER_REAL,
+                             max(0.001, previous_timer[0] - (time.monotonic() - started)),
+                             previous_timer[1])
+
+
+def _normalize(value):
+    return "".join(c for c in str(value or "").lower() if c.isalnum())
+
+
+def _operation(parameters):
+    value = (parameters or {}).get("Operation", [])
+    value = value[0] if isinstance(value, list) and value else value
+    return {"scan": "Scan", "install": "Install"}.get(str(value).lower(), "unknown")
+
+
+def _classify(status_details, event_status, operation):
+    event = _normalize(event_status)
+    details = _normalize(status_details)
+    if event == "success":
+        return {"Scan": "scanned", "Install": "patched"}.get(operation, "unknown")
+    if event in NOT_ATTEMPTED or details in NOT_ATTEMPTED:
         return "not-attempted"
-    if status_details in FAILED:
-        return "failed"
-    # Fall back to the coarse event status when enrichment was unavailable.
-    if status_details is None and event_status in ("Undeliverable", "Cancelled"):
-        return "not-attempted"
-    if status_details is None and event_status in ("Failed", "TimedOut"):
+    # Only an aggregate invocation result establishes a coarse Failed outcome.
+    # Cancelled/TimedOut events alone cannot establish whether execution started.
+    if details in {"failed", "executiontimedout"} or event == "executiontimedout":
         return "failed"
     return "unknown"
 
 
-def _build_key(event):
-    detail = event.get("detail") or {}
-    ts = event.get("time") or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    day = ts[:10]                                   # dt= partition
-    compact = ts.replace("-", "").replace(":", "")
-    return (
-        f"{PREFIX}/dt={day}/{_safe(event.get('account'))}/"
-        f"{_safe(detail.get('status'))}_"
-        f"{_safe(detail.get('instance-id'), 'no-instance')}_"
-        f"{_safe(detail.get('command-id'), 'no-command')}_"
-        f"{compact}_{_safe(event.get('id'))}.json"
-    )
+def _safe(value):
+    return "".join(c if c.isascii() and (c.isalnum() or c in "-_.") else "-"
+                   for c in str(value))[:128]
 
 
-# ------------------------------------------------------------ enrichment
-# None of these raise.
-
-def _status_details(command_id, instance_id):
-    """The one field the EventBridge event does not carry, and the only source
-    of `Terminated`.
-
-    The Run Command API is eventually consistent, so a terminal-status event can
-    briefly outrun the queryable invocation record. One short retry covers it.
-    """
+def _read(method, kwargs, accept, deadline):
+    """Retry missing/eventually-consistent results; all calls share one deadline."""
     for attempt in range(3):
+        if deadline - time.monotonic() < CALL_SECONDS:
+            return None
         try:
-            r = SSM.get_command_invocation(CommandId=command_id, InstanceId=instance_id)
-            return r.get("StatusDetails")
-        except Exception as exc:                                  # noqa: BLE001
-            LOG.warning("get_command_invocation attempt %s: %s", attempt + 1, exc)
-            time.sleep(2 ** attempt)
+            result = accept(method(**kwargs))
+            if result is not None:
+                return result
+        except Exception as exc:
+            LOG.warning("%s unavailable: %s", getattr(method, "__name__", "enrichment API"), exc)
+            code = getattr(exc, "response", {}).get("Error", {}).get("Code", "")
+            if code in {"AccessDenied", "AccessDeniedException", "InvalidCommandId", "InvalidInstanceId"}:
+                return None
+        if attempt < 2:
+            delay = 0.25 * (2 ** attempt)
+            if deadline - time.monotonic() < CALL_SECONDS + delay:
+                return None
+            time.sleep(delay)
     return None
 
 
-def _command_fields(command_id):
-    """Six fields that make a not-attempted record self-documenting: a reader
-    needs no knowledge of the rate-control policy to understand it."""
-    if command_id in _CMD_CACHE:
-        return _CMD_CACHE[command_id]
-    out = {}
-    try:
-        cmds = SSM.list_commands(CommandId=command_id).get("Commands") or []
-        if cmds:
-            c = cmds[0]
-            out = {
-                "target_count": c.get("TargetCount"),
-                "error_count": c.get("ErrorCount"),
-                "completed_count": c.get("CompletedCount"),
-                "max_errors": c.get("MaxErrors"),
-                "max_concurrency": c.get("MaxConcurrency"),
-                "command_comment": c.get("Comment") or None,
-            }
-    except Exception as exc:                                      # noqa: BLE001
-        LOG.warning("list_commands failed: %s", exc)
-    if len(_CMD_CACHE) > 100:
-        _CMD_CACHE.clear()
-    _CMD_CACHE[command_id] = out
-    return out
-
-
-def _ping_status(instance_id):
-    """Usually IS the answer for a not-attempted instance."""
-    try:
-        info = SSM.describe_instance_information(
-            Filters=[{"Key": "InstanceIds", "Values": [instance_id]}]
-        ).get("InstanceInformationList") or []
-        return info[0].get("PingStatus") if info else None
-    except Exception as exc:                                      # noqa: BLE001
-        LOG.warning("describe_instance_information failed: %s", exc)
+def _status_details(command_id, instance_id, deadline):
+    def accept(response):
+        for invocation in response.get("CommandInvocations", []):
+            if invocation.get("CommandId") != command_id or invocation.get("InstanceId") != instance_id:
+                continue
+            status = _normalize(invocation.get("StatusDetails"))
+            if status in CANONICAL:
+                return CANONICAL[status]
         return None
 
-
-def _tags(instance_id):
-    """Only when Splunk has no instance-id -> owner lookup of its own."""
-    wanted = {"Name": "instance_name", "Application": "tag_application",
-              "Owner": "tag_owner", "patch:wave": "tag_patch_wave"}
-    try:
-        r = EC2.describe_instances(InstanceIds=[instance_id])
-        for res in r.get("Reservations", []):
-            for inst in res.get("Instances", []):
-                return {wanted[t["Key"]]: t["Value"]
-                        for t in inst.get("Tags", []) if t["Key"] in wanted}
-        return {}
-    except Exception as exc:                                      # noqa: BLE001
-        LOG.warning("describe_instances failed: %s", exc)
-        return {}
+    return _read(SSM.list_command_invocations,
+                 {"CommandId": command_id, "InstanceId": instance_id, "Details": False},
+                 accept, deadline)
 
 
-# ---------------------------------------------------------------- handler
+def _command(command_id, deadline):
+    cached = _CMD_CACHE.get(command_id)
+    if cached and time.monotonic() < cached[0]:
+        _CMD_CACHE.move_to_end(command_id)
+        return cached[1]
+    _CMD_CACHE.pop(command_id, None)
+
+    def accept(response):
+        return next((c for c in response.get("Commands", [])
+                     if c.get("CommandId") == command_id and _operation(c.get("Parameters")) != "unknown"), None)
+
+    command = _read(SSM.list_commands, {"CommandId": command_id}, accept, deadline)
+    if command is not None:
+        _CMD_CACHE[command_id] = (time.monotonic() + CACHE_TTL_SECONDS, command)
+        if len(_CMD_CACHE) > 128:
+            _CMD_CACHE.popitem(last=False)
+    return command or {}
+
+
+def _enrich(rec, deadline):
+    # Classification takes precedence over supplementary metadata on failures.
+    if rec["record_type"] == "invocation" and _normalize(rec["status"]) not in NOT_ATTEMPTED | {"success", "executiontimedout"}:
+        rec["status_details"] = _status_details(rec["command_id"], rec["instance_id"], deadline)
+    outcome = _classify(rec["status_details"], rec["status"], rec["operation"])
+    needs_context = outcome in {"unknown", "not-attempted"}
+    if rec["operation"] == "unknown" or needs_context or rec["record_type"] == "command":
+        command = _command(rec["command_id"], deadline)
+        if rec["operation"] == "unknown":
+            rec["operation"] = _operation(command.get("Parameters"))
+        outcome = _classify(rec["status_details"], rec["status"], rec["operation"])
+        needs_context = outcome in {"unknown", "not-attempted"}
+        if needs_context or rec["record_type"] == "command":
+            rec.update({target: command[source] for source, target in CONTEXT_FIELDS.items() if source in command})
+    if needs_context and rec["record_type"] == "invocation":
+        info = _read(SSM.describe_instance_information,
+                     {"Filters": [{"Key": "InstanceIds", "Values": [rec["instance_id"]]}]},
+                     lambda r: r.get("InstanceInformationList", []), deadline)
+        rec["agent_ping_status"] = info[0].get("PingStatus") if info else None
+        if INCLUDE_TAGS and rec["instance_id"].startswith("i-"):
+            reservations = _read(EC2.describe_instances, {"InstanceIds": [rec["instance_id"]]},
+                                 lambda r: r.get("Reservations", []), deadline)
+            wanted = {"Name": "instance_name", "Application": "tag_application",
+                      "Owner": "tag_owner", "patch:wave": "tag_patch_wave"}
+            for reservation in reservations or []:
+                for instance in reservation.get("Instances", []):
+                    if instance.get("InstanceId") == rec["instance_id"]:
+                        rec.update({wanted[t["Key"]]: t["Value"] for t in instance.get("Tags", []) if t["Key"] in wanted})
+
 
 def handler(event, context):
-    key = _build_key(event)
+    source = event.get("source")
+    detail_type = event.get("detail-type")
+    is_canary = source == "custom.patch-canary" and detail_type == "canary"
+    types = {"EC2 Command Invocation Status-change Notification": "invocation",
+             "EC2 Command Status-change Notification": "command"}
+    if not is_canary and (source != "aws.ssm" or detail_type not in types):
+        raise ValueError("Expected an SSM status event or a patch canary; unwrap failure destinations before replay")
+    for field in ("id", "time", "account", "region"):
+        if not isinstance(event.get(field), str) or not event[field]:
+            raise ValueError(f"Event is missing {field}")
+    timestamp = datetime.fromisoformat(event["time"].replace("Z", "+00:00"))
+    if timestamp.tzinfo is None:
+        raise ValueError("Event time must include a timezone")
+    timestamp = timestamp.astimezone(timezone.utc)
     detail = event.get("detail") or {}
-    command_id = detail.get("command-id")
-    instance_id = detail.get("instance-id")
-    event_status = detail.get("status")
-
-    is_success = event_status in SUCCEEDED
-
-    # Success costs ZERO API calls -- the event alone is conclusive, and this is
-    # the highest-volume class by a wide margin.
-    status_details = "Success" if is_success else None
-    if ENRICH and not is_success and command_id and instance_id:
-        status_details = _status_details(command_id, instance_id)
-
-    patch_outcome = _classify(status_details, event_status)
-
+    record_type = "canary" if is_canary else types[detail_type]
+    if not is_canary and (not detail.get("command-id") or not detail.get("status") or not detail.get("document-name")):
+        raise ValueError("SSM event is missing command-id, document-name or status")
+    if record_type == "invocation" and not detail.get("instance-id"):
+        raise ValueError("Invocation event is missing instance-id")
+    status = None if is_canary else detail["status"]
+    normalized = _normalize(status)
     rec = {
         "schema_version": SCHEMA_VERSION,
-        "record_type": "invocation" if instance_id else "command",
-        "account": event.get("account"),
-        "region": event.get("region"),
-        "instance_id": instance_id,
-        "command_id": command_id,
-        "document": detail.get("document-name"),
-        "event_time": event.get("time"),
-        "patch_outcome": patch_outcome,
-        "status": event_status,
-        "status_details": status_details,
+        "record_type": record_type,
+        "event_id": event["id"],
+        "account": event["account"],
+        "region": event["region"],
+        "command_id": None if is_canary else detail["command-id"],
+        "document": None if is_canary else detail["document-name"],
+        "event_time": timestamp.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        "operation": "unknown" if is_canary else _operation(detail.get("parameters")),
+        "status": status,
+        "status_details": CANONICAL.get(normalized) if normalized in NOT_ATTEMPTED | {"success", "executiontimedout"} else None,
     }
-    if not instance_id:
-        rec.pop("instance_id")
-
-    # Extra context ONLY where stdout does not exist to supply it.
-    #   patched -> nothing to explain
-    #   failed  -> a full stdout object is already in Splunk; join on command_id
-    #   not-attempted -> NO stdout was ever written; this record must stand alone
-    needs_context = patch_outcome not in ("patched", "failed")
-
-    if ENRICH and needs_context and command_id:
-        rec.update(_command_fields(command_id))
-
-    if ENRICH and needs_context and instance_id:
-        rec["agent_ping_status"] = _ping_status(instance_id)
-
-    if ENRICH and INCLUDE_TAGS and instance_id:
-        rec.update(_tags(instance_id))
-
+    if record_type == "invocation":
+        rec["instance_id"] = detail["instance-id"]
+    if ENRICH and not is_canary:
+        with _budget(context) as deadline:
+            _enrich(rec, deadline)
+    # A command summary or a canary never makes an instance-level patch claim.
+    rec["patch_outcome"] = (_classify(rec["status_details"], rec["status"], rec["operation"])
+                            if record_type == "invocation" else "unknown")
+    key = (f"{PREFIX}/dt={timestamp:%Y-%m-%d}/{_safe(event['account'])}/"
+           f"{_safe(event['region'])}/{record_type}_{_safe(event['id'])}.json")
     body = (json.dumps(rec, separators=(",", ":"), default=str) + "\n").encode("utf-8")
-
-    args = {
-        "Bucket": BUCKET,
-        "Key": key,
-        "Body": body,
-        "ContentType": "application/json",
-    }
+    args = {"Bucket": BUCKET, "Key": key, "Body": body, "ContentType": "application/json"}
     if KMS_KEY_ARN:
-        args["ServerSideEncryption"] = "aws:kms"
-        args["SSEKMSKeyId"] = KMS_KEY_ARN
+        args.update(ServerSideEncryption="aws:kms", SSEKMSKeyId=KMS_KEY_ARN)
     if OBJECT_ACL:
         args["ACL"] = OBJECT_ACL
-
-    # Deliberately NOT wrapped. An exception here is how the Lambda async failure
-    # destination gets exercised -- swallowing it would make a broken bucket
-    # policy or a revoked KMS grant invisible.
+    # Do not swallow this exception: Lambda must retry and send its failure record.
     S3.put_object(**args)
-
-    LOG.info("patch outcome record %s (%s bytes): %s",
-             key, len(body), json.dumps(rec, default=str))
+    LOG.info("patch outcome %s (%s bytes): %s", key, len(body), json.dumps(rec))
     return {"bucket": BUCKET, "key": key, "bytes": len(body)}

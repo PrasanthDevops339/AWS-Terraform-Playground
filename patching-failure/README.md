@@ -1,66 +1,52 @@
-# Patch Outcome Observability
+# Patch outcome observability
 
-Terraform for shipping per-instance SSM patch outcome records (patched /
-failed / not-attempted) from every AFT-vended member account into the
-central patching S3 bucket, for Splunk.
+Capture delivered SSM patch-command terminal events from AFT member accounts
+into an existing central S3/Splunk pipeline. Distinguish installation success,
+scan success, execution failure, non-delivery and unresolved outcomes.
 
-- `PAYLOAD-SPEC-patch-outcome-record.md` -- the record shape, the three
-  outcome classes, and the searches ops runs against it.
-- `BUILD-INSTRUCTIONS-infrastructure.md` -- the infrastructure design and
-  the constraints behind every choice in the module.
-- `modules/patch-outcome-observability/` -- the Terraform module. Deployed
-  once per region, per account.
-- `central-prerequisites/README.md` -- **the runbook for the central
-  account**: the two statements the bucket owner must merge (bucket policy +
-  KMS key policy), the preflight checks that decide whether they are enough,
-  the Deny patterns that silently override them, and how to verify the write
-  path end to end. This repo never creates or modifies the bucket, its
-  policy, or the key.
-- `examples/aft-account-customizations/main.tf` -- example wiring for an AFT
-  account-customizations repo.
-- `splunk/` -- `props.conf` sourcetype stanza and the
-  `patch_outcome_action.csv` lookup table for the `recommended_action`
-  field.
+- [Architecture](ARCHITECTURE.md): account identity, regional resources and ownership boundaries.
+- [Build and rollout](BUILD-INSTRUCTIONS-infrastructure.md): local tests, source pinning and dormant deployment.
+- [Lambda deployment module](modules/patch-outcome-observability/README.md): writer IAM role, policy outputs and one event pipeline per patching region.
+- [Payload contract](PAYLOAD-SPEC-patch-outcome-record.md): schema version 2 and interpretation.
+- [Central prerequisites](central-prerequisites/README.md): bucket/key policy checks and queue replay.
+- [Splunk integration](splunk/README.md): lookup installation and ready-to-use searches.
 
-## Quick start
+The deployment module sources `Terrafrom-AWS-Prasanth/terraform-aws-lambda` and
+`terraform-aws-sqs` without modifying them. The central archive bucket, key,
+policies and existing ingestion remain externally owned.
 
-```hcl
-module "patch_outcome_observability" {
-  source = "./modules/patch-outcome-observability"
+## Start with the two-region example
 
-  archive_bucket_name = "<central bucket>"
-  archive_kms_key_arn = "<central CMK arn>"
-  rules_enabled       = false   # deploy dormant, arm later
-}
+`examples/aft-account-customizations/` calls the same module in two regions.
+The primary deployment creates the Lambda execution role and common permissions;
+the secondary sets `create_writer_role=false` and reuses `module.primary.writer_role_arn`.
+Both pipelines and the role belong to one member-account state. Sample tfvars use dummy member accounts
+`222233334444` and `333344445555`, and central account `111122223333`.
+They are documentation/test values, not deployment targets. The provider's
+`allowed_account_ids` guard must match the real member account before deployment.
+
+```bash
+terraform -chdir=examples/aft-account-customizations init -backend=false
+terraform -chdir=examples/aft-account-customizations validate
+terraform -chdir=examples/aft-account-customizations test
+python3 -m unittest discover -s tests -v
 ```
 
-## Changes required on the central bucket and its KMS key
+All checked-in Terraform tests mock every AWS provider. Production roots must
+use the organization's existing AFT backend and an immutable Git source commit.
+The root example defaults to dormant SSM rules; the optional manual canary stays
+available. The primary Lambda deployment outputs `central_prerequisites`: merge
+these statements into the **existing** central bucket and KMS policies. No central
+bucket/key is created, imported or replaced, and no separate IAM module or repository
+is required.
 
-Nothing here works until the central account merges two policy statements —
-the Lambda writes cross-account, so its own IAM permissions are only half the
-grant:
+The default deployment includes its own role (`create_writer_role=true`) and
+requires `organization_id` to render matching central statements. Additional
+regions reuse the role. The AFT example includes `moved` blocks for the prior
+separate account-module layout in the same state. The code was reported undeployed;
+any existing state still needs a reviewed migration plan. See the build guide for
+compatibility with earlier names and schema-1 consumers.
 
-| # | Where | Change | Required? |
-|---|---|---|---|
-| 1 | Central **bucket policy** | `Allow s3:PutObject` on `<bucket>/patchingsolution-events/outcomes/*`, conditioned on `aws:PrincipalOrgID` **and** `ArnLike aws:PrincipalArn = arn:aws:iam::*:role/patch-outcome-s3-writer` | **Always** |
-| 2 | Central **KMS key policy** | `Allow kms:GenerateDataKey` / `kms:Encrypt` / `kms:DescribeKey`, same two conditions, no `kms:Decrypt` | Only if the bucket is SSE-KMS with a customer-managed key |
-
-Both are rendered fully resolved by the module
-(`terraform output -json central_prerequisites | jq`), and
-`central-prerequisites/sample-*.json` holds complete copy-and-edit policy
-documents — the full bucket policy and the full KMS key policy with the new
-statement merged in among plausible existing ones, plus the ACL and
-`kms:ViaService` variants.
-
-Three answers are needed back from the bucket owner before going live: the
-bucket's **Object Ownership** setting (decides `archive_object_acl`), the
-bucket's **own KMS key ARN** or "SSE-S3, no key" (decides
-`archive_kms_key_arn`), and whether any existing **Deny** catches the writer
-role. `central-prerequisites/README.md` has the commands, the failure modes —
-including the two that fail silently with HTTP 200 — and the canary-based
-verification.
-
-Read the module's own README for the full variable list, resource shape,
-and outstanding open questions that need answers before going live in
-production (Object Ownership on the bucket, explicit Denies, SCP/VPC
-constraints, Splunk field extraction, and the instance-tag lookup).
+A `patched` result means the installation command succeeded, not that the node
+is fully compliant. A `scanned` result installs nothing. SSM event delivery is
+best effort; this module does not reconcile missing events.

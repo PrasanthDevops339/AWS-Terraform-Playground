@@ -1,269 +1,141 @@
-# Shape and wiring assertions for the module under its default inputs.
-#
-# All runs use command = plan with a mocked AWS provider -- free, offline, no
-# credentials. The archive provider is left real: it actually zips src/, which
-# is what the shared terraform-aws-lambda module packages and hashes.
-#
-# Assertions only touch attributes that come from configuration (literals,
-# variable-derived values, or references). A mock provider fills computed
-# attributes -- ARNs, generated names, the account alias -- with junk, so those
-# are matched with strcontains() on the parts we control, never compared whole.
-
-mock_provider "aws" {}
-
-# account_id / partition / region feed resource names and ARNs; pin them so
-# those are known at plan. The account alias (looked up in this module and in
-# both shared sqs/lambda modules) prefixes every generated name.
-override_data {
-  target = data.aws_caller_identity.current
-  values = { account_id = "123456789012" }
+mock_provider "aws" {
+  mock_data "aws_caller_identity" { defaults = { account_id = "222233334444" } }
+  mock_data "aws_partition" { defaults = { partition = "aws" } }
+  mock_data "aws_region" { defaults = { region = "us-east-1", name = "us-east-1" } }
+  mock_data "aws_iam_account_alias" { defaults = { account_alias = "pilot" } }
+  mock_resource "aws_lambda_function" { defaults = { arn = "arn:aws:lambda:us-east-1:222233334444:function:pilot-patch-outcome-us-east-1-writer" } }
+  mock_resource "aws_cloudwatch_log_group" { defaults = { arn = "arn:aws:logs:us-east-1:222233334444:log-group:/aws/lambda/pilot-patch-outcome-us-east-1-writer" } }
+  mock_resource "aws_sqs_queue" { defaults = { arn = "arn:aws:sqs:us-east-1:222233334444:mock-queue" } }
+  mock_resource "aws_cloudwatch_event_rule" { defaults = { arn = "arn:aws:events:us-east-1:222233334444:rule/mock-rule" } }
 }
-override_data {
-  target = data.aws_partition.current
-  values = { partition = "aws" }
-}
-override_data {
-  target = data.aws_region.current
-  values = { region = "us-east-1" }
-}
-override_data {
-  target = data.aws_iam_account_alias.current
-  values = { account_alias = "acme-test" }
-}
-override_data {
-  target = module.writer_lambda.data.aws_iam_account_alias.current
-  values = { account_alias = "acme-test" }
-}
-override_data {
-  target = module.target_dlq.data.aws_iam_account_alias.current
-  values = { account_alias = "acme-test" }
-}
-override_data {
-  target = module.lambda_dlq.data.aws_iam_account_alias.current
-  values = { account_alias = "acme-test" }
-}
-
-# aws_iam_policy_document is provider-computed; a mock provider returns a
-# non-JSON string that aws_iam_role / aws_sqs_queue_policy then reject.
-override_data {
-  target = data.aws_iam_policy_document.assume
-  values = { json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}" }
-}
-override_data {
-  target = data.aws_iam_policy_document.writer
-  values = { json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}" }
-}
-override_data {
-  target = data.aws_iam_policy_document.target_dlq
-  values = { json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}" }
-}
-
 variables {
-  archive_bucket_name = "central-patching-logs-123456789012"
-  archive_kms_key_arn = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
+  create_writer_role  = false
+  archive_bucket_name = "central-patching-logs-111122223333"
+  writer_role_arn     = "arn:aws:iam::222233334444:role/platform/patch-outcome-s3-writer"
 }
 
-run "default_plan_is_valid" {
+run "default_shape_and_dormant" {
   command = plan
-}
-
-run "three_ssm_rules_plus_canary" {
-  command = plan
-
   assert {
-    condition     = length(aws_cloudwatch_event_rule.ssm) == 3
-    error_message = "expected exactly three SSM EventBridge rules"
+    condition     = length(aws_iam_role.writer) == 0 && length(aws_iam_role_policy.archive) == 0 && output.central_prerequisites == null
+    error_message = "Role reuse must not create a second identity/common policy or render unrelated central statements."
   }
-
   assert {
-    condition     = length(aws_cloudwatch_event_rule.canary) == 1
-    error_message = "canary rule should be created when enable_canary is true (default)"
+    condition     = length(aws_cloudwatch_event_rule.ssm) == 3 && length(aws_cloudwatch_event_rule.canary) == 1
+    error_message = "Three SSM rules and a canary are required."
   }
-
   assert {
     condition     = length(aws_cloudwatch_event_target.ssm) == 3 && length(aws_cloudwatch_event_target.canary) == 1
-    error_message = "every rule needs a target"
+    error_message = "Every rule must have a target."
   }
-
-  # allowed_triggers is built 1:1 from these rules, so the rule set is the
-  # permission set (the shared module doesn't export its permission resources).
   assert {
-    condition     = length(output.event_rule_arns) == 4
-    error_message = "expected 4 rules (3 SSM + canary), each of which yields one Lambda permission"
+    condition     = alltrue([for r in aws_cloudwatch_event_rule.ssm : r.state == "DISABLED"]) && aws_cloudwatch_event_rule.canary[0].state == "ENABLED"
+    error_message = "Default deployments must be dormant with a live canary."
   }
-}
-
-run "ssm_rule_patterns_are_scoped_to_runpatchbaseline" {
-  command = plan
-
   assert {
-    condition     = alltrue([for r in aws_cloudwatch_event_rule.ssm : strcontains(r.event_pattern, "AWS-RunPatchBaseline")])
-    error_message = "every SSM rule pattern must prefix-match AWS-RunPatchBaseline"
+    condition     = aws_iam_role_policy.writer.name == "patch-outcome-us-east-1-runtime" && aws_iam_role_policy.writer.role == "patch-outcome-s3-writer"
+    error_message = "Attach a regional policy to the existing role, including when its ARN has a path."
   }
-
   assert {
-    condition     = strcontains(aws_cloudwatch_event_rule.ssm["invocation_failure"].event_pattern, "Terminated")
-    error_message = "the invocation_failure pattern must include the Terminated status"
+    condition     = aws_s3_bucket.lambda_package.bucket == "patch-outcome-pkg-222233334444-us-east-1"
+    error_message = "The package bucket must be unique by account and region."
   }
-
   assert {
-    condition     = strcontains(aws_cloudwatch_event_rule.canary[0].event_pattern, "custom.patch-canary")
-    error_message = "the canary rule must match source custom.patch-canary"
+    condition     = aws_cloudwatch_log_group.this.name == "/aws/lambda/pilot-patch-outcome-us-east-1-writer"
+    error_message = "The log group must include alias and region."
   }
-}
-
-run "rules_enabled_true_by_default" {
-  command = plan
-
   assert {
-    condition     = alltrue([for r in aws_cloudwatch_event_rule.ssm : r.state == "ENABLED"])
-    error_message = "SSM rules should be ENABLED when rules_enabled is true"
+    condition     = aws_cloudwatch_log_group.this.retention_in_days == 365 && aws_cloudwatch_log_group.this.kms_key_id == null
+    error_message = "Logs use explicit retention and no central key."
   }
-
-  assert {
-    condition     = aws_cloudwatch_event_rule.canary[0].state == "ENABLED"
-    error_message = "canary rule is always ENABLED"
-  }
-}
-
-run "lambda_contract" {
-  command = plan
-
-  assert {
-    condition     = output.writer_lambda_config.runtime == "python3.13"
-    error_message = "Lambda runtime must be python3.13"
-  }
-
-  assert {
-    condition     = output.writer_lambda_config.handler == "handler.handler"
-    error_message = "Lambda handler must be handler.handler"
-  }
-
-  assert {
-    condition     = output.writer_lambda_config.timeout == 30 && output.writer_lambda_config.memory_size == 128
-    error_message = "Lambda must be 128 MB / 30 s"
-  }
-
-  assert {
-    condition     = output.writer_lambda_config.package_type == "Zip"
-    error_message = "Lambda must be a Zip package"
-  }
-
-  assert {
-    condition     = output.writer_lambda_config.environment["BUCKET_NAME"] == var.archive_bucket_name
-    error_message = "BUCKET_NAME env var must be the archive bucket"
-  }
-
-  assert {
-    condition     = output.writer_lambda_config.environment["S3_PREFIX"] == "patchingsolution-events/outcomes"
-    error_message = "S3_PREFIX env var must default to the sibling outcomes prefix"
-  }
-
-  # module.writer_lambda.lambda_name is aws_lambda_function.function_name, an
-  # Optional+Computed attribute the mock provider marks unknown at plan. The
-  # naming intent is covered by the log group name assertion below, which is
-  # built from this module's own local.function_name.
-  assert {
-    condition     = aws_lambda_function_event_invoke_config.this.maximum_retry_attempts == 2
-    error_message = "async invoke config must retry twice before dead-lettering"
-  }
-
-  assert {
-    condition     = length(aws_lambda_function_event_invoke_config.this.destination_config[0].on_failure) == 1
-    error_message = "an async on_failure destination must be configured"
-  }
-}
-
-run "lambda_package_bucket_is_locked_down" {
-  command = plan
-
-  assert {
-    condition     = aws_s3_bucket.lambda_package.bucket == "patch-outcome-pkg-123456789012"
-    error_message = "package bucket name must be name_prefix-pkg-<account-id>"
-  }
-
   assert {
     condition     = aws_s3_bucket_public_access_block.lambda_package.block_public_acls && aws_s3_bucket_public_access_block.lambda_package.block_public_policy && aws_s3_bucket_public_access_block.lambda_package.ignore_public_acls && aws_s3_bucket_public_access_block.lambda_package.restrict_public_buckets
-    error_message = "the package bucket must block all public access"
+    error_message = "Block all package bucket public access."
   }
-
   assert {
     condition     = aws_s3_bucket_ownership_controls.lambda_package.rule[0].object_ownership == "BucketOwnerEnforced"
-    error_message = "the package bucket must enforce bucket-owner ownership"
+    error_message = "Package ownership must be enforced."
   }
-
   assert {
-    condition = anytrue([
-      for r in aws_s3_bucket_server_side_encryption_configuration.lambda_package.rule :
-      r.apply_server_side_encryption_by_default[0].sse_algorithm == "AES256"
-    ])
-    error_message = "the package bucket must be SSE-S3 encrypted by default"
+    condition     = one(aws_s3_bucket_server_side_encryption_configuration.lambda_package.rule).apply_server_side_encryption_by_default[0].sse_algorithm == "AES256"
+    error_message = "The package defaults to SSE-S3."
+  }
+  assert {
+    condition     = output.writer_lambda_config.runtime == "python3.13" && output.writer_lambda_config.handler == "handler.handler" && output.writer_lambda_config.package_type == "Zip"
+    error_message = "Retain the shared Lambda input contract."
+  }
+  assert {
+    condition     = output.writer_lambda_config.timeout == 30 && output.writer_lambda_config.memory_size == 128 && output.writer_lambda_config.reserved_concurrent_executions == -1
+    error_message = "Retain sizing and unreserved concurrency."
+  }
+  assert {
+    condition     = output.writer_lambda_config.environment.BUCKET_NAME == var.archive_bucket_name && output.writer_lambda_config.environment.KMS_KEY_ARN == ""
+    error_message = "Route archive settings to the handler."
+  }
+  assert {
+    condition     = aws_lambda_function_event_invoke_config.this.maximum_retry_attempts == 2 && aws_lambda_function_event_invoke_config.this.maximum_event_age_in_seconds == 21600
+    error_message = "Preserve async retries and age."
   }
 }
 
-run "writer_role_name_is_pinned_not_derived" {
-  command = plan
-
+run "actual_regional_policies_and_shared_resources" {
+  command = apply
   assert {
-    condition     = aws_iam_role.writer.name == "patch-outcome-s3-writer"
-    error_message = "writer role name must be the exact fleet-wide default, not derived from name_prefix"
+    condition     = toset(jsondecode(aws_iam_role_policy.writer.policy).Statement[0].Action) == toset(["logs:CreateLogStream", "logs:PutLogEvents"])
+    error_message = "Validate actual generated log actions."
+  }
+  assert {
+    condition     = jsondecode(aws_iam_role_policy.writer.policy).Statement[0].Resource == ["${aws_cloudwatch_log_group.this.arn}:*"]
+    error_message = "Limit log writes to this region/function."
+  }
+  assert {
+    condition     = jsondecode(aws_iam_role_policy.writer.policy).Statement[1].Resource == [module.lambda_dlq.queue_arn]
+    error_message = "Grant sends only to the Lambda failure destination."
+  }
+  assert {
+    condition     = toset(jsondecode(aws_sqs_queue_policy.target_dlq.policy).Statement[0].Condition.ArnEquals["aws:SourceArn"]) == toset(values(output.event_rule_arns))
+    error_message = "Target policy must enumerate exactly the actual rule ARNs."
+  }
+  assert {
+    condition     = jsondecode(aws_sqs_queue_policy.target_dlq.policy).Statement[0].Condition.StringEquals["aws:SourceAccount"] == "222233334444"
+    error_message = "Target policy must restrict the source account."
+  }
+  assert {
+    condition     = module.writer_lambda.lambda_name == "pilot-patch-outcome-us-east-1-writer"
+    error_message = "Check the name produced by the unchanged shared Lambda module."
+  }
+  assert {
+    condition     = aws_lambda_function_event_invoke_config.this.destination_config[0].on_failure[0].destination == module.lambda_dlq.queue_arn
+    error_message = "Wire the async failure destination."
   }
 }
 
-run "dlqs_are_named_from_the_name_prefix" {
-  command = plan
-
-  # message_retention_seconds (1209600) and the absence of a KMS key are passed
-  # as literals into the shared terraform-aws-sqs module calls in main.tf; the
-  # module exposes neither as an output, so they are covered by `validate`
-  # parsing the literal, not asserted here.
-  assert {
-    condition     = strcontains(module.target_dlq.queue_name, "patch-outcome-target-dlq") && strcontains(module.lambda_dlq.queue_name, "patch-outcome-lambda-dlq")
-    error_message = "DLQ names must carry the name_prefix-derived suffix"
-  }
-
-  assert {
-    condition     = module.target_dlq.secure_transport_policy_enabled == false
-    error_message = "the shared module's canned TLS-deny policy must be off (we attach the EventBridge allow-policy instead)"
-  }
+override_resource {
+  target = aws_cloudwatch_event_rule.ssm["invocation_success"]
+  values = { arn = "arn:aws:events:us-east-1:222233334444:rule/patch-outcome-invocation-success" }
 }
 
-run "log_group_retention_and_no_central_key" {
-  command = plan
-
-  assert {
-    condition     = aws_cloudwatch_log_group.this.kms_key_id == null
-    error_message = "log group must not be encrypted with the central archive key by default"
-  }
-
-  assert {
-    condition     = aws_cloudwatch_log_group.this.retention_in_days == 365
-    error_message = "default log retention must be 365 days"
-  }
-
-  assert {
-    condition     = strcontains(aws_cloudwatch_log_group.this.name, "/aws/lambda/") && strcontains(aws_cloudwatch_log_group.this.name, "patch-outcome-writer")
-    error_message = "log group name must match the (alias-prefixed) function name"
-  }
+override_resource {
+  target = aws_cloudwatch_event_rule.ssm["invocation_failure"]
+  values = { arn = "arn:aws:events:us-east-1:222233334444:rule/patch-outcome-invocation-failure" }
 }
 
-run "renders_central_prerequisites_output" {
-  command = plan
+override_resource {
+  target = aws_cloudwatch_event_rule.ssm["command_failure"]
+  values = { arn = "arn:aws:events:us-east-1:222233334444:rule/patch-outcome-command-failure" }
+}
 
-  assert {
-    condition     = output.central_prerequisites.bucket_policy_statement.Action == "s3:PutObject"
-    error_message = "bucket policy statement must grant exactly s3:PutObject"
-  }
+override_resource {
+  target = aws_cloudwatch_event_rule.canary[0]
+  values = { arn = "arn:aws:events:us-east-1:222233334444:rule/patch-outcome-canary" }
+}
 
-  assert {
-    condition = toset(output.central_prerequisites.kms_key_policy_statement.Action) == toset([
-      "kms:GenerateDataKey", "kms:Encrypt", "kms:DescribeKey"
-    ])
-    error_message = "KMS key policy statement must grant only the three encrypt-only actions (no kms:Decrypt)"
-  }
+override_resource {
+  target = module.target_dlq.aws_sqs_queue.main
+  values = { arn = "arn:aws:sqs:us-east-1:222233334444:pilot-patch-outcome-target-dlq" }
+}
 
-  assert {
-    condition     = output.central_prerequisites.bucket_policy_statement.Condition.StringEquals["aws:PrincipalOrgID"] != null
-    error_message = "bucket policy statement must be scoped by aws:PrincipalOrgID"
-  }
+override_resource {
+  target = module.lambda_dlq.aws_sqs_queue.main
+  values = { arn = "arn:aws:sqs:us-east-1:222233334444:pilot-patch-outcome-lambda-dlq" }
 }

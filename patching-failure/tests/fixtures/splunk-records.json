@@ -1,0 +1,89 @@
+[
+  {
+    "account": "222233334444",
+    "region": "us-east-1",
+    "command_id": "11111111-1111-1111-1111-111111111111",
+    "instance_id": "i-0123456789abcdef0",
+    "sourcetype": "aws:ssm:patch:outcome",
+    "record_type": "invocation",
+    "schema_version": 2,
+    "event_id": "i-0123456789abcdef0-failure",
+    "operation": "Install",
+    "patch_outcome": "failed",
+    "status_details": "Failed"
+  },
+  {
+    "account": "222233334444",
+    "region": "us-east-1",
+    "command_id": "11111111-1111-1111-1111-111111111111",
+    "instance_id": "i-0123456789abcdef0",
+    "sourcetype": "aws:ssm:patch:outcome",
+    "record_type": "invocation",
+    "schema_version": 2,
+    "event_id": "i-0123456789abcdef0-failure",
+    "operation": "Install",
+    "patch_outcome": "failed",
+    "status_details": "Failed"
+  },
+  {
+    "account": "222233334444",
+    "region": "us-east-1",
+    "command_id": "11111111-1111-1111-1111-111111111111",
+    "instance_id": "i-0123456789abcdef0",
+    "sourcetype": "aws:ssm:patch:stdout",
+    "_raw": "stdout for i-0123456789abcdef0"
+  },
+  {
+    "account": "222233334444",
+    "region": "us-east-1",
+    "command_id": "11111111-1111-1111-1111-111111111111",
+    "instance_id": "i-00000000000000001",
+    "sourcetype": "aws:ssm:patch:outcome",
+    "record_type": "invocation",
+    "schema_version": 2,
+    "event_id": "i-00000000000000001-failure",
+    "operation": "Install",
+    "patch_outcome": "failed",
+    "status_details": "Execution Timed Out"
+  },
+  {
+    "account": "222233334444",
+    "region": "us-east-1",
+    "command_id": "11111111-1111-1111-1111-111111111111",
+    "instance_id": "i-00000000000000001",
+    "sourcetype": "aws:ssm:patch:outcome",
+    "record_type": "invocation",
+    "schema_version": 2,
+    "event_id": "i-00000000000000001-failure",
+    "operation": "Install",
+    "patch_outcome": "failed",
+    "status_details": "Execution Timed Out"
+  },
+  {
+    "account": "222233334444",
+    "region": "us-east-1",
+    "command_id": "11111111-1111-1111-1111-111111111111",
+    "instance_id": "i-00000000000000001",
+    "sourcetype": "aws:ssm:patch:stdout",
+    "_raw": "stdout for i-00000000000000001"
+  },
+  {
+    "account": "222233334444",
+    "region": "us-east-1",
+    "sourcetype": "aws:ssm:patch:outcome",
+    "record_type": "canary",
+    "schema_version": 2,
+    "event_id": "canary",
+    "patch_outcome": "unknown"
+  },
+  {
+    "account": "222233334444",
+    "region": "us-east-1",
+    "sourcetype": "aws:ssm:patch:outcome",
+    "record_type": "command",
+    "schema_version": 2,
+    "event_id": "summary",
+    "command_id": "11111111-1111-1111-1111-111111111111",
+    "patch_outcome": "unknown"
+  }
+]

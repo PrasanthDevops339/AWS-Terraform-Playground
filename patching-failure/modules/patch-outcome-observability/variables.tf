@@ -8,18 +8,17 @@ variable "name_prefix" {
     error_message = "name_prefix must be lowercase alphanumeric/hyphen, 3-41 chars, starting with alphanumeric."
   }
 
-  # Longest derived name is "${name_prefix}-invocation-success" (rule) and
-  # "${name_prefix}-target-dlq" (SQS, hard 80-char limit). 41 + 17 keeps both safe.
+  # Final account-alias-prefixed names are checked in main.tf.
   nullable = false
 }
 
 variable "archive_bucket_name" {
-  description = "Name of the existing central S3 bucket that stores patch outcome records. This module never creates or modifies the bucket, its policy, or its KMS key -- it only writes to it and renders the statements the bucket owner must merge (see the central_prerequisites output)."
+  description = "Name of the existing central S3 bucket that stores patch outcome records. This module never creates or modifies the bucket, its policy, or its KMS key -- resolved central policy statements are output for the existing resource owners to merge."
   type        = string
 
   validation {
-    condition     = length(var.archive_bucket_name) > 0
-    error_message = "archive_bucket_name is required."
+    condition     = can(regex("^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$", var.archive_bucket_name))
+    error_message = "archive_bucket_name must be a valid 3-63 character S3 bucket name."
   }
 
   nullable = false
@@ -36,8 +35,8 @@ variable "archive_s3_prefix" {
   }
 
   validation {
-    condition     = length(var.archive_s3_prefix) > 0
-    error_message = "archive_s3_prefix must not be empty."
+    condition     = length(var.archive_s3_prefix) > 0 && !can(regex("[?*]", var.archive_s3_prefix))
+    error_message = "archive_s3_prefix must not be empty or contain IAM wildcards."
   }
 
   nullable = false
@@ -50,7 +49,7 @@ variable "archive_kms_key_arn" {
 }
 
 variable "lambda_package_bucket_name" {
-  description = "Override name for the per-account S3 bucket that holds the Lambda deployment zip (the shared terraform-aws-lambda module deploys from S3, not a local file). Leave null to use the computed name '<name_prefix>-pkg-<account-id>'. Set this if an SCP or naming standard requires a specific bucket name."
+  description = "Override name for the per-account, per-region S3 bucket that holds the Lambda deployment zip (the shared terraform-aws-lambda module deploys from S3, not a local file). Leave null to use the computed name '<name_prefix>-pkg-<account-id>-<region>'. Set this if an SCP or naming standard requires a specific bucket name."
   type        = string
   default     = null
 
@@ -61,27 +60,14 @@ variable "lambda_package_bucket_name" {
 }
 
 variable "archive_object_acl" {
-  description = "Object ACL to set on PutObject, e.g. bucket-owner-full-control. Set this ONLY if the central bucket has S3 ACLs enabled (not BucketOwnerEnforced). See open question 1 in BUILD-INSTRUCTIONS: with ACLs enabled and no bucket-owner-full-control, every PutObject still returns 200, objects silently accumulate, and the bucket owner gets AccessDenied reading its own objects -- nothing errors anywhere. Leave null when the bucket uses BucketOwnerEnforced."
+  description = "Optional bucket-owner-full-control ACL. Prefer null for BucketOwnerEnforced; ACL-enabled cross-account buckets may require it."
   type        = string
   default     = null
-}
-
-variable "writer_role_name" {
-  description = "Exact IAM role name for the Lambda execution role. Must be IDENTICAL in every member account: the central bucket policy and KMS key policy authorize this role by ArnLike arn:<partition>:iam::*:role/<name>. Do not derive it from name_prefix, append a suffix, or let Terraform randomize it."
-  type        = string
-  default     = "patch-outcome-s3-writer"
 
   validation {
-    condition     = !can(regex("[*/]", var.writer_role_name))
-    error_message = "writer_role_name must not contain '*' or '/'."
+    condition     = var.archive_object_acl == null || var.archive_object_acl == "bucket-owner-full-control"
+    error_message = "archive_object_acl must be null or bucket-owner-full-control."
   }
-
-  validation {
-    condition     = length(var.writer_role_name) >= 1 && length(var.writer_role_name) <= 64
-    error_message = "writer_role_name must be 1-64 characters (IAM role name limit)."
-  }
-
-  nullable = false
 }
 
 variable "patch_document_name_prefix" {
@@ -100,7 +86,7 @@ variable "patch_document_name_prefix" {
 variable "invocation_failure_statuses" {
   description = "detail.status values that match the EC2 Command Invocation Status-change Notification failure rule. Do NOT remove Terminated: under zero-tolerance rate control, a Terminated instance was never touched and is unpatched, which is a failure, not a benign skip."
   type        = list(string)
-  default     = ["Failed", "TimedOut", "Cancelled", "Undeliverable", "Terminated"]
+  default     = ["Failed", "TimedOut", "Cancelled", "Undeliverable", "Terminated", "DeliveryTimedOut", "Delivery Timed Out", "ExecutionTimedOut", "Execution Timed Out", "InvalidPlatform", "Invalid Platform", "AccessDenied", "Access Denied"]
 
   validation {
     condition     = contains(var.invocation_failure_statuses, "Terminated")
@@ -113,7 +99,7 @@ variable "invocation_failure_statuses" {
 variable "command_failure_statuses" {
   description = "detail.status values that match the EC2 Command Status-change Notification failure rule."
   type        = list(string)
-  default     = ["Failed", "TimedOut", "Cancelled", "Undeliverable", "Incomplete", "AccessDenied", "DeliveryTimedOut"]
+  default     = ["Failed", "TimedOut", "Cancelled", "Undeliverable", "Incomplete", "AccessDenied", "Access Denied", "DeliveryTimedOut", "Delivery Timed Out", "RateExceeded", "Rate Exceeded", "No Instances In Tag"]
 
   validation {
     condition     = length(var.command_failure_statuses) > 0
@@ -124,9 +110,9 @@ variable "command_failure_statuses" {
 }
 
 variable "rules_enabled" {
-  description = "Whether the three SSM EventBridge rules are ENABLED. Set false to deploy this module dormant (cost at rest is $0) and arm it later by flipping this variable. Does not affect the canary rule, which is always enabled independent of this flag."
+  description = "Whether the three SSM EventBridge rules are ENABLED. Defaults to a dormant deployment; stored packages, logs and canary requests can still incur charges. Does not affect the canary rule, which is always enabled independent of this flag."
   type        = bool
-  default     = true
+  default     = false
   nullable    = false
 }
 
@@ -138,7 +124,7 @@ variable "enable_canary" {
 }
 
 variable "enable_enrichment" {
-  description = "Whether the Lambda makes the enrichment API calls (GetCommandInvocation, ListCommands, DescribeInstanceInformation) needed to classify not-attempted outcomes. Do NOT disable in production: it is the only source of the Terminated status detail, without which not-attempted instances are indistinguishable from any other failure."
+  description = "Enable bounded SSM lookups for aggregate invocation status, command operation and optional context. Disable only if degraded unknown outcomes are acceptable."
   type        = bool
   default     = true
   nullable    = false
@@ -192,14 +178,68 @@ variable "log_level" {
   nullable = false
 }
 
+variable "tags" {
+  description = "Tags applied to all taggable resources created by this module."
+  type        = map(string)
+  default     = {}
+  nullable    = false
+}
+
+variable "create_writer_role" {
+  description = "Create the Lambda execution role and common archive/enrichment permissions with this deployment. Set false in additional regions and supply the first deployment's writer_role_arn."
+  type        = bool
+  default     = true
+  nullable    = false
+}
+
+variable "writer_role_arn" {
+  description = "Existing same-account Lambda execution role, required only when create_writer_role is false. Its owner must provide the shared archive/enrichment permissions."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.create_writer_role ? var.writer_role_arn == null : var.writer_role_arn != null
+    error_message = "Leave writer_role_arn null when creating the role; supply it when create_writer_role is false."
+  }
+
+  validation {
+    condition     = var.writer_role_arn == null ? true : can(regex("^arn:[a-z0-9-]+:iam::[0-9]{12}:role/([A-Za-z0-9+=,.@_-]+/)*[A-Za-z0-9+=,.@_-]{1,64}$", var.writer_role_arn))
+    error_message = "writer_role_arn must be an IAM role ARN, including any role path."
+  }
+}
+
+variable "lambda_package_kms_key_arn" {
+  description = "Optional member-account, same-region CMK for the deployment bucket. The deployment principal needs S3/KMS package upload/read permissions. Independent of the CloudWatch Logs key."
+  type        = string
+  default     = null
+}
+
+variable "writer_role_name" {
+  description = "Exact IAM role name for the Lambda execution role. Must be IDENTICAL in every member account: the central bucket policy and KMS key policy authorize this role by ArnLike arn:<partition>:iam::*:role/<name>. Do not derive it from name_prefix, append a suffix, or let Terraform randomize it."
+  type        = string
+  default     = "patch-outcome-s3-writer"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9+=,.@_-]+$", var.writer_role_name))
+    error_message = "writer_role_name must contain only IAM role-name characters (no slash or wildcard)."
+  }
+
+  validation {
+    condition     = length(var.writer_role_name) >= 1 && length(var.writer_role_name) <= 64
+    error_message = "writer_role_name must be 1-64 characters (IAM role name limit)."
+  }
+
+  nullable = false
+}
+
 variable "iam_role_path" {
   description = "IAM path for the writer role, in case SCPs or permissions boundaries mandate one."
   type        = string
   default     = "/"
 
   validation {
-    condition     = can(regex("^/.*/$|^/$", var.iam_role_path))
-    error_message = "iam_role_path must begin and end with '/' (e.g. '/' or '/service-role/')."
+    condition     = can(regex("^/([A-Za-z0-9+=,.@_-]+/)*$", var.iam_role_path))
+    error_message = "iam_role_path must be / or slash-delimited IAM path segments without wildcards."
   }
 
   nullable = false
@@ -211,9 +251,18 @@ variable "permissions_boundary_arn" {
   default     = null
 }
 
-variable "tags" {
-  description = "Tags applied to all taggable resources created by this module."
-  type        = map(string)
-  default     = {}
-  nullable    = false
+variable "organization_id" {
+  description = "AWS Organizations ID for the resolved policy statements to merge into the existing central bucket and key policies. Required when create_writer_role is true; no central statements are rendered when reusing a role."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.create_writer_role ? var.organization_id != null : true
+    error_message = "organization_id is required when creating the writer role and rendering central prerequisites."
+  }
+
+  validation {
+    condition     = var.organization_id == null ? true : can(regex("^o-[a-z0-9]{10,32}$", var.organization_id)) && var.organization_id != "o-xxxxxxxxxx"
+    error_message = "organization_id must be an Organizations ID (o- followed by 10-32 lowercase letters/digits), not the template placeholder."
+  }
 }

@@ -2,11 +2,14 @@
   "Sid": "AllowPatchOutcomeWritersFromOrg",
   "Effect": "Allow",
   "Principal": "*",
-  "Action": ["s3:PutObject", "s3:PutObjectAcl"],
-  "Resource": "arn:aws:s3:::central-patching-logs-bucket/patchingsolution-events/outcomes/*",
+  "Action": [
+    "s3:PutObject",
+    "s3:PutObjectAcl"
+  ],
+  "Resource": "arn:aws:s3:::central-patching-logs-111122223333/patchingsolution-events/outcomes/*",
   "Condition": {
     "StringEquals": {
-      "aws:PrincipalOrgID": "o-abcd1234ef",
+      "aws:PrincipalOrgID": "o-example1234",
       "s3:x-amz-acl": "bucket-owner-full-control"
     },
     "ArnLike": {

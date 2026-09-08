@@ -1,0 +1,6 @@
+index=aws_patching sourcetype="aws:ssm:patch:outcome" schema_version=2 record_type="invocation" earliest=-35d
+| sort 0 - _indextime
+| dedup account region event_id
+| sort 0 - _time - _indextime
+| dedup account region command_id instance_id
+| stats count AS observed_invocations count(eval(patch_outcome="patched")) AS patched count(eval(patch_outcome="scanned")) AS scanned count(eval(patch_outcome="failed")) AS failed count(eval(patch_outcome="not-attempted")) AS not_attempted count(eval(patch_outcome="unknown")) AS unknown BY account region command_id

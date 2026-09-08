@@ -22,7 +22,7 @@ output "writer_lambda_config" {
 }
 
 output "lambda_package_bucket" {
-  description = "Name of the per-account S3 bucket holding the Lambda deployment zip."
+  description = "Name of the regional member-account S3 bucket holding the Lambda deployment zip."
   value       = aws_s3_bucket.lambda_package.id
 }
 
@@ -32,8 +32,9 @@ output "lambda_log_group_name" {
 }
 
 output "writer_role_arn" {
-  description = "ARN of the Lambda execution role. Its name must match arn:<partition>:iam::*:role/<writer_role_name> in the central bucket and KMS key policies."
-  value       = aws_iam_role.writer.arn
+  description = "ARN of the created or reused Lambda execution role, including its path. Waits for common permissions before additional regions use it."
+  value       = local.writer_role_arn
+  depends_on  = [aws_iam_role_policy.archive]
 }
 
 output "target_dlq_url" {
@@ -42,7 +43,7 @@ output "target_dlq_url" {
 }
 
 output "lambda_dlq_url" {
-  description = "URL of the queue that catches Lambda-ran-and-threw failures (bucket policy, KMS grant, S3 errors)."
+  description = "URL of the queue that catches Lambda asynchronous failure invocation records, including exhausted retries and expired events."
   value       = module.lambda_dlq.queue_url
 }
 
@@ -59,29 +60,32 @@ output "canary_command" {
 }
 
 output "central_prerequisites" {
-  description = "The two statements the CENTRAL bucket owner must merge into the bucket policy and KMS key policy. This module does not create or modify the bucket, its policy, or the KMS key -- see central-prerequisites/README.md for the same content with instructions."
-  value = {
+  description = "Resolved statements for the central owners to merge. The KMS statement is null for SSE-S3. Null when reusing a role. No central resources are managed here."
+  value = var.create_writer_role ? {
     bucket_policy_statement = {
       Sid       = "AllowPatchOutcomeWritersFromOrg"
       Effect    = "Allow"
       Principal = "*"
-      Action    = "s3:PutObject"
-      Resource  = "arn:${local.partition}:s3:::${var.archive_bucket_name}/${var.archive_s3_prefix}/*"
-      Condition = {
-        StringEquals = { "aws:PrincipalOrgID" = "o-xxxxxxxxxx" }
-        ArnLike      = { "aws:PrincipalArn" = "arn:${local.partition}:iam::*:role/${var.writer_role_name}" }
-      }
+      Action    = local.s3_actions
+      Resource  = local.archive_object_arn
+      Condition = merge(local.central_condition, {
+        StringEquals = merge(local.central_condition.StringEquals,
+          var.archive_object_acl == null ? {} : { "s3:x-amz-acl" = var.archive_object_acl }
+        )
+      })
     }
-    kms_key_policy_statement = {
+    kms_key_policy_statement = var.archive_kms_key_arn == null ? null : {
       Sid       = "AllowPatchOutcomeWritersFromOrg"
       Effect    = "Allow"
       Principal = "*"
-      Action    = ["kms:GenerateDataKey", "kms:Encrypt", "kms:DescribeKey"]
+      Action    = local.kms_actions
       Resource  = "*"
-      Condition = {
-        StringEquals = { "aws:PrincipalOrgID" = "o-xxxxxxxxxx" }
-        ArnLike      = { "aws:PrincipalArn" = "arn:${local.partition}:iam::*:role/${var.writer_role_name}" }
-      }
+      Condition = local.central_condition
     }
-  }
+  } : null
+}
+
+output "writer_role_created" {
+  description = "Whether this deployment owns the shared Lambda execution role and common permissions."
+  value       = var.create_writer_role
 }

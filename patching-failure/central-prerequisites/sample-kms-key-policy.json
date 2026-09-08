@@ -1,53 +1,19 @@
 {
-  "Version": "2012-10-17",
-  "Id": "central-patching-cmk-policy",
-  "Statement": [
-    {
-      "Sid": "EnableIAMUserPermissions",
-      "Effect": "Allow",
-      "Principal": { "AWS": "arn:aws:iam::111111111111:root" },
-      "Action": "kms:*",
-      "Resource": "*"
+  "Sid": "AllowPatchOutcomeWritersFromOrg",
+  "Effect": "Allow",
+  "Principal": "*",
+  "Action": [
+    "kms:GenerateDataKey",
+    "kms:Encrypt",
+    "kms:DescribeKey"
+  ],
+  "Resource": "*",
+  "Condition": {
+    "StringEquals": {
+      "aws:PrincipalOrgID": "o-example1234"
     },
-    {
-      "Sid": "AllowKeyAdministrators",
-      "Effect": "Allow",
-      "Principal": { "AWS": "arn:aws:iam::111111111111:role/KeyAdministrator" },
-      "Action": [
-        "kms:Create*",
-        "kms:Describe*",
-        "kms:Enable*",
-        "kms:List*",
-        "kms:Put*",
-        "kms:Update*",
-        "kms:Revoke*",
-        "kms:Disable*",
-        "kms:Get*",
-        "kms:Delete*",
-        "kms:ScheduleKeyDeletion",
-        "kms:CancelKeyDeletion"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Sid": "ExistingS3ToFirehoseReader",
-      "Effect": "Allow",
-      "Principal": { "AWS": "arn:aws:iam::111111111111:role/s3tofirehose-ingest" },
-      "Action": ["kms:Decrypt", "kms:DescribeKey"],
-      "Resource": "*"
-    },
-    {
-      "Sid": "AllowPatchOutcomeWritersFromOrg",
-      "Effect": "Allow",
-      "Principal": "*",
-      "Action": ["kms:GenerateDataKey", "kms:Encrypt", "kms:DescribeKey"],
-      "Resource": "*",
-      "Condition": {
-        "StringEquals": { "aws:PrincipalOrgID": "o-abcd1234ef" },
-        "ArnLike": {
-          "aws:PrincipalArn": "arn:aws:iam::*:role/patch-outcome-s3-writer"
-        }
-      }
+    "ArnLike": {
+      "aws:PrincipalArn": "arn:aws:iam::*:role/patch-outcome-s3-writer"
     }
-  ]
+  }
 }

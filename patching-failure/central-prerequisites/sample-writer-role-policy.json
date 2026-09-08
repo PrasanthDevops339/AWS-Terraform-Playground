@@ -2,44 +2,48 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "Logs",
-      "Effect": "Allow",
-      "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
-      "Resource": "arn:aws:logs:us-east-1:222222222222:log-group:/aws/lambda/myalias-patch-outcome-writer:*"
-    },
-    {
       "Sid": "S3WriteOnly",
       "Effect": "Allow",
-      "Action": "s3:PutObject",
-      "Resource": "arn:aws:s3:::central-patching-logs-bucket/patchingsolution-events/outcomes/*"
+      "Action": [
+        "s3:PutObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::central-patching-logs-111122223333/patchingsolution-events/outcomes/*"
+      ]
     },
     {
       "Sid": "KmsEncryptOnly",
       "Effect": "Allow",
-      "Action": ["kms:GenerateDataKey", "kms:Encrypt", "kms:DescribeKey"],
-      "Resource": "arn:aws:kms:us-east-1:111111111111:key/1234abcd-12ab-34cd-56ef-1234567890ab"
-    },
-    {
-      "Sid": "LambdaDlq",
-      "Effect": "Allow",
-      "Action": "sqs:SendMessage",
-      "Resource": "arn:aws:sqs:us-east-1:222222222222:myalias-patch-outcome-lambda-dlq"
+      "Action": [
+        "kms:GenerateDataKey",
+        "kms:Encrypt",
+        "kms:DescribeKey"
+      ],
+      "Resource": [
+        "arn:aws:kms:us-east-1:111122223333:key/00000000-0000-0000-0000-000000000000"
+      ]
     },
     {
       "Sid": "SsmReadOnly",
       "Effect": "Allow",
       "Action": [
-        "ssm:GetCommandInvocation",
+        "ssm:ListCommandInvocations",
         "ssm:ListCommands",
         "ssm:DescribeInstanceInformation"
       ],
-      "Resource": "*"
+      "Resource": [
+        "*"
+      ]
     },
     {
       "Sid": "Ec2DescribeForTags",
       "Effect": "Allow",
-      "Action": "ec2:DescribeInstances",
-      "Resource": "*"
+      "Action": [
+        "ec2:DescribeInstances"
+      ],
+      "Resource": [
+        "*"
+      ]
     }
   ]
 }

@@ -1,6 +1,7 @@
 modules/**/build/
 .terraform/
-.terraform.lock.hcl
+modules/**/.terraform.lock.hcl
+!examples/aft-account-customizations/.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
 crash.log

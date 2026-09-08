@@ -1,0 +1,5 @@
+index=aws_patching (sourcetype="aws:ssm:patch:outcome" OR sourcetype="aws:ssm:patch:stdout") earliest=-35d
+| where sourcetype="aws:ssm:patch:stdout" OR (schema_version=2 AND record_type="invocation")
+| eval is_outcome=if(sourcetype="aws:ssm:patch:outcome",1,0)
+| stats values(eval(if(is_outcome=1,patch_outcome,null()))) AS outcomes values(eval(if(is_outcome=1,status_details,null()))) AS reasons values(eval(if(is_outcome=1,event_id,null()))) AS event_ids values(eval(if(is_outcome=0,_raw,null()))) AS stdout BY account region command_id instance_id
+| where mvfind(outcomes,"^failed$")>=0

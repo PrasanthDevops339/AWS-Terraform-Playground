@@ -4,22 +4,17 @@ data "aws_partition" "current" {}
 data "aws_region" "current" {}
 
 locals {
-  # Provider floor is now >= 6.0.0 (raised by the shared terraform-aws-sqs
-  # module), where data.aws_region exposes .region -- so the ARN-splitting
-  # workaround the 5.x/6.x straddle needed is no longer required.
-  partition  = data.aws_partition.current.partition
-  region     = data.aws_region.current.region
-  account_id = data.aws_caller_identity.current.account_id
-
-  # The shared terraform-aws-lambda module prefixes every function name with the
-  # account alias, so the real function -- and therefore its auto-created log
-  # group -- is "<alias>-<name_prefix>-writer". This module owns that log group
-  # explicitly (for retention), so the name must match exactly.
-  function_name = "${data.aws_iam_account_alias.current.account_alias}-${var.name_prefix}-writer"
-
+  partition        = data.aws_partition.current.partition
+  region           = data.aws_region.current.region
+  account_id       = data.aws_caller_identity.current.account_id
+  account_alias    = data.aws_iam_account_alias.current.account_alias
+  lambda_name      = "${var.name_prefix}-${local.region}-writer"
+  function_name    = "${local.account_alias}-${local.lambda_name}"
+  writer_role_arn  = var.create_writer_role ? local.created_writer_role_arn : coalesce(var.writer_role_arn, "invalid")
+  writer_role_name = var.create_writer_role ? aws_iam_role.writer[0].name : element(reverse(split("/", coalesce(var.writer_role_arn, "invalid"))), 0)
   lambda_package_bucket = coalesce(
     var.lambda_package_bucket_name,
-    "${var.name_prefix}-pkg-${local.account_id}",
+    "${var.name_prefix}-pkg-${local.account_id}-${local.region}",
   )
 
   rule_definitions = {
@@ -37,12 +32,8 @@ locals {
     }
   }
 
-  # The writer function's core configuration, declared here rather than inline
-  # in the module block below. The shared terraform-aws-lambda module exports
-  # only lambda_name / lambda_arn / lambda_s3_key -- it deliberately does not
-  # re-export what it was handed -- so this local is what the tests assert on.
-  # Every field is configuration-derived (literal or variable), so it is fully
-  # known at plan: the assertions run offline against a mock provider.
+  # Configuration contract passed to the unchanged shared Lambda module.
+  # It is also exposed for callers and offline tests.
   writer_lambda_config = {
     runtime       = "python3.13"
     handler       = "handler.handler"
@@ -56,7 +47,7 @@ locals {
 
     ephemeral_storage = 512
 
-    # The shared module maps null -> unreserved; -1 is its sentinel for that.
+    # AWS uses -1 for unreserved concurrency; map the wrapper null explicitly.
     reserved_concurrent_executions = var.reserved_concurrency == null ? -1 : var.reserved_concurrency
 
     environment = {
@@ -92,7 +83,7 @@ locals {
 }
 
 # --------------------------------------------------------------------------
-# Lambda deployment-package bucket -- one per member account. The shared
+# Lambda deployment-package bucket -- one per member account and region. The shared
 # terraform-aws-lambda module deploys only from S3 or a container image; it
 # cannot take a local zip. This bucket holds that zip.
 # --------------------------------------------------------------------------
@@ -101,6 +92,30 @@ resource "aws_s3_bucket" "lambda_package" {
   bucket        = local.lambda_package_bucket
   force_destroy = true
   tags          = var.tags
+
+  lifecycle {
+    precondition {
+      condition = length(local.account_alias) > 0 && length(local.function_name) <= 64 && alltrue([
+        for suffix in ["target-dlq", "lambda-dlq"] : length("${local.account_alias}-${var.name_prefix}-${suffix}") <= 80
+      ])
+      error_message = "The shared modules require an account alias; alias-prefixed Lambda/SQS names must fit 64/80 characters. Shorten name_prefix or the account alias."
+    }
+    precondition {
+      condition     = length(local.lambda_package_bucket) <= 63
+      error_message = "The region-specific package bucket name must fit 63 characters; shorten name_prefix or set lambda_package_bucket_name."
+    }
+    precondition {
+      condition     = startswith(local.writer_role_arn, "arn:${local.partition}:iam::${local.account_id}:role/")
+      error_message = "writer_role_arn must belong to this member account and partition."
+    }
+    precondition {
+      condition = alltrue([
+        for key in [var.local_kms_key_arn, var.lambda_package_kms_key_arn] :
+        key == null ? true : startswith(key, "arn:${local.partition}:kms:${local.region}:${local.account_id}:key/")
+      ])
+      error_message = "Log and package keys must belong to this member account and region."
+    }
+  }
 }
 
 resource "aws_s3_bucket_public_access_block" "lambda_package" {
@@ -125,10 +140,10 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "lambda_package" {
 
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm     = var.local_kms_key_arn != null ? "aws:kms" : "AES256"
-      kms_master_key_id = var.local_kms_key_arn
+      sse_algorithm     = var.lambda_package_kms_key_arn != null ? "aws:kms" : "AES256"
+      kms_master_key_id = var.lambda_package_kms_key_arn
     }
-    bucket_key_enabled = true
+    bucket_key_enabled = var.lambda_package_kms_key_arn != null
   }
 }
 
@@ -145,83 +160,28 @@ resource "aws_cloudwatch_log_group" "this" {
 }
 
 # --------------------------------------------------------------------------
-# IAM execution role -- name is load-bearing, see variables.tf
+# Regional runtime permissions for the Lambda execution role
 # --------------------------------------------------------------------------
 
-data "aws_iam_policy_document" "assume" {
-  statement {
-    effect  = "Allow"
-    actions = ["sts:AssumeRole"]
-
-    principals {
-      type        = "Service"
-      identifiers = ["lambda.amazonaws.com"]
-    }
-  }
-}
-
-resource "aws_iam_role" "writer" {
-  name                 = var.writer_role_name
-  path                 = var.iam_role_path
-  permissions_boundary = var.permissions_boundary_arn
-  assume_role_policy   = data.aws_iam_policy_document.assume.json
-  tags                 = var.tags
-}
-
-data "aws_iam_policy_document" "writer" {
-  statement {
-    sid       = "Logs"
-    effect    = "Allow"
-    actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
-    resources = ["${aws_cloudwatch_log_group.this.arn}:*"]
-  }
-
-  statement {
-    sid       = "S3WriteOnly"
-    effect    = "Allow"
-    actions   = ["s3:PutObject"]
-    resources = ["arn:${local.partition}:s3:::${var.archive_bucket_name}/${var.archive_s3_prefix}/*"]
-  }
-
-  dynamic "statement" {
-    for_each = var.archive_kms_key_arn != null ? [1] : []
-    content {
-      sid       = "KmsEncryptOnly"
-      effect    = "Allow"
-      actions   = ["kms:GenerateDataKey", "kms:Encrypt", "kms:DescribeKey"]
-      resources = [var.archive_kms_key_arn]
-    }
-  }
-
-  statement {
-    sid       = "LambdaDlq"
-    effect    = "Allow"
-    actions   = ["sqs:SendMessage"]
-    resources = [module.lambda_dlq.queue_arn]
-  }
-
-  statement {
-    sid       = "SsmReadOnly"
-    effect    = "Allow"
-    actions   = ["ssm:GetCommandInvocation", "ssm:ListCommands", "ssm:DescribeInstanceInformation"]
-    resources = ["*"]
-  }
-
-  dynamic "statement" {
-    for_each = var.include_instance_tags ? [1] : []
-    content {
-      sid       = "Ec2DescribeForTags"
-      effect    = "Allow"
-      actions   = ["ec2:DescribeInstances"]
-      resources = ["*"]
-    }
-  }
-}
-
+# Every regional deployment adds its own policy to the shared execution role.
 resource "aws_iam_role_policy" "writer" {
-  name   = "${var.writer_role_name}-inline"
-  role   = aws_iam_role.writer.id
-  policy = data.aws_iam_policy_document.writer.json
+  name = "${var.name_prefix}-${local.region}-runtime"
+  role = local.writer_role_name
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "Logs", Effect = "Allow"
+        Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+        Resource = ["${aws_cloudwatch_log_group.this.arn}:*"]
+      },
+      {
+        Sid      = "LambdaFailureDestination", Effect = "Allow"
+        Action   = ["sqs:SendMessage"]
+        Resource = [module.lambda_dlq.queue_arn]
+      }
+    ]
+  })
 }
 
 # --------------------------------------------------------------------------
@@ -231,9 +191,9 @@ resource "aws_iam_role_policy" "writer" {
 module "writer_lambda" {
   source = "../../../Terrafrom-AWS-Prasanth/terraform-aws-lambda"
 
-  lambda_name        = "${var.name_prefix}-writer"
+  lambda_name        = local.lambda_name
   lambda_description = "Writes one patch-outcome record per SSM RunPatchBaseline terminal event to the central bucket."
-  lambda_role_arn    = aws_iam_role.writer.arn
+  lambda_role_arn    = local.writer_role_arn
   lambda_handler     = local.writer_lambda_config.handler
   runtime            = local.writer_lambda_config.runtime
   memory_size        = local.writer_lambda_config.memory_size
@@ -246,8 +206,8 @@ module "writer_lambda" {
 
   environment = local.writer_lambda_config.environment
 
-  # Package: zip src/ and upload to the per-account bucket. source_code_hash
-  # is set from the archive hash inside the module, so code changes redeploy.
+  # Region-specific names also make local zip files unique. The shared module
+  # derives source_code_hash from the archive so code changes redeploy.
   upload_to_s3       = true
   lambda_script_dir  = "${path.module}/src"
   lambda_bucket_name = aws_s3_bucket.lambda_package.id
@@ -257,7 +217,14 @@ module "writer_lambda" {
 
   tags = var.tags
 
-  depends_on = [aws_cloudwatch_log_group.this]
+  depends_on = [
+    aws_cloudwatch_log_group.this,
+    aws_iam_role_policy.writer,
+    aws_iam_role_policy.archive,
+    aws_s3_bucket_public_access_block.lambda_package,
+    aws_s3_bucket_ownership_controls.lambda_package,
+    aws_s3_bucket_server_side_encryption_configuration.lambda_package,
+  ]
 }
 
 resource "aws_lambda_function_event_invoke_config" "this" {
@@ -304,6 +271,8 @@ resource "aws_cloudwatch_event_target" "ssm" {
   dead_letter_config {
     arn = module.target_dlq.queue_arn
   }
+
+  depends_on = [module.writer_lambda, aws_sqs_queue_policy.target_dlq, aws_lambda_function_event_invoke_config.this]
 }
 
 # Canary -- always enabled, proves the plumbing without impersonating a real
@@ -315,7 +284,8 @@ resource "aws_cloudwatch_event_rule" "canary" {
   state = "ENABLED"
 
   event_pattern = jsonencode({
-    source = ["custom.patch-canary"]
+    source      = ["custom.patch-canary"]
+    detail-type = ["canary"]
   })
 
   tags = var.tags
@@ -330,12 +300,13 @@ resource "aws_cloudwatch_event_target" "canary" {
   dead_letter_config {
     arn = module.target_dlq.queue_arn
   }
+
+  depends_on = [module.writer_lambda, aws_sqs_queue_policy.target_dlq, aws_lambda_function_event_invoke_config.this]
 }
 
 # --------------------------------------------------------------------------
-# Two DLQs -- different failure points, both required. See BUILD-INSTRUCTIONS
-# section 6: with no metrics tier these plus the canary are the entire safety
-# net. Sourced from the shared terraform-aws-sqs module.
+# EventBridge target DLQ and Lambda async failure destination. Both queues
+# are sourced unchanged; operators use the central runbook for recovery.
 # --------------------------------------------------------------------------
 
 module "target_dlq" {
@@ -365,33 +336,22 @@ module "lambda_dlq" {
   tags = var.tags
 }
 
-data "aws_iam_policy_document" "target_dlq" {
-  statement {
-    sid       = "AllowEventBridgeSend"
-    effect    = "Allow"
-    actions   = ["sqs:SendMessage"]
-    resources = [module.target_dlq.queue_arn]
-
-    principals {
-      type        = "Service"
-      identifiers = ["events.amazonaws.com"]
-    }
-
-    condition {
-      test     = "ArnLike"
-      variable = "aws:SourceArn"
-      values   = ["arn:${local.partition}:events:*:${local.account_id}:rule/${var.name_prefix}-*"]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "aws:SourceAccount"
-      values   = [local.account_id]
-    }
-  }
-}
-
 resource "aws_sqs_queue_policy" "target_dlq" {
   queue_url = module.target_dlq.queue_url
-  policy    = data.aws_iam_policy_document.target_dlq.json
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "AllowEventBridgeSend", Effect = "Allow"
+      Principal = { Service = "events.amazonaws.com" }
+      Action    = "sqs:SendMessage"
+      Resource  = module.target_dlq.queue_arn
+      Condition = {
+        ArnEquals = { "aws:SourceArn" = concat(
+          [for rule in aws_cloudwatch_event_rule.ssm : rule.arn],
+          var.enable_canary ? [aws_cloudwatch_event_rule.canary[0].arn] : [],
+        ) }
+        StringEquals = { "aws:SourceAccount" = local.account_id }
+      }
+    }]
+  })
 }

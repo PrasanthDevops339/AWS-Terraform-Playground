@@ -1,0 +1,5 @@
+index=aws_patching sourcetype="aws:ssm:patch:outcome" schema_version=2 record_type="invocation" account="222233334444" region="us-east-1" instance_id="i-0123456789abcdef0"
+| sort 0 - _indextime
+| dedup account region event_id
+| table _time account region instance_id command_id operation patch_outcome status status_details recommended_action
+| sort 0 - _time

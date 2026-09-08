@@ -1,87 +1,117 @@
-# Architecture Diagram
+# Patch outcome architecture
 
-Deployed once per region, per member account (~450 accounts via AFT). The
-central account (right side) is owned by another team and is never
-created or modified by this module — only referenced.
+Use `patch-outcome-observability` for each patching region. The first deployment
+creates the Lambda execution role within that module; additional regions reuse it. The example uses two dummy members (`222233334444`,
+`333344445555`), two regions, and an existing central bucket in dummy account
+`111122223333`. Repeat the same account customization independently across the
+fleet. A single member-account Terraform state owns its identity and regions.
 
 ```mermaid
 flowchart TB
-    subgraph MEMBER["Member account (× ~450, via AFT)"]
-        direction TB
-
-        SSM["SSM Run Command<br/>AWS-RunPatchBaseline"]
-
-        subgraph BUS["EventBridge — default bus"]
-            R1["rule: invocation_success<br/>status = Success"]
-            R2["rule: invocation_failure<br/>Failed / TimedOut / Cancelled /<br/>Undeliverable / Terminated"]
-            R3["rule: command_failure<br/>Failed / Incomplete / AccessDenied / ..."]
-            RC["rule: canary (always ON)<br/>source = custom.patch-canary"]
+    subgraph MEMBER["Member account — repeat through AFT"]
+        subgraph REGION["patch-outcome-observability — primary region, create_writer_role=true"]
+            ROLE["Included Lambda execution role<br/>One account-wide patch-outcome-s3-writer<br/>Optional path /platform/<br/>Common archive + enrichment permissions"]
+            SSM["SSM Run Command<br/>AWS-RunPatchBaseline*<br/>Scan or Install"]
+            subgraph BUS["EventBridge default bus"]
+                R1["invocation_success<br/>Success"]
+                R2["invocation_failure<br/>Terminal failure / non-delivery statuses"]
+                R3["command_failure<br/>Command summaries"]
+                RC["Optional canary rule<br/>Enabled when created<br/>custom.patch-canary + detail-type canary"]
+            end
+            CLI["Operator: manually sends canary"]
+            FN["Shared terraform-aws-lambda module<br/>Function: alias-prefix-region-writer<br/>handler.handler / Python 3.13 / 30 seconds"]
+            PKG[("Regional member S3 package bucket<br/>prefix-pkg-account-region<br/>SSE-S3 or independent local package CMK")]
+            BUILD["Terraform archive + package upload<br/>Unique regional zip name"]
+            READS["Bounded enrichment — at most 10 seconds<br/>SSM ListCommandInvocations / ListCommands<br/>SSM agent status / optional EC2 tags"]
+            LOGS[("CloudWatch Logs<br/>/aws/lambda/alias-prefix-region-writer<br/>365-day default retention / optional local log CMK")]
+            TDLQ[("Shared SQS: target-dlq<br/>EventBridge target delivery failures<br/>Original event + message attributes / 14 days")]
+            DEST[("Shared SQS: lambda-dlq<br/>Lambda async on-failure destination<br/>Invocation record + requestPayload / 14 days")]
+            RP["Regional IAM policy<br/>Only this function's logs<br/>and its failure-destination queue"]
+            SSM --> R1 & R2 & R3
+            R1 & R2 & R3 --> FN
+            CLI --> RC --> FN
+            R1 & R2 & R3 & RC -. delivery failure .-> TDLQ
+            FN -. exhausted retries / expired event .-> DEST
+            FN --> LOGS
+            FN -. optional API reads .-> READS
+            BUILD --> PKG --> FN
+            ROLE -. execution identity .-> FN
+            RP -. attached to .-> ROLE
         end
-
-        LAMBDA["Lambda: patch-outcome-writer<br/>src/handler.py<br/>role: patch-outcome-s3-writer"]
-
-        TDLQ[("SQS: target-dlq<br/>EventBridge could not invoke Lambda")]
-        LDLQ[("SQS: lambda-dlq<br/>Lambda ran and threw")]
-
-        LOGS[("CloudWatch Logs<br/>/aws/lambda/patch-outcome-writer")]
-
-        SSM -->|status-change event| R1
-        SSM -->|status-change event| R2
-        SSM -->|status-change event| R3
-
-        R1 -->|invoke| LAMBDA
-        R2 -->|invoke| LAMBDA
-        R3 -->|invoke| LAMBDA
-        RC -->|invoke| LAMBDA
-
-        R1 -.->|invoke failed| TDLQ
-        R2 -.->|invoke failed| TDLQ
-        R3 -.->|invoke failed| TDLQ
-        RC -.->|invoke failed| TDLQ
-
-        LAMBDA -.->|function threw| LDLQ
-        LAMBDA --> LOGS
+        SECONDARY["Same module in each additional region<br/>create_writer_role=false<br/>Own Lambda, package bucket, logs, rules and queues<br/>Own regional runtime policy"]
+        ROLE -. "writer_role_arn reused" .-> SECONDARY
     end
-
-    subgraph CENTRAL["Central account — owned by another team, never created/modified here"]
-        direction TB
-        BUCKET[("S3 bucket<br/>patchingsolution-events/outcomes/*<br/>(sibling of patchingsolution/)")]
-        KMS{{"KMS CMK<br/>encrypts bucket"}}
-        POLICY["Bucket policy + KMS key policy<br/>ArnLike role/patch-outcome-s3-writer<br/>+ PrincipalOrgID"]
-        FIREHOSE["s3tofirehose ingestion<br/>(owned by another team)"]
-        SPLUNK[("Splunk<br/>sourcetype: aws:ssm:patch:outcome")]
-
-        POLICY -.authorizes.-> BUCKET
-        BUCKET --> FIREHOSE --> SPLUNK
+    subgraph CENTRAL["Existing central account — owned by other teams"]
+        POLICY["Existing bucket + KMS policies<br/>Merge rendered statements manually<br/>Actual PrincipalOrgID + full role-path pattern"]
+        BUCKET[("Existing archive bucket<br/>patchingsolution-events/outcomes/<br/>Sibling of patchingsolution/")]
+        KEY{{"Existing central KMS CMK<br/>For SSE-KMS archives"}}
+        INGEST["Existing s3tofirehose ingestion<br/>Verify routing of the outcomes prefix"]
+        SPLUNK[("Splunk: aws:ssm:patch:outcome<br/>Schema 2 + action lookup")]
+        POLICY -. authorizes .-> BUCKET
+        POLICY -. authorizes .-> KEY
+        BUCKET -. GenerateDataKey on writer's behalf .-> KEY
+        BUCKET --> INGEST --> SPLUNK
     end
-
-    LAMBDA ==>|s3:PutObject<br/>SSE-KMS| BUCKET
-    LAMBDA -.->|kms:Encrypt /<br/>GenerateDataKey| KMS
-
-    STDOUT[("Existing sourcetype<br/>aws:ssm:patch:stdout")] -.join on command_id.- SPLUNK
-
-    classDef dormant stroke-dasharray: 4 3;
-    class TDLQ,LDLQ dormant
+    FN ==>|"Cross-account PutObject<br/>SSE-KMS when configured"| BUCKET
+    STDOUT[("Existing aws:ssm:patch:stdout")] -. "correlate account + region + command_id + instance_id" .-> SPLUNK
 ```
 
-## Reading the diagram
+## Identity, regions and dependencies
 
-- **Solid arrows** are the happy path: SSM event → rule → Lambda → S3 →
-  Firehose → Splunk.
-- **Dashed arrows** are the failure/side paths: a target DLQ catches
-  EventBridge-can't-reach-Lambda, a Lambda DLQ catches
-  Lambda-ran-and-threw, and the canary proves the whole chain without
-  needing a real SSM event.
-- The **only cross-account call** is the Lambda's `s3:PutObject` (and the
-  paired KMS encrypt calls) into the central bucket — everything else stays
-  inside the member account.
-- Nothing in the `CENTRAL` box is created by this Terraform module. The
-  module only *renders* the two policy statements
-  (`central_prerequisites` output) that the bucket owner merges by hand.
-- `rules_enabled = false` disables `R1`/`R2`/`R3` (dashed in a live diagram
-  would represent "DISABLED state"); `RC` (the canary) always stays
-  `ENABLED` regardless.
+The primary Lambda deployment owns exactly one role and its common S3/KMS/SSM/EC2
+policy in `iam.tf`. No separate account module or repository is needed. Its role
+name and path are consistent across the fleet. Additional regional deployments
+set `create_writer_role=false` and receive the primary output `writer_role_arn`;
+each attaches a uniquely named runtime policy for its log group and Lambda failure
+destination. Keep common archive/enrichment settings consistent across regions. IAM inline-policy
+size limits still apply to the shared role; review policy size when expanding
+to many regions.
 
-See `HOW-IT-WORKS.md` for the narrative walkthrough of each step, and
-`PAYLOAD-SPEC-patch-outcome-record.md` for what actually lands in the
-bucket.
+The shared Lambda and SQS source modules are consumed unchanged. They prefix
+names with the member account alias, which must exist and fit AWS name limits.
+The Lambda input includes region so the shared module's local zip filenames
+also differ in a two-region root. Package buckets are created in each Lambda's
+region. Terraform establishes bucket protection/encryption and execution
+permissions before making targets available. IAM propagation may still require
+AWS retries during deployment.
+
+## Outcomes and delivery
+
+| Record | Meaning |
+|---|---|
+| `invocation`, `patched` | An **Install** invocation returned Success; verify actual compliance and reboot state separately. |
+| `invocation`, `scanned` | A **Scan** invocation returned Success; no installation is implied. |
+| `invocation`, `failed` | Aggregate invocation details establish failure or execution timeout. |
+| `invocation`, `not-attempted` | Explicit termination by error threshold or a non-delivery/targeting status. |
+| `invocation`, `unknown` | Operation or execution stage is unresolved. Cancellation alone does not prove non-execution. |
+| `command` | Command-level context; never counted as an instance outcome. |
+| `canary` | Synthetic pipeline check; never counted as patch activity. |
+
+The handler writes flat, newline-terminated JSON with schema version 2,
+`event_id`, `operation`, original event identity, status and optional context.
+SSM invocation events often omit command parameters, so successful runs may
+need a cached `ListCommands` call to distinguish Scan from Install. Metadata
+is cached for fifteen seconds per Lambda environment; environments do not
+share their caches. S3 failures propagate for Lambda retries.
+
+SSM service events use [best-effort delivery](https://docs.aws.amazon.com/eventbridge/latest/ref/events-ref-ssm.html).
+This design has no reconciliation poller: an event never received by EventBridge
+cannot be recovered by either queue. Duplicate delivery is possible; repeated
+writes use the same event-based key, and Splunk deduplicates event IDs/counts.
+A canary proves downstream delivery only after its event is found in Splunk;
+it does not prove that real SSM event patterns match.
+
+## Deployment boundary
+
+`rules_enabled` defaults to `false`. Creating the optional canary leaves its
+rule enabled, but there is no schedule; an operator sends the event manually.
+No custom metrics, alarms, SNS, central resources or bucket notifications are
+created. Existing ingestion is reused and its outcomes-prefix routing is verified.
+Packages, retained logs, requests, and any KMS usage can incur charges even
+while SSM rules are disabled.
+
+Use [BUILD-INSTRUCTIONS-infrastructure.md](BUILD-INSTRUCTIONS-infrastructure.md)
+for deployment/tests, [PAYLOAD-SPEC-patch-outcome-record.md](PAYLOAD-SPEC-patch-outcome-record.md)
+for the record contract, [central-prerequisites/README.md](central-prerequisites/README.md)
+for cross-account access and queue replay, and [splunk/README.md](splunk/README.md)
+for parsing, correlation and pilot acceptance.
