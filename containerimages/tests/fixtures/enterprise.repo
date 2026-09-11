@@ -1,0 +1,7 @@
+[test]
+name=Test fixture - never deploy
+baseurl=https://packages.example.invalid/al2023/$releasever/$basearch
+enabled=1
+gpgcheck=1
+sslverify=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-amazon-linux-2023

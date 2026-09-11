@@ -1,0 +1,48 @@
+set -euo pipefail
+. /etc/os-release
+test "$ID" = amzn
+test "$VERSION_ID" = 2023
+test "$(uname -m)" = x86_64
+install -d -m 0755 /usr/local/share/containerimages /etc/pki/ca-trust/source/anchors
+printf '%s' '${ca_base64}' | base64 -d > /etc/pki/ca-trust/source/anchors/enterprise.pem
+update-ca-trust extract
+# Replace upstream repo definitions with the reviewed enterprise configuration.
+rm -f /etc/yum.repos.d/*.repo
+printf '%s' '${repo_base64}' | base64 -d > /etc/yum.repos.d/enterprise.repo
+dnf --releasever='${package_release}' upgrade -y
+dnf --releasever='${package_release}' install -y ca-certificates shadow-utils python3
+groupadd --gid 10001 app
+useradd --uid 10001 --gid 10001 --no-create-home --home-dir /app --shell /sbin/nologin app
+install -d -m 0755 -o 10001 -g 10001 /app
+printf '%s\n' '${source_revision}' > /usr/local/share/containerimages/source-revision
+printf '%s\n' '${parent_image}' > /usr/local/share/containerimages/parent-image
+printf '%s\n' '${recipe_version}' > /usr/local/share/containerimages/recipe-version
+printf '%s\n' '${package_release}' > /usr/local/share/containerimages/package-release
+chmod 0644 /etc/yum.repos.d/enterprise.repo /etc/pki/ca-trust/source/anchors/enterprise.pem
+dnf clean all
+rm -rf /var/cache/dnf
+# Container-specific permissions; host kernel, SSH and systemd policies belong on the host.
+find /usr /bin /sbin -xdev -type f -perm /6000 -exec chmod a-s {} +
+rpm -qa --qf '%%{NAME}\t%%{VERSION}-%%{RELEASE}\t%%{ARCH}\n' | sort > /usr/local/share/containerimages/packages.tsv
+python3 - <<'PY'
+import datetime, hashlib, json, pathlib
+root = pathlib.Path('/usr/local/share/containerimages')
+inventory = root.joinpath('packages.tsv').read_text()
+packages = []
+for index, line in enumerate(inventory.splitlines()):
+    name, version, arch = line.split('\t')
+    packages.append({'SPDXID': f'SPDXRef-Package-{index}', 'name': name,
+                     'versionInfo': version, 'downloadLocation': 'NOASSERTION',
+                     'filesAnalyzed': False, 'licenseConcluded': 'NOASSERTION',
+                     'licenseDeclared': 'NOASSERTION', 'copyrightText': 'NOASSERTION',
+                     'primaryPackagePurpose': 'LIBRARY', 'comment': f'RPM architecture: {arch}'})
+doc = {'spdxVersion': 'SPDX-2.3', 'dataLicense': 'CC0-1.0', 'SPDXID': 'SPDXRef-DOCUMENT',
+       'name': 'AL2023 OS package inventory',
+       'documentNamespace': 'https://containerimages.invalid/spdx/' + hashlib.sha256(inventory.encode()).hexdigest(),
+       'creationInfo': {'creators': ['Tool: containerimages-rpm-inventory-1.0'],
+                        'created': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')},
+       'packages': packages,
+       'relationships': [{'spdxElementId': 'SPDXRef-DOCUMENT', 'relationshipType': 'DESCRIBES',
+                          'relatedSpdxElement': p['SPDXID']} for p in packages]}
+root.joinpath('sbom.spdx.json').write_text(json.dumps(doc, sort_keys=True))
+PY

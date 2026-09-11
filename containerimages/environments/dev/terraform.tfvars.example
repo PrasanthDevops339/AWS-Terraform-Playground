@@ -1,0 +1,23 @@
+# Replace every REPLACE value. No credentials or secret values belong here.
+name = "containerimages-dev"
+account_id = "REPLACE_WITH_ACCOUNT_ID"
+organization_id = "REPLACE_WITH_ORG_ID"
+vpc_id = "REPLACE_WITH_VPC_ID"
+subnet_id = "REPLACE_WITH_PRIVATE_SUBNET_ID"
+egress_cidrs = ["REPLACE_WITH_APPROVED_HTTPS_CIDR"]
+build_host_ami = "REPLACE_WITH_APPROVED_X86_64_AMI"
+parent_image = "public.ecr.aws/amazonlinux/amazonlinux@sha256:REPLACE_WITH_APPROVED_DIGEST"
+package_release = "REPLACE_WITH_APPROVED_AL2023_RELEASE"
+source_revision = "REPLACE_WITH_REVIEWED_GIT_SHA"
+recipe_version = "1.0.0"
+release_series = "1.0"
+certificate_bundle = "../../enterprise/ca-bundle.pem"
+package_repository_file = "../../enterprise/enterprise.repo"
+promotion_worker_image = "REPLACE_WITH_TRUSTED_ECR_WORKER_DIGEST"
+schedule_enabled = false
+# Default delegates shared registry settings to the registry owner. See docs/RUNBOOK.md.
+manage_registry_configuration = false
+additional_scan_rules = {}
+additional_replication_rules = []
+tags = { Environment = "dev", Owner = "CloudPlatform" }
+access_log_bucket_name = "REPLACE_WITH_EXISTING_ACCESS_LOG_BUCKET"

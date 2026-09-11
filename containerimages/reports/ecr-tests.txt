@@ -1,0 +1,7 @@
+tests/repository.tftest.hcl... in progress
+  run "approved_repository_requires_organization_and_trusted_writer"... pass
+  run "staging_has_no_organization_pull_grant"... pass
+tests/repository.tftest.hcl... tearing down
+tests/repository.tftest.hcl... pass
+
+Success! 2 passed, 0 failed.

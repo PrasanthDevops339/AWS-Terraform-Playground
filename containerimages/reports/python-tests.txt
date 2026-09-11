@@ -1,0 +1,46 @@
+test_builder_cannot_write_approved_repository (test_policy.PolicyTests.test_builder_cannot_write_approved_repository) ... ok
+test_mutable_repository_rejected (test_policy.PolicyTests.test_mutable_repository_rejected) ... ok
+test_private_key_is_rejected_before_state (test_policy.PolicyTests.test_private_key_is_rejected_before_state) ... ok
+test_privileged_publisher_rejected (test_policy.PolicyTests.test_privileged_publisher_rejected) ... ok
+test_replacements_require_migration_review (test_policy.PolicyTests.test_replacements_require_migration_review) ... ok
+test_repository_signature_bypass_is_rejected (test_policy.PolicyTests.test_repository_signature_bypass_is_rejected) ... ok
+test_reviewed_test_ca_and_repo_config (test_policy.PolicyTests.test_reviewed_test_ca_and_repo_config) ... ok
+test_scan_filter_matching (test_policy.PolicyTests.test_scan_filter_matching) ... ok
+test_foreign_event_is_rejected (test_release.EventTests.test_foreign_event_is_rejected) ... ok
+test_old_clean_event_cannot_overwrite_new_critical_event (test_release.EventTests.test_old_clean_event_cannot_overwrite_new_critical_event) ... ok
+test_repository_arn_must_match_event_region (test_release.EventTests.test_repository_arn_must_match_event_region) ... ok
+test_scan_can_arrive_before_build_and_duplicate_is_safe (test_release.EventTests.test_scan_can_arrive_before_build_and_duplicate_is_safe) ... ok
+test_arm_image_cannot_enter_x86_release (test_release.PublisherTests.test_arm_image_cannot_enter_x86_release) ... ok
+test_copy_uses_scanned_digest_and_preserves_it (test_release.PublisherTests.test_copy_uses_scanned_digest_and_preserves_it) ... ok
+test_gate_failure_never_copies (test_release.PublisherTests.test_gate_failure_never_copies) ... ok
+test_matching_existing_version_does_not_copy_again (test_release.PublisherTests.test_matching_existing_version_does_not_copy_again) ... ok
+test_root_image_fails_final_configuration_check (test_release.PublisherTests.test_root_image_fails_final_configuration_check) ... ok
+test_tag_conflict_never_copies (test_release.PublisherTests.test_tag_conflict_never_copies) ... ok
+test_conditional_race_returns_winning_assignment (test_release.ReleaseTests.test_conditional_race_returns_winning_assignment) ... ok
+test_critical_candidate_never_allocates_version (test_release.ReleaseTests.test_critical_candidate_never_allocates_version) ... ok
+test_failed_release_retry_requires_fresh_gate_and_retains_version (test_release.ReleaseTests.test_failed_release_retry_requires_fresh_gate_and_retains_version) ... ok
+test_rebuild_cooldown_and_budget (test_release.ReleaseTests.test_rebuild_cooldown_and_budget) ... ok
+test_replication_deadline (test_release.ReleaseTests.test_replication_deadline) ... ok
+test_replication_mismatch_never_sets_eligibility (test_release.ReleaseTests.test_replication_mismatch_never_sets_eligibility) ... ok
+test_scan_deadline_prevents_late_acceptance (test_release.ReleaseTests.test_scan_deadline_prevents_late_acceptance) ... ok
+test_versions_start_at_zero_and_retries_are_idempotent (test_release.ReleaseTests.test_versions_start_at_zero_and_retries_are_idempotent) ... ok
+test_withdrawn_release_cannot_be_reactivated_by_retry (test_release.ReleaseTests.test_withdrawn_release_cannot_be_reactivated_by_retry) ... ok
+test_wrong_build_digest_never_allocates_version (test_release.ReleaseTests.test_wrong_build_digest_never_allocates_version) ... ok
+test_active_without_completion_blocks (test_release.ScanTests.test_active_without_completion_blocks) ... ok
+test_completed_zero_omitted_critical_passes (test_release.ScanTests.test_completed_zero_omitted_critical_passes) ... ok
+test_critical_on_later_page_blocks (test_release.ScanTests.test_critical_on_later_page_blocks) ... ok
+test_event_supplies_completion_when_api_timestamp_absent (test_release.ScanTests.test_event_supplies_completion_when_api_timestamp_absent) ... ok
+test_high_is_reported_not_blocked (test_release.ScanTests.test_high_is_reported_not_blocked) ... ok
+test_inspector_filter_schema_and_pagination (test_release.ScanTests.test_inspector_filter_schema_and_pagination) ... ok
+test_missing_summary_does_not_mean_zero (test_release.ScanTests.test_missing_summary_does_not_mean_zero) ... ok
+test_pending_states_wait (test_release.ScanTests.test_pending_states_wait) ... ok
+test_summary_critical_blocks_even_before_findings_catch_up (test_release.ScanTests.test_summary_critical_blocks_even_before_findings_catch_up) ... ok
+test_unknown_coverage_states_fail_closed (test_release.ScanTests.test_unknown_coverage_states_fail_closed) ... ok
+test_wrong_account_or_digest_rejected (test_release.ScanTests.test_wrong_account_or_digest_rejected) ... ok
+
+----------------------------------------------------------------------
+Ran 39 tests in 2.714s
+
+OK
+{"_aws": {"Timestamp": 1789127201000, "CloudWatchMetrics": [{"Namespace": "ContainerImages", "Dimensions": [["Factory"]], "Metrics": [{"Name": "ReplicationTimeout", "Unit": "Count"}]}]}, "Factory": "test", "ReplicationTimeout": 1}
+{"_aws": {"Timestamp": 1789127201000, "CloudWatchMetrics": [{"Namespace": "ContainerImages", "Dimensions": [["Factory"]], "Metrics": [{"Name": "ScanTimeout", "Unit": "Count"}]}]}, "Factory": "test", "ScanTimeout": 1}

@@ -1,0 +1,8 @@
+tests/factory.tftest.hcl... in progress
+  run "factory_is_isolated_and_gate_is_enforced"... pass
+  run "reject_floating_base_tag"... pass
+  run "reject_unrestricted_egress"... pass
+tests/factory.tftest.hcl... tearing down
+tests/factory.tftest.hcl... pass
+
+Success! 3 passed, 0 failed.

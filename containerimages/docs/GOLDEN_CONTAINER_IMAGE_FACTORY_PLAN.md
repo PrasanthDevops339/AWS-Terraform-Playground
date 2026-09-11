@@ -1,14 +1,11 @@
-# Golden Container Image Factory — all-family plan and AL2023 implementation
+# Golden Container Image Factory — AL2023 implementation and rollout
 
 **Repository:** `containerimages`, independent of the existing `Imagebuilder` appliance infrastructure.  
 **Infrastructure:** native Terraform; no CloudFormation wrappers or build/push provisioners.  
-**Planned image families:** Amazon Linux, .NET, Red Hat/UBI and approved third-party images.  
-**Initial implemented artifact:** standard AL2023 Linux x86_64 container image.  
+**Initial artifact:** standard AL2023 Linux x86_64 container image.  
 **Production target:** `prasanth-operations-prd`; numeric account ID is a required deployment input.  
 **Regions:** build and scan in `us-east-2`; replicate accepted releases to `us-east-1`.  
 **Delivery state:** source implementation and local validation; live AWS deployment and enterprise acceptance remain separate steps.
-
-The implementation is saved in the separate [containerimages repository](../../containerimages/README.md). See its [runbook](../../containerimages/docs/RUNBOOK.md), [validation record](../../containerimages/docs/VALIDATION.md) and [cost notes](../../containerimages/docs/COSTS.md).
 
 ## 1. Objective and Jira interpretation
 
@@ -150,78 +147,6 @@ Development acceptance must prove a clean AL2023 build, a blocked Critical candi
 
 Production rollout requires a reviewed Terraform plan and completed stakeholder acceptance. Cloud Platform owns factory operation; InfoSec owns policy/vendor acceptance; certificate/package owners approve sources; application teams own adoption. Publish reviewed standards to the CITP Confluence area through the established documentation process.
 
-## 9. Full image-family scope and delivery status
+## 9. Later image families
 
-The planning scope includes all four image families named in the Jira: Amazon Linux, .NET, Red Hat Linux and third-party images. AL2023 standard x86_64 remains the only implemented candidate recipe. The entries below define future work and acceptance requirements; they do not represent additional working pipelines or approved releases.
-
-| Family / variant | Planned purpose | Source decision required | Delivery status |
-|---|---|---|---|
-| Amazon Linux 2023 standard x86_64 | Enterprise OS base for downstream applications. | Reviewed AWS parent digest, AL2023 package snapshot and approved package mirrors. | Source implemented; live development acceptance pending. |
-| Amazon Linux 2023 minimal | Smaller base for applications that need fewer OS tools. | Separate upstream variant and package-management approach; confirm application dependencies. | Planned optional variant; not covered by the standard recipe. |
-| Amazon Linux 2023 ARM64 | Architecture-specific alternative where consumers require it. | Approved architecture-specific digest, compatible build host, packages and security integrations. | Planned after standard x86_64 acceptance. |
-| .NET runtime | Run applications that need the .NET runtime without development tools. | Approved upstream publisher, supported .NET line, underlying OS, architecture and digest. | Planned; versions require runtime-owner approval. |
-| ASP.NET Core runtime | Run web applications requiring ASP.NET Core. | Approved runtime variant and matching framework/native dependencies. | Planned as a distinct image from the general runtime. |
-| .NET SDK | Compile/test applications in approved build environments. | Approved SDK line, package feeds and intended CI consumers. | Optional onboarding decision; separate build image and access scope. |
-| Red Hat Linux / UBI | Provide the approved Red Hat-family base required by applications. | Decide UBI versus an entitled RHEL-derived source, specific variant, repositories and distribution permissions. | Planned; vendor and InfoSec acceptance required. |
-| Third-party images | Centrally approve named vendor/product images used by existing workloads. | Inventory exact products, registries, versions, digests, licensing and modification permissions. | Planned per product; no unspecified vendor image is automatically approved. |
-
-Do not assume .NET must be installed on AL2023, or that UBI automatically satisfies every Red Hat Linux requirement. Select the upstream OS/runtime combination using application compatibility, support and enterprise approval. Other Amazon Linux releases are not implicitly included; add them only through a separately approved need and support assessment.
-
-### Family-specific build and test work
-
-| Family | Configuration and hardening work | Evidence required before release |
-|---|---|---|
-| AL2023 standard | Validate the existing certificate, repository, pinned-package, non-root and permissions components in the enterprise environment. | Existing component tests plus real Inspector coverage, organization pulls and representative ECS/EKS startup. |
-| AL2023 minimal / ARM64 | Create separate recipes and adapt package operations, available tools and architecture checks. | Actual startup on the target architecture, package inventory, scanner support and runtime-security compatibility. |
-| .NET runtime / ASP.NET | Preserve the selected upstream runtime layout; validate CA trust, approved OS updates, globalization/time-zone/native dependencies and non-root startup. | Framework identity, representative console/web application startup, HTTPS trust, shutdown behavior, OS and included runtime/dependency inventory, and complete scan evidence. |
-| .NET SDK | Add approved restore/build feed configuration without credentials in layers; define compiler and dependency-policy requirements. | Representative restore/build/test using runtime-injected credentials where required, dependency inventory and scan results. |
-| Red Hat / UBI | Implement distribution-specific repository and hardening components; confirm entitlement handling without persisting subscription secrets. | OS identity, repository/signature checks, certificate trust, supported application startup and approved redistribution to organization accounts. |
-| Third-party | Choose approved mirroring or a supported derived image; preserve the vendor's required entrypoint, user and filesystem behavior. | Provenance/licensing approval, vendor-specific startup/upgrade tests, supported scanning and documented ownership. |
-
-Security components must be parameterized only where their behavior is compatible. Reuse the release gate, evidence format and approved-repository policy; do not reuse AL2023 package commands or force UID `10001` onto a vendor image without compatibility approval. CrowdStrike and Tripwire decisions in section 5 apply to every family. A missing supported integration remains an explicit acceptance issue.
-
-## 10. Changes needed to support multiple families
-
-The current source targets one AL2023 family. Before onboarding another family:
-
-1. Define a reviewed family catalog containing a stable family/variant ID, owner, approved upstream registry and digest, OS/runtime line, architecture, recipe/component versions, test suite, release series and retirement policy. Keep credentials outside this catalog and Terraform state.
-2. Provision distinct staging and approved repositories and a pipeline for each selected family/variant. Use a naming convention such as `staging/<factory>/<family-variant>` and `golden/<factory>/<family-variant>`; finalize names before deployment to avoid replacement and consumer migration.
-3. Review release-ledger keys, version-counter scope, event routing and workflow inputs. Namespace them by family/variant as well as digest where appropriate so one family's evidence, retries or versions cannot authorize another family's release.
-4. Extend build verification and publisher configuration checks to the selected family. Replace the current fixed AL2023/x86_64/UID assumptions with explicit approved family policy; keep unknown family/configuration values blocked.
-5. Ensure registry scanning rules cover every staging and approved repository, and replication selects only approved repositories. Preserve the registry owner's existing configuration.
-6. Extend SBOM generation for the packages and language dependencies actually included. A base-image scan does not approve dependencies later added by application teams; their final application images need their own delivery controls.
-7. Add per-family build/scan/replication metrics, ownership, notifications, retention and rebuild limits. Scope remediation budgets and successful-build heartbeat expectations per family so one active pipeline cannot hide another failing pipeline.
-8. Extend tests to cover cross-family event mismatches, independent version allocation, permitted user/architecture settings, distribution filtering and duplicate events. Publish each accepted family's immutable version and digest in both Regions.
-
-Every family uses the same blocking policy: upload privately to staging, require verified build tests and explicit supported scan completion, block unresolved Critical findings including suppressed/no-fix findings, recheck before digest-preserving publication, then verify regional replication. Unsupported scanning does not create an exception or scanner fallback; that image remains blocked pending an approved solution. Multi-architecture manifest publication is separate future work and must require acceptance of every referenced platform image.
-
-## 11. Open questions and decision owners
-
-Record answers, approver and decision date before enabling a family's pipeline. Unanswered items below are deployment/onboarding inputs, not reasons to invent production values.
-
-| Area | Questions to resolve | Decision owner |
-|---|---|---|
-| Existing estate | Which exact container images, tags/digests, operating systems, runtime versions and architectures are deployed today? Which applications consume them? | Application teams and Cloud Platform |
-| AL2023 scope | Is standard x86_64 sufficient for the first release? Which applications require minimal or ARM64, and when? | Cloud Platform and application owners |
-| .NET | Which runtime and ASP.NET lines are required? Which upstream OS variants are supported by the applications? Is an SDK image in scope, and for which CI systems? | .NET platform/runtime owners |
-| Red Hat | Does the requirement mean UBI or entitled RHEL content? Which variants/package channels are approved? Can resulting content be shared to every intended account? | Red Hat platform owner, licensing/procurement and InfoSec |
-| Third-party inventory | Which named vendors/products are in scope? May their images be modified or mirrored? Who owns vendor patch escalation and support validation? | Product owners, procurement and InfoSec |
-| Upstream approval | Which registries/publishers and digests are trusted? Who approves new upstream digests and package snapshots? What provenance/signature evidence is required? | Supply-chain security and Cloud Platform |
-| Scanning | Is Inspector coverage verified for each chosen OS/runtime/package combination? What evidence is required for scan-completion failures or unsupported content? | InfoSec and Cloud Platform |
-| Critical vulnerabilities | Who receives blocked-release alerts and escalates no-fix vulnerabilities? What are patch and workload-redeployment deadlines? The v1 gate has no bypass. | InfoSec and application owners |
-| Hardening | Which container-specific baseline applies per OS/runtime? Which writable paths, user IDs, capabilities and package exceptions are required? | InfoSec and runtime owners |
-| Certificates and packages | Who supplies the CA bundle and approved mirrors/feeds? How are certificate and package-source changes reviewed and tested? | Certificate and package-platform owners |
-| CrowdStrike / Tripwire | Which products and integrations are required for each EC2/ECS/EKS/Fargate deployment? Who confirms support, licensing, telemetry and non-root compatibility? | Endpoint/container security and InfoSec |
-| Distribution | Which organization/OUs/accounts and workload roles need access? Is organization-wide pull appropriate for licensed vendor images? Is build-once/replicate accepted against the Jira's two-Region pipeline wording? | Cloud Platform, application owners and licensing |
-| Registry ownership | Who owns scanning/replication configuration and approves import or rule changes? Is the native ECR resource replacement formally recorded against the module requirement? | Platform registry/module owners |
-| Release lifecycle | Which families are delivered first? How are major/minor series, retirement dates, accepted-image catalogs and consumer migration tracked? | Cloud Platform and runtime owners |
-| Operations and cost | What per-family build frequency, retention, remediation limits and cost allocation are approved? Who handles alerts and controls rebuild storms? | Cloud Platform, operations and FinOps |
-
-## 12. Rollout and completion criteria across all families
-
-- **Phase 1 — AL2023 standard x86_64:** supply enterprise inputs and complete the live acceptance in section 8 for the implemented source.
-- **Phase 2 — family support:** implement the catalog, family-specific policies, event/ledger isolation and tests described in section 10 before adding production families.
-- **Phase 3 — .NET and Red Hat:** onboard approved runtime/OS variants in stakeholder-agreed order; approve SDK, minimal and ARM64 variants individually when needed.
-- **Phase 4 — named third-party products:** onboard one approved product at a time after licensing, support, scanner coverage and workload compatibility are resolved.
-
-For every selected family, completion requires a successful real build, verified enterprise configuration, complete SBOM scope documentation, a proven Critical-publication block, immutable release evidence, matching digests in both Regions, authorized consumer pull/startup, notifications, an operational owner and a tested retirement/rollback process. An unselected optional variant is recorded as deferred with an owner; it is not reported as implemented. Publish the accepted family matrix and decisions to the CITP standards area through the established process.
+Add ARM64 only after package, worker and runtime-security compatibility testing. Treat AL2023 minimal as a separate variant. Add .NET runtime/ASP.NET and SDK images separately with support and native-dependency checks. Confirm Red Hat/UBI entitlement and redistribution requirements. For third-party images, establish provenance, modification rights, vendor support and update ownership before onboarding.
