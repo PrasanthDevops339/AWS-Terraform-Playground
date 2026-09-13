@@ -27,8 +27,8 @@ output "lambda_package_bucket" {
 }
 
 output "lambda_log_group_name" {
-  description = "Name of the Lambda's CloudWatch log group."
-  value       = aws_cloudwatch_log_group.this.name
+  description = "Existing CloudWatch log group the Lambda writes to (streams are named after the function)."
+  value       = data.aws_cloudwatch_log_group.app.name
 }
 
 output "writer_role_arn" {
@@ -61,7 +61,7 @@ output "canary_command" {
 }
 
 output "central_prerequisites" {
-  description = "Resolved statements for the central bucket/KMS owners to merge. The KMS statement is null for SSE-S3. No central resources are managed here."
+  description = "Resolved statements for the central bucket/KMS owners to merge. Both are required because the archive is SSE-KMS. No central resources are managed here."
   value = {
     bucket_policy_statement = {
       Sid       = "AllowPatchOutcomeWritersFromOrg"
@@ -75,7 +75,7 @@ output "central_prerequisites" {
         )
       })
     }
-    kms_key_policy_statement = var.archive_kms_key_arn == null ? null : {
+    kms_key_policy_statement = {
       Sid       = "AllowPatchOutcomeWritersFromOrg"
       Effect    = "Allow"
       Principal = "*"

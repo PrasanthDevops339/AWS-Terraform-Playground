@@ -34,7 +34,8 @@ explicit non-delivery/termination, or `unknown`. Command summaries and canaries
 are separate record types. No outcome is a substitute for SSM Patch Compliance.
 
 The writer performs a cross-account PutObject into the existing central outcomes
-prefix. With SSE-KMS, S3 calls KMS on the writer's behalf. The central bucket/key
+prefix. The central bucket is SSE-KMS: every PutObject names the central CMK,
+and S3 calls KMS on the writer's behalf. The central bucket/key
 policies must authorize the actual organization and full role path. Only the
 bucket's existing owners merge the rendered statements; Terraform here does not
 manage any central bucket, key or notification configuration.
@@ -47,7 +48,7 @@ stored for replay. Failures show up here instead:
 | Failure | Where it is visible |
 |---|---|
 | EventBridge cannot invoke the Lambda (permission, throttling) | EventBridge rule metric `FailedInvocations` (namespace `AWS/Events`). |
-| Handler error, such as S3 or KMS AccessDenied | Lambda log group `/aws/lambda/<alias>-<prefix>-<region>-writer` and the Lambda `Errors` metric. Lambda retries twice. |
+| Handler error, such as S3 or KMS AccessDenied | Log streams for `<alias>-<prefix>-<region>-writer` in the existing `app_log/` group, and the Lambda `Errors` metric. Lambda retries twice. |
 | Retries exhausted or event older than six hours | Lambda `AsyncEventsDropped` metric; the event body is in the earlier error log lines. |
 | SSM never emitted the event | Nowhere; delivery is best effort. |
 

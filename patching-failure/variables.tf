@@ -80,9 +80,15 @@ variable "archive_s3_prefix" {
 }
 
 variable "archive_kms_key_arn" {
-  description = "ARN of the central account's KMS CMK that encrypts the archive bucket. Used only to encrypt the S3 PutObject call; never used for local resources such as the log group."
+  description = "Key ARN (not an alias) of the central account's KMS CMK. The central bucket is SSE-KMS, so every PutObject names this key. Used only for archive writes."
   type        = string
-  default     = null
+
+  validation {
+    condition     = can(regex("^arn:[a-z-]+:kms:[a-z0-9-]+:[0-9]{12}:key/[A-Za-z0-9-]+$", var.archive_kms_key_arn))
+    error_message = "archive_kms_key_arn must be a KMS key ARN (arn:<partition>:kms:<region>:<account>:key/<id>), not an alias."
+  }
+
+  nullable = false
 }
 
 variable "archive_object_acl" {
@@ -174,32 +180,30 @@ variable "include_instance_tags" {
   nullable    = false
 }
 
-variable "lambda_log_retention_in_days" {
-  description = "CloudWatch Logs retention for the Lambda's own log group."
-  type        = number
-  default     = 365
+variable "app_log_group_name" {
+  description = "Existing CloudWatch Logs group (same account and region) the Lambda writes to. Lambda creates its own log streams in it; retention and encryption belong to the group's owner and are not managed here."
+  type        = string
+  default     = "app_log/"
 
   validation {
-    condition = contains(
-      [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653],
-      var.lambda_log_retention_in_days
-    )
-    error_message = "lambda_log_retention_in_days must be one of the CloudWatch Logs allowed retention values."
+    condition     = length(var.app_log_group_name) > 0
+    error_message = "app_log_group_name must not be empty."
   }
 
   nullable = false
 }
 
-variable "local_kms_key_arn" {
-  description = "Same-account, same-region KMS key ARN to encrypt the Lambda's log group. NOT the central archive key. Leave null for CloudWatch Logs default encryption."
-  type        = string
-  default     = null
-}
-
 variable "lambda_package_kms_key_arn" {
-  description = "Optional same-account, same-region CMK for the deployment bucket. Independent of the log group key."
+  description = "Key ARN of a same-account, same-region CMK that encrypts the Lambda deployment-zip bucket (SSE-KMS). Its key policy must let the deploying role (prasa-tfe-assume-role) encrypt and decrypt."
   type        = string
-  default     = null
+
+  validation {
+    condition     = can(regex("^arn:[a-z-]+:kms:[a-z0-9-]+:[0-9]{12}:key/[A-Za-z0-9-]+$", var.lambda_package_kms_key_arn))
+    error_message = "lambda_package_kms_key_arn must be a KMS key ARN (arn:<partition>:kms:<region>:<account>:key/<id>), not an alias."
+  }
+
+  # Same account and region are checked by a precondition in main.tf.
+  nullable = false
 }
 
 variable "reserved_concurrency" {

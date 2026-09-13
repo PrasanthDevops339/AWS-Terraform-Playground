@@ -26,7 +26,7 @@ aws kms get-key-policy --key-id CENTRAL_KEY_ARN --policy-name default --query Po
 ```
 
 `get-bucket-location` returns null for us-east-1. Run KMS inspection in the key's
-region, and skip the KMS commands for SSE-S3. Also check the existing ingestion
+region. Also check the existing ingestion
 service's routing and labeling, and the reader's S3/KMS permissions for the new
 prefix.
 
@@ -34,8 +34,7 @@ prefix.
 |---|---|
 | BucketOwnerEnforced | Prefer `archive_object_acl=null`. An upload with `bucket-owner-full-control` is also accepted; other ACLs fail. |
 | ObjectWriter / BucketOwnerPreferred | Coordinate `bucket-owner-full-control`, the writer's `s3:PutObjectAcl` and the matching central allowance. Without the ACL, ownership and read access can differ even when the write succeeds. |
-| SSE-S3 | Leave `archive_kms_key_arn=null`; the rendered KMS statement is null. |
-| SSE-KMS with a customer-managed key | Set the **actual central key ARN**, even when the bucket's default encryption is already SSE-KMS. |
+| SSE-KMS with a customer-managed key (required) | Set `archive_kms_key_arn` to the **actual central key ARN** (a key ARN, not an alias). The writer always sends SSE-KMS headers with it. |
 | SSE-KMS with an AWS-managed key | The central owner must provide a customer-managed key for this cross-account write path. |
 | Role path/boundary | Use the actual role path and any required boundary. Both central statements include the complete role path. |
 
@@ -58,8 +57,8 @@ terraform output -json central_prerequisites > central-prerequisites.json
   actual organization and `arn:<partition>:iam::*:role<path><writer_role_name>`.
   With the ACL enabled, the condition also requires bucket-owner-full-control.
 - KMS statement: GenerateDataKey, Encrypt and DescribeKey, with the same
-  organization and full role-path conditions. It is null when no central CMK is
-  configured.
+  organization and full role-path conditions. It is always rendered because the
+  archive is SSE-KMS; if the key owner does not merge it, every write fails.
 
 The central owner merges these into the existing policy documents and keeps the
 administration, reader and other statements and their explicit protections.
@@ -89,9 +88,9 @@ service paths:
 | Restriction | Check |
 |---|---|
 | `aws:SourceVpce` / `aws:SourceVpc` | The writer has no VPC attachment, so an endpoint-only bucket Deny can reject it. Agree an approved network path first. |
-| SSE algorithm/key header | The writer sends explicit SSE-KMS and key headers only when the central key input is set. |
+| SSE algorithm/key header | The writer always sends `aws:kms` and the central key ARN; a bucket Deny that requires a different key rejects it. |
 | Account allowlist / organization / role path | Confirm the dummy values are replaced and the exact writer role path is authorized. |
-| Local log/package key conditions | Authorize logs and the deployment principal's package operations separately. Do not reuse the central archive key. |
+| Package CMK / `app_log/` group | The package CMK's key policy must let `prasa-tfe-assume-role` encrypt and decrypt the zip. `app_log/` encryption and retention stay with its owner. Do not reuse the central archive key for either. |
 | Lambda creation / permissions boundary / VPC guardrails | Confirm the deploying credentials can create these resources. A mandated VPC deployment needs an explicit code change. |
 
 No second `aws_s3_bucket_notification` is created: that resource is authoritative

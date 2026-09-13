@@ -43,6 +43,13 @@ locals {
 
     ephemeral_storage = 512
 
+    # Write to the existing app_log/ group; Lambda creates the log streams
+    # (named after the function) itself. system_log_level is JSON-only.
+    logging_config = {
+      log_format = "Text"
+      log_group  = data.aws_cloudwatch_log_group.app.name
+    }
+
     # AWS uses -1 for unreserved concurrency; map the null input explicitly.
     reserved_concurrent_executions = var.reserved_concurrency == null ? -1 : var.reserved_concurrency
 
@@ -97,11 +104,8 @@ resource "aws_s3_bucket" "lambda_package" {
       error_message = "The package bucket name must fit 63 characters; shorten name_prefix or set lambda_package_bucket_name."
     }
     precondition {
-      condition = alltrue([
-        for key in [var.local_kms_key_arn, var.lambda_package_kms_key_arn] :
-        key == null ? true : startswith(key, "arn:${local.partition}:kms:${local.region}:${local.account_id}:key/")
-      ])
-      error_message = "Log and package keys must belong to this account and region."
+      condition     = startswith(var.lambda_package_kms_key_arn, "arn:${local.partition}:kms:${local.region}:${local.account_id}:key/")
+      error_message = "lambda_package_kms_key_arn must be a key in this account and region."
     }
   }
 }
@@ -128,23 +132,11 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "lambda_package" {
 
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm     = var.lambda_package_kms_key_arn != null ? "aws:kms" : "AES256"
+      sse_algorithm     = "aws:kms"
       kms_master_key_id = var.lambda_package_kms_key_arn
     }
-    bucket_key_enabled = var.lambda_package_kms_key_arn != null
+    bucket_key_enabled = true
   }
-}
-
-# --------------------------------------------------------------------------
-# Lambda log group -- created before the function so Terraform owns it with an
-# explicit retention instead of Lambda auto-creating it.
-# --------------------------------------------------------------------------
-
-resource "aws_cloudwatch_log_group" "this" {
-  name              = "/aws/lambda/${local.function_name}"
-  retention_in_days = var.lambda_log_retention_in_days
-  kms_key_id        = var.local_kms_key_arn
-  tags              = var.tags
 }
 
 # --------------------------------------------------------------------------
@@ -167,7 +159,8 @@ module "writer_lambda" {
 
   reserved_concurrent_executions = local.writer_lambda_config.reserved_concurrent_executions
 
-  environment = local.writer_lambda_config.environment
+  environment    = local.writer_lambda_config.environment
+  logging_config = local.writer_lambda_config.logging_config
 
   # The shared module zips src/ and derives source_code_hash so code changes redeploy.
   upload_to_s3       = true
@@ -180,7 +173,6 @@ module "writer_lambda" {
   tags = var.tags
 
   depends_on = [
-    aws_cloudwatch_log_group.this,
     aws_iam_role_policy.runtime,
     aws_iam_role_policy.archive,
     aws_s3_bucket_public_access_block.lambda_package,

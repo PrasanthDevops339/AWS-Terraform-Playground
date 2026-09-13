@@ -23,9 +23,9 @@ there is no wrapper module and no AFT example.
 | File | Contents |
 |---|---|
 | `versions.tf` | Terraform/provider constraints, `cloud {}` for TFE, one `aws` provider assuming `prasa-tfe-assume-role` in `var.account_id` with the finops `default_tags`. |
-| `variables.tf` | `account_id`, `region`, `organization_id`, `archive_bucket_name` plus optional tuning. |
-| `data.tf` | Caller identity, account alias, partition, region. |
-| `main.tf` | Package bucket, log group, `module "writer_lambda"`, async retries, EventBridge rules/targets, and the **commented-out DLQ enhancement**. |
+| `variables.tf` | `account_id`, `organization_id`, `archive_bucket_name`, `archive_kms_key_arn`, `lambda_package_kms_key_arn`, plus optional `region`, `app_log_group_name` and tuning. |
+| `data.tf` | Caller identity, account alias, partition, region, and the **existing** `app_log/` log group (referenced, not created). |
+| `main.tf` | SSE-KMS package bucket, `module "writer_lambda"` logging to `app_log/`, async retries, EventBridge rules/targets, and the **commented-out DLQ enhancement**. |
 | `iam.tf` | Writer role, central archive/enrichment policy, logs runtime policy. |
 | `outputs.tf` | Function, rules, role, `canary_command`, `central_prerequisites`. |
 | `src/handler.py` | Lambda code (Python 3.13, boto3 from the runtime). |
@@ -46,16 +46,25 @@ All Terraform tests mock AWS, so no credentials or TFE login are needed
 (`-backend=false` skips the `cloud {}` block). To deploy the POC through TFE:
 
 1. On the TFE workspace, set **Terraform working directory** to `patching-failure`,
-   so the sibling `Terrafrom-AWS-Prasanth` modules are uploaded, and add the
-   Terraform variables from [terraform.tfvars.example](terraform.tfvars.example):
-   `account_id`, `organization_id`, `archive_bucket_name`, and optionally `region`
-   (default `us-east-2`).
+   so the sibling `Terrafrom-AWS-Prasanth` modules are uploaded. Add these
+   workspace **Terraform variables** (there is no tfvars file):
+
+   | Variable | Required | Notes |
+   |---|---|---|
+   | `account_id` | yes | Target account; TFE assumes `prasa-tfe-assume-role` there. |
+   | `organization_id` | yes | Rendered into the central policy statements. |
+   | `archive_bucket_name` | yes | Existing central bucket (SSE-KMS). |
+   | `archive_kms_key_arn` | yes | Central CMK **key** ARN (not an alias). |
+   | `lambda_package_kms_key_arn` | yes | Same-account, same-region CMK for the zip bucket. |
+   | `region` | no | Default `us-east-2`. |
+   | `app_log_group_name` | no | Default `app_log/`; must already exist. |
+
 2. Queue the run:
 
    ```bash
    export TF_CLOUD_ORGANIZATION=<org> TF_WORKSPACE=<workspace>
    terraform init
-   terraform plan    # runs in TFE; review: 23 creates, no aws_sqs_*
+   terraform plan    # runs in TFE; review: 22 creates, no aws_sqs_* or log group
    terraform apply   # or confirm the reviewed run in the TFE UI
    ```
 

@@ -5,19 +5,21 @@ mock_provider "aws" {
   mock_data "aws_partition" { defaults = { partition = "aws" } }
   mock_data "aws_region" { defaults = { region = "us-east-1", name = "us-east-1" } }
   mock_data "aws_iam_account_alias" { defaults = { account_alias = "pilot" } }
+  mock_data "aws_cloudwatch_log_group" { defaults = { arn = "arn:aws:logs:us-east-1:222233334444:log-group:app_log/" } }
   mock_resource "aws_lambda_function" { defaults = { arn = "arn:aws:lambda:us-east-1:222233334444:function:pilot-patch-outcome-us-east-1-writer" } }
-  mock_resource "aws_cloudwatch_log_group" { defaults = { arn = "arn:aws:logs:us-east-1:222233334444:log-group:/aws/lambda/pilot-patch-outcome-us-east-1-writer" } }
   mock_resource "aws_cloudwatch_event_rule" { defaults = { arn = "arn:aws:events:us-east-1:222233334444:rule/mock-rule" } }
 }
 
 variables {
-  account_id          = "222233334444"
-  organization_id     = "o-example1234"
-  archive_bucket_name = "central-patching-logs-111122223333"
+  account_id                 = "222233334444"
+  organization_id            = "o-example1234"
+  archive_bucket_name        = "central-patching-logs-111122223333"
+  archive_kms_key_arn        = "arn:aws:kms:us-east-2:111122223333:key/11111111-1111-1111-1111-111111111111"
+  lambda_package_kms_key_arn = "arn:aws:kms:us-east-1:222233334444:key/22222222-2222-2222-2222-222222222222"
 }
 
 # ---------------------------------------------------------------------------
-# Default shape: basic path, dormant rules, no DLQ
+# Default shape: basic path, dormant rules, no DLQ, KMS everywhere, app_log/
 # ---------------------------------------------------------------------------
 
 run "default_shape_and_dormant" {
@@ -67,12 +69,12 @@ run "default_shape_and_dormant" {
     error_message = "Package ownership must be enforced."
   }
   assert {
-    condition     = one(aws_s3_bucket_server_side_encryption_configuration.lambda_package.rule).apply_server_side_encryption_by_default[0].sse_algorithm == "AES256"
-    error_message = "The package defaults to SSE-S3."
+    condition     = one(aws_s3_bucket_server_side_encryption_configuration.lambda_package.rule).apply_server_side_encryption_by_default[0].sse_algorithm == "aws:kms" && one(aws_s3_bucket_server_side_encryption_configuration.lambda_package.rule).apply_server_side_encryption_by_default[0].kms_master_key_id == var.lambda_package_kms_key_arn && one(aws_s3_bucket_server_side_encryption_configuration.lambda_package.rule).bucket_key_enabled
+    error_message = "The package bucket must use SSE-KMS with the supplied CMK and a bucket key."
   }
   assert {
-    condition     = aws_cloudwatch_log_group.this.name == "/aws/lambda/pilot-patch-outcome-us-east-1-writer" && aws_cloudwatch_log_group.this.retention_in_days == 365 && aws_cloudwatch_log_group.this.kms_key_id == null
-    error_message = "The log group must include alias and region, with explicit retention and no central key."
+    condition     = output.writer_lambda_config.logging_config.log_group == "app_log/" && output.writer_lambda_config.logging_config.log_format == "Text" && output.lambda_log_group_name == "app_log/"
+    error_message = "The Lambda must log to the existing app_log/ group in Text format."
   }
   assert {
     condition     = output.writer_lambda_config.runtime == "python3.13" && output.writer_lambda_config.handler == "handler.handler" && output.writer_lambda_config.package_type == "Zip"
@@ -83,20 +85,32 @@ run "default_shape_and_dormant" {
     error_message = "Retain sizing and unreserved concurrency."
   }
   assert {
-    condition     = output.writer_lambda_config.environment.BUCKET_NAME == var.archive_bucket_name && output.writer_lambda_config.environment.KMS_KEY_ARN == ""
-    error_message = "Route archive settings to the handler."
+    condition     = output.writer_lambda_config.environment.BUCKET_NAME == var.archive_bucket_name && output.writer_lambda_config.environment.KMS_KEY_ARN == var.archive_kms_key_arn && output.writer_lambda_config.environment.OBJECT_ACL == ""
+    error_message = "Route archive bucket and central CMK to the handler."
+  }
+  assert {
+    condition     = length(jsondecode(aws_iam_role_policy.archive.policy).Statement) == 4
+    error_message = "Archive policy has S3, KMS, SSM and EC2 statements by default."
   }
   assert {
     condition     = jsondecode(aws_iam_role_policy.archive.policy).Statement[0].Action == ["s3:PutObject"] && jsondecode(aws_iam_role_policy.archive.policy).Statement[0].Resource == ["arn:aws:s3:::central-patching-logs-111122223333/patchingsolution-events/outcomes/*"]
     error_message = "Write-only archive access to the outcomes prefix."
   }
   assert {
-    condition     = toset(jsondecode(aws_iam_role_policy.archive.policy).Statement[1].Action) == toset(["ssm:ListCommandInvocations", "ssm:ListCommands", "ssm:DescribeInstanceInformation"])
+    condition     = jsondecode(aws_iam_role_policy.archive.policy).Statement[1].Resource == [var.archive_kms_key_arn] && !contains(jsondecode(aws_iam_role_policy.archive.policy).Statement[1].Action, "kms:Decrypt")
+    error_message = "Only the central key receives encrypt permissions; no Decrypt."
+  }
+  assert {
+    condition     = toset(jsondecode(aws_iam_role_policy.archive.policy).Statement[2].Action) == toset(["ssm:ListCommandInvocations", "ssm:ListCommands", "ssm:DescribeInstanceInformation"])
     error_message = "Use aggregate invocation read access, not plugin API access."
   }
   assert {
-    condition     = output.central_prerequisites.bucket_policy_statement.Condition.StringEquals["aws:PrincipalOrgID"] == "o-example1234" && output.central_prerequisites.kms_key_policy_statement == null
-    error_message = "Resolve the org ID and omit KMS policy for SSE-S3."
+    condition     = output.central_prerequisites.bucket_policy_statement.Condition.StringEquals["aws:PrincipalOrgID"] == "o-example1234" && output.central_prerequisites.kms_key_policy_statement != null
+    error_message = "Resolve the org ID and always render the KMS statement."
+  }
+  assert {
+    condition     = !contains(output.central_prerequisites.kms_key_policy_statement.Action, "kms:Decrypt")
+    error_message = "The central KMS statement grants no Decrypt."
   }
 }
 
@@ -127,8 +141,8 @@ run "applied_runtime_policy_basic_path" {
     error_message = "Basic path: the runtime policy grants logs only (no SQS)."
   }
   assert {
-    condition     = toset(jsondecode(aws_iam_role_policy.runtime.policy).Statement[0].Action) == toset(["logs:CreateLogStream", "logs:PutLogEvents"]) && jsondecode(aws_iam_role_policy.runtime.policy).Statement[0].Resource == ["${aws_cloudwatch_log_group.this.arn}:*"]
-    error_message = "Limit log writes to this function's log group."
+    condition     = toset(jsondecode(aws_iam_role_policy.runtime.policy).Statement[0].Action) == toset(["logs:CreateLogStream", "logs:PutLogEvents"]) && jsondecode(aws_iam_role_policy.runtime.policy).Statement[0].Resource == ["arn:aws:logs:us-east-1:222233334444:log-group:app_log/:*"]
+    error_message = "Limit log writes to streams in the existing app_log/ group."
   }
   assert {
     condition     = aws_iam_role_policy.runtime.role == aws_iam_role.writer.name && aws_iam_role_policy.archive.role == aws_iam_role.writer.name
@@ -166,13 +180,12 @@ run "canary_off" {
   }
 }
 
-run "path_boundary_acl_and_kms" {
+run "path_boundary_and_acl" {
   command = plan
   variables {
     iam_role_path            = "/platform/"
     permissions_boundary_arn = "arn:aws:iam::222233334444:policy/boundary"
     archive_object_acl       = "bucket-owner-full-control"
-    archive_kms_key_arn      = "arn:aws:kms:us-east-1:111122223333:key/00000000-0000-0000-0000-000000000000"
   }
   assert {
     condition     = output.central_prerequisites.bucket_policy_statement.Condition.ArnLike["aws:PrincipalArn"] == "arn:aws:iam::*:role/platform/patch-outcome-s3-writer" && output.central_prerequisites.kms_key_policy_statement.Condition.ArnLike["aws:PrincipalArn"] == "arn:aws:iam::*:role/platform/patch-outcome-s3-writer"
@@ -187,12 +200,8 @@ run "path_boundary_acl_and_kms" {
     error_message = "Both sides grant and require the ACL only when requested."
   }
   assert {
-    condition     = jsondecode(aws_iam_role_policy.archive.policy).Statement[1].Resource == [var.archive_kms_key_arn] && !contains(output.central_prerequisites.kms_key_policy_statement.Action, "kms:Decrypt")
-    error_message = "Only the selected central key receives write permissions."
-  }
-  assert {
-    condition     = output.writer_lambda_config.environment.KMS_KEY_ARN == var.archive_kms_key_arn && output.writer_lambda_config.environment.OBJECT_ACL == "bucket-owner-full-control"
-    error_message = "Pass the archive CMK and ACL to the handler."
+    condition     = output.writer_lambda_config.environment.OBJECT_ACL == "bucket-owner-full-control"
+    error_message = "Pass the ACL to the handler."
   }
 }
 
@@ -203,8 +212,8 @@ run "no_enrichment" {
     include_instance_tags = false
   }
   assert {
-    condition     = length(jsondecode(aws_iam_role_policy.archive.policy).Statement) == 1 && output.writer_lambda_config.environment.ENRICH == "false" && output.writer_lambda_config.environment.INCLUDE_INSTANCE_TAGS == "false"
-    error_message = "Disable all enrichment permissions and flags together."
+    condition     = length(jsondecode(aws_iam_role_policy.archive.policy).Statement) == 2 && output.writer_lambda_config.environment.ENRICH == "false" && output.writer_lambda_config.environment.INCLUDE_INSTANCE_TAGS == "false"
+    error_message = "Disable all enrichment permissions and flags together (S3 + KMS remain)."
   }
 }
 
@@ -214,19 +223,19 @@ run "no_tag_permissions" {
     include_instance_tags = false
   }
   assert {
-    condition     = length(jsondecode(aws_iam_role_policy.archive.policy).Statement) == 2
-    error_message = "Keep SSM but remove EC2 when tags are off."
+    condition     = length(jsondecode(aws_iam_role_policy.archive.policy).Statement) == 3
+    error_message = "Keep S3, KMS and SSM but remove EC2 when tags are off."
   }
 }
 
-run "independent_log_and_package_keys" {
+run "custom_log_group" {
   command = plan
   variables {
-    local_kms_key_arn = "arn:aws:kms:us-east-1:222233334444:key/00000000-0000-0000-0000-000000000000"
+    app_log_group_name = "app_log/patching"
   }
   assert {
-    condition     = aws_cloudwatch_log_group.this.kms_key_id == var.local_kms_key_arn && one(aws_s3_bucket_server_side_encryption_configuration.lambda_package.rule).apply_server_side_encryption_by_default[0].sse_algorithm == "AES256"
-    error_message = "A log-specific key must not be reused for the package bucket."
+    condition     = output.writer_lambda_config.logging_config.log_group == "app_log/patching"
+    error_message = "Pass the configured existing log group to the Lambda."
   }
 }
 
@@ -237,7 +246,7 @@ run "name_prefix_and_concurrency" {
     reserved_concurrency = 5
   }
   assert {
-    condition     = aws_s3_bucket.lambda_package.bucket == "px-test-pkg-222233334444-us-east-1" && aws_cloudwatch_log_group.this.name == "/aws/lambda/pilot-px-test-us-east-1-writer" && output.writer_lambda_config.reserved_concurrent_executions == 5
+    condition     = aws_s3_bucket.lambda_package.bucket == "px-test-pkg-222233334444-us-east-1" && output.writer_lambda_config.reserved_concurrent_executions == 5
     error_message = "Derive names and pass explicit concurrency."
   }
 }
@@ -270,6 +279,46 @@ run "rejects_empty_bucket" {
   expect_failures = [var.archive_bucket_name]
 }
 
+run "rejects_empty_archive_key" {
+  command = plan
+  variables {
+    archive_kms_key_arn = ""
+  }
+  expect_failures = [var.archive_kms_key_arn]
+}
+
+run "rejects_alias_archive_key" {
+  command = plan
+  variables {
+    archive_kms_key_arn = "arn:aws:kms:us-east-2:111122223333:alias/central-archive"
+  }
+  expect_failures = [var.archive_kms_key_arn]
+}
+
+run "rejects_empty_package_key" {
+  command = plan
+  variables {
+    lambda_package_kms_key_arn = ""
+  }
+  expect_failures = [var.lambda_package_kms_key_arn]
+}
+
+run "rejects_other_region_package_key" {
+  command = plan
+  variables {
+    lambda_package_kms_key_arn = "arn:aws:kms:us-west-2:222233334444:key/test"
+  }
+  expect_failures = [aws_s3_bucket.lambda_package]
+}
+
+run "rejects_empty_log_group" {
+  command = plan
+  variables {
+    app_log_group_name = ""
+  }
+  expect_failures = [var.app_log_group_name]
+}
+
 run "rejects_uppercase_prefix" {
   command = plan
   variables {
@@ -292,14 +341,6 @@ run "rejects_missing_terminated" {
     invocation_failure_statuses = ["Failed"]
   }
   expect_failures = [var.invocation_failure_statuses]
-}
-
-run "rejects_retention" {
-  command = plan
-  variables {
-    lambda_log_retention_in_days = 45
-  }
-  expect_failures = [var.lambda_log_retention_in_days]
 }
 
 run "rejects_log_level" {
@@ -332,14 +373,6 @@ run "rejects_bad_path" {
     iam_role_path = "/platform"
   }
   expect_failures = [var.iam_role_path]
-}
-
-run "rejects_other_region_key" {
-  command = plan
-  variables {
-    lambda_package_kms_key_arn = "arn:aws:kms:us-west-2:222233334444:key/test"
-  }
-  expect_failures = [aws_s3_bucket.lambda_package]
 }
 
 run "rejects_long_bucket" {

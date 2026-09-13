@@ -19,9 +19,9 @@ flowchart TB
         end
         CLI["Operator: manually sends canary"]
         FN["Shared terraform-aws-lambda module<br/>alias-prefix-region-writer<br/>handler.handler / Python 3.13 / 30 s<br/>2 async retries, 6 h max age"]
-        PKG[("S3 package bucket<br/>prefix-pkg-account-region<br/>SSE-S3 or local package CMK")]
+        PKG[("S3 package bucket<br/>prefix-pkg-account-region<br/>SSE-KMS with local package CMK")]
         READS["Bounded enrichment — at most 10 s<br/>SSM ListCommandInvocations / ListCommands<br/>agent status / optional EC2 tags"]
-        LOGS[("CloudWatch Logs + metrics<br/>365-day retention / optional local CMK<br/>failure visibility")]
+        LOGS[("Existing app_log/ log group (not managed)<br/>Lambda-created streams + metrics<br/>failure visibility")]
         SSM --> R1 & R2 & R3
         R1 & R2 & R3 --> FN
         CLI --> RC --> FN
@@ -33,7 +33,7 @@ flowchart TB
     subgraph CENTRAL["Existing central account — owned by other teams"]
         POLICY["Existing bucket + KMS policies<br/>Merge rendered statements manually"]
         BUCKET[("Existing archive bucket<br/>patchingsolution-events/outcomes/")]
-        KEY{{"Existing central KMS CMK<br/>For SSE-KMS archives"}}
+        KEY{{"Existing central KMS CMK<br/>Archive is SSE-KMS"}}
         INGEST["Existing s3tofirehose ingestion"]
         SPLUNK[("Splunk: aws:ssm:patch:outcome")]
         POLICY -. authorizes .-> BUCKET
@@ -42,7 +42,7 @@ flowchart TB
         BUCKET --> INGEST --> SPLUNK
     end
     QS --> SSM
-    FN ==>|"Cross-account PutObject<br/>SSE-KMS when configured"| BUCKET
+    FN ==>|"Cross-account PutObject<br/>SSE-KMS with central CMK"| BUCKET
     STDOUT[("Existing aws:ssm:patch:stdout")] -. "correlate account + region + command_id + instance_id" .-> SPLUNK
 ```
 
@@ -51,12 +51,14 @@ flowchart TB
 `iam.tf` creates one role with a fixed name and path, so that the central policies
 can authorize it with `arn:<partition>:iam::*:role<path><name>`. The role carries
 two inline policies: `archive`, which covers central S3/KMS writes and optional
-SSM/EC2 reads, and `runtime`, which lets the function write to its own log group.
+SSM/EC2 reads, and `runtime`, which lets Lambda create log streams in the existing
+`app_log/` group.
 
 The shared Lambda module is used unchanged. It prefixes the function name with
 the account alias, which must exist and keep the name within 64 characters. It
-deploys only from S3, so this root creates a package bucket. Bucket protection,
-the log group and both IAM policies are created before the function, and the
+deploys only from S3, so this root creates an SSE-KMS package bucket. The log
+group is looked up with a data source, so the plan fails if `app_log/` is
+missing. Bucket protection and both IAM policies are created before the function, and the
 EventBridge targets follow the function and its async configuration. IAM
 propagation can still require AWS retries during the first apply.
 

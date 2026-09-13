@@ -15,19 +15,20 @@ does not create or modify patch policies, baselines or associations.
 - A TFE workspace whose credentials can assume `arn:aws:iam::<account_id>:role/prasa-tfe-assume-role`. That role must be able to create IAM, Lambda, S3, Logs and EventBridge resources and look up the account alias.
 - Provider `default_tags` add the `#finops:*` and `admin:environment` tags to every resource. The IAM API documents tag keys as `[\p{L}\p{Z}\p{N}_.:/=+\-@]+`, which does not include `#`. If the first apply rejects the tags on `aws_iam_role.writer`, confirm how your other TFE workspaces tag IAM roles before changing anything.
 - The Python 3.13 runtime includes boto3; no layer is added.
-- Optional package or log CMKs must be in the same account and region.
+- The CloudWatch log group `app_log/` (or `app_log_group_name`) must already exist in the same account and region. Lambda creates its log streams there. The TFE role needs `logs:DescribeLogGroups` for the lookup. Retention and encryption are owned by the group's owner.
+- A same-account, same-region CMK for the zip bucket (`lambda_package_kms_key_arn`). Its key policy must allow `prasa-tfe-assume-role` `kms:GenerateDataKey`, `kms:Encrypt`, `kms:Decrypt` and `kms:DescribeKey`: Terraform uploads the zip, and Lambda reads it with the caller's permissions.
+- The central archive bucket is SSE-KMS; `archive_kms_key_arn` must be the central key ARN.
 - The central archive CMK is used only for archive writes.
 
 ## Resources
 
-Default deployment (canary enabled): **23 managed resources**.
+Default deployment (canary enabled): **22 managed resources**.
 
 | Count | Resource | Purpose |
 |---|---|---|
 | 1 | IAM role | Lambda execution role with a fixed name and path. |
-| 2 | IAM inline policies | `archive`: central S3/KMS writes and SSM/EC2 reads. `runtime`: this function's log group. |
-| 4 | Package bucket, public access block, ownership, encryption | Deployment zip, separate from the central archive. |
-| 1 | CloudWatch log group | Explicit retention and optional local CMK. |
+| 2 | IAM inline policies | `archive`: central S3/KMS writes and SSM/EC2 reads. `runtime`: log streams in the existing `app_log/` group. |
+| 4 | Package bucket, public access block, ownership, encryption | Deployment zip, SSE-KMS with the package CMK, separate from the central archive. |
 | 1 | Lambda function (shared module) | Python 3.13, `handler.handler`, 128 MB, 30 s. |
 | 1 | S3 package object (shared module) | Zip of `src/`; a hash change redeploys. |
 | 4 | Lambda permissions (shared module) | Only the configured rules may invoke. |
@@ -35,7 +36,7 @@ Default deployment (canary enabled): **23 managed resources**.
 | 4 | EventBridge rules | Three SSM patterns plus the manual canary. |
 | 4 | EventBridge targets | One Lambda target per rule, no DLQ. |
 
-With `enable_canary=false` the count is 20. Restoring the DLQ enhancement adds
+The `app_log/` log group is looked up, not managed. With `enable_canary=false` the count is 19. Restoring the DLQ enhancement adds
 3: two SQS queues and one queue policy.
 
 ## Local verification
@@ -67,10 +68,11 @@ delivery.
 2. On the TFE workspace:
    - Set the **Terraform working directory** to `patching-failure`. The CLI then
      uploads the repository root, so `../Terrafrom-AWS-Prasanth` resolves.
-   - Add Terraform variables (not environment variables) with the real
-     `account_id`, `organization_id`, `archive_bucket_name` and, when needed,
-     `archive_kms_key_arn` and `region` (default `us-east-2`). Keep
-     `rules_enabled=false`. See `terraform.tfvars.example`.
+   - Add Terraform variables (not environment variables; there is no tfvars
+     file) with the real `account_id`, `organization_id`, `archive_bucket_name`,
+     `archive_kms_key_arn` and `lambda_package_kms_key_arn`. Optionally set
+     `region` (default `us-east-2`) and `app_log_group_name` (default `app_log/`).
+     Keep `rules_enabled=false`.
 3. Queue a plan in TFE, review it, then confirm the apply for that run:
 
    ```bash
@@ -80,7 +82,9 @@ delivery.
    terraform apply
    ```
 
-   Check the plan for 23 creates, no `aws_sqs_*`, no central resources, and the
+   Check the plan for 22 creates, no `aws_sqs_*` or `aws_cloudwatch_log_group`
+   resource, `logging_config.log_group = "app_log/"` on the function,
+   `aws:kms` on the package bucket, no central resources, and the
    finops `default_tags` on each resource. TFE keeps the state; the
    `allowed_account_ids` guard fails the run if the assumed role is in a
    different account.
@@ -96,7 +100,8 @@ delivery.
    ```
 
 7. Exercise the failure path. Temporarily remove the central bucket grant, send
-   the canary, and confirm the error in the log group and the Lambda `Errors`
+   the canary, and confirm the error in the `app_log/` log stream named after
+   the function and the Lambda `Errors`
    metric (`AsyncEventsDropped` after retries). Restore the grant.
 8. Set `rules_enabled=true` and apply through a new reviewed plan. Let the
    Quick Setup patch policy run a scan, or an install on a pilot node, then
