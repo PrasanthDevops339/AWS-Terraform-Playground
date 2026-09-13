@@ -12,7 +12,7 @@ import types
 import unittest
 from unittest.mock import Mock, patch
 
-SOURCE = Path(__file__).parents[1] / "modules/patch-outcome-observability/src/handler.py"
+SOURCE = Path(__file__).parents[1] / "src/handler.py"
 COMMAND = "11111111-1111-1111-1111-111111111111"
 INSTANCE = "i-0123456789abcdef0"
 

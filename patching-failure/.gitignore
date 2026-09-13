@@ -1,13 +1,15 @@
-modules/**/build/
 .terraform/
-modules/**/.terraform.lock.hcl
-!examples/aft-account-customizations/.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
+*.tfplan
+terraform.tfvars
 crash.log
 
-# Lambda package zips written by the shared terraform-aws-lambda module
+# Lambda package zip written by the shared terraform-aws-lambda module
 # (its archive_file output_path is relative to the working directory).
 *.zip
 **/__pycache__/
 *.pyc
+
+# Commit the POC root provider lock file (repo root .gitignore ignores lock files).
+!.terraform.lock.hcl

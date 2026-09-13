@@ -19,8 +19,8 @@ still deduplicate `account`, `region`, `event_id`.
 |---|---|
 | `schema_version` | Integer `2`. |
 | `record_type` | `invocation`, `command`, or `canary`. |
-| `event_id` | Original EventBridge ID; preserved during queue replay. |
-| `account`, `region` | Originating member account and region. |
+| `event_id` | Original EventBridge ID; preserved during replay. |
+| `account`, `region` | Originating account and region. |
 | `event_time` | Original event time normalized to UTC with milliseconds, e.g. `2026-09-08T12:00:00.000Z`. |
 | `instance_id` | Present only on invocation records; EC2 `i-` or managed-node `mi-` ID. |
 | `command_id`, `document` | SSM command/document identity; null on canaries. |

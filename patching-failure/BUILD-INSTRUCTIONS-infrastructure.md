@@ -1,57 +1,42 @@
-# Build and rollout — patch outcome observability
+# Build and rollout — patch outcome observability POC
 
-Implementations live entirely in `patching-failure`. Shared modules under
-`Terrafrom-AWS-Prasanth` are read-only dependencies. Keep their relative source
-paths intact inside the Git package; all integration adaptations belong here.
+Everything is implemented in `patching-failure/`, a single Terraform root for one
+account and one region. The shared module
+`../Terrafrom-AWS-Prasanth/terraform-aws-lambda` is a read-only dependency; keep
+the two directories side by side so the relative source path resolves.
 
-## Deployment shape and contracts
+Patching is performed by the centralized Quick Setup patch policy. This root
+does not create or modify patch policies, baselines or associations.
 
-Call `modules/patch-outcome-observability` once per region. The primary call
-uses the default `create_writer_role=true`: supply the actual organization ID,
-existing central bucket/prefix/key, optional ACL, role path/boundary and enrichment
-flags. The module creates the Lambda execution role and common inline policy
-alongside the regional resources. It exports `writer_role_arn` and resolved
-`central_prerequisites` for the **existing** central bucket and KMS policies.
+## Requirements
 
-Additional regions set `create_writer_role=false` and pass
-`writer_role_arn=module.primary.writer_role_arn`, with the same archive/enrichment
-settings. No separate account module or IAM repository is required.
-The primary deployment creates 26 resources and each additional region creates
-24 with the default canary: regional package bucket/object, runtime policy,
-Lambda/log group, three SSM rules plus canary, targets/permissions and two queues.
-Two regions create 50 managed resources. Central infrastructure is referenced;
-only its owners merge the generated policy statements into their existing policies.
+- Terraform >= 1.9, AWS provider >= 6.0 and < 7, archive provider >= 2.4 and < 3.
+- An IAM account alias in the POC account; the shared module uses it to prefix names.
+- A TFE workspace whose credentials can assume `arn:aws:iam::<account_id>:role/prasa-tfe-assume-role`. That role must be able to create IAM, Lambda, S3, Logs and EventBridge resources and look up the account alias.
+- Provider `default_tags` add the `#finops:*` and `admin:environment` tags to every resource. The IAM API documents tag keys as `[\p{L}\p{Z}\p{N}_.:/=+\-@]+`, which does not include `#`. If the first apply rejects the tags on `aws_iam_role.writer`, confirm how your other TFE workspaces tag IAM roles before changing anything.
+- The Python 3.13 runtime includes boto3; no layer is added.
+- Optional package or log CMKs must be in the same account and region.
+- The central archive CMK is used only for archive writes.
 
-The example root owns both regions and the role in one member-account state.
-AFT repeats that root in separate member states. IAM is account-wide: enable
-role creation in exactly one call per account. If splitting states later, deploy
-the owning region first and pass its role ARN to the other regional states. Keep
-the owning deployment while any regional Lambda still uses the shared role.
+## Resources
 
-Requirements: Terraform >=1.9, AWS provider >=6.0,<7, archive provider >=2.4,<3,
-a usable IAM account alias, and AFT deployment credentials with provisioning,
-account-alias lookup and package access. Python 3.13 runtime includes boto3;
-no runtime layer or dependency installation is added. Optional package/log CMKs
-must be local to their region/account and authorize their respective consumers.
-The central archive CMK is used only for archive writes.
+Default deployment (canary enabled): **23 managed resources**.
 
-## Reproducible AFT sourcing
+| Count | Resource | Purpose |
+|---|---|---|
+| 1 | IAM role | Lambda execution role with a fixed name and path. |
+| 2 | IAM inline policies | `archive`: central S3/KMS writes and SSM/EC2 reads. `runtime`: this function's log group. |
+| 4 | Package bucket, public access block, ownership, encryption | Deployment zip, separate from the central archive. |
+| 1 | CloudWatch log group | Explicit retention and optional local CMK. |
+| 1 | Lambda function (shared module) | Python 3.13, `handler.handler`, 128 MB, 30 s. |
+| 1 | S3 package object (shared module) | Zip of `src/`; a hash change redeploys. |
+| 4 | Lambda permissions (shared module) | Only the configured rules may invoke. |
+| 1 | Lambda async invoke config | 2 retries, 6-hour maximum event age, no destination. |
+| 4 | EventBridge rules | Three SSM patterns plus the manual canary. |
+| 4 | EventBridge targets | One Lambda target per rule, no DLQ. |
 
-For local development, run the supplied example in the full checkout. For a
-existing AFT customization repository, use the same literal Git source in each
-regional module call, pinned to the **full reviewed commit** of this enclosing repository:
-
-```hcl
-# Replace REVIEWED_COMMIT with the full commit containing these changes before init.
-source = "git::ssh://git@github.com/PrasanthDevops339/AWS-Terraform-Playground.git//patching-failure/modules/patch-outcome-observability?ref=REVIEWED_COMMIT"
-```
-
-This is a module-block source line, not a complete Terraform configuration. Terraform downloads the enclosing package so sibling shared
-module paths resolve. Do not copy only the regional module directory or use a
-floating branch for fleet rollout. Use AFT's existing backend/providers and
-commit the deployment root's provider lock file. The supplied root lock includes
-registry checksums; refresh Linux platform checksums in the release environment
-if the AFT runner requires them.
+With `enable_canary=false` the count is 20. Restoring the DLQ enhancement adds
+3: two SQS queues and one queue policy.
 
 ## Local verification
 
@@ -59,119 +44,99 @@ Run from `patching-failure/`:
 
 ```bash
 terraform fmt -check -recursive
-terraform -chdir=modules/patch-outcome-observability init -backend=false
-terraform -chdir=modules/patch-outcome-observability validate
-terraform -chdir=modules/patch-outcome-observability test
-terraform -chdir=examples/aft-account-customizations init -backend=false
-terraform -chdir=examples/aft-account-customizations validate
-terraform -chdir=examples/aft-account-customizations test
+terraform init -backend=false
+terraform validate
+terraform test
 python3 -m unittest discover -s tests -v
 ```
 
-Terraform suites mock **all** AWS providers; their `command=apply` cases apply
-only mocked resources to temporary test state. They inspect actual generated
-policy JSON and the shared modules' resolved outputs. No AWS credentials or
-cloud resources are used. Run `tflint` where installed with the supplied config;
-report its absence rather than claiming it ran. Do not format or edit child
-source modules to resolve unrelated upstream lint findings.
+`tests/basic.tftest.hcl` mocks the AWS provider. Its `command = apply` run only
+creates mocked resources in temporary test state and inspects the generated
+policy JSON. The archive provider runs locally and writes
+`patch-outcome-<region>-writer.zip` to the working directory, which is
+gitignored. The Python suite fakes the SDK boundary. It covers aggregate status
+queries, Scan/Install classification, eventual consistency, deadline
+interruption, cache expiry, canaries, replay identity, S3 failures and Splunk
+fixture correlation. Local tests cannot run Splunk or prove real SSM event
+delivery.
 
-The Python suite fakes the SDK boundary and validates aggregate status queries,
-Scan/Install classification, eventual consistency, deadline interruption, cache
-expiry, canaries, replay identity, S3 failures, lookup configuration and fixture
-correlation. Local tests cannot execute the Splunk search engine or prove real
-SSM event delivery. Test event envelopes live under `tests/fixtures/`; the native
-Terraform suite compares them with generated JSON patterns.
+## POC deployment
 
-Verification on 2026-09-08 used local Terraform **1.15.8**, AWS provider **6.62.0**
-and archive provider **2.8.0**, with backend initialization disabled and all AWS
-providers mocked. Formatting, module/example validation, **41 Terraform tests**
-and **27 Python/Splunk contract tests** passed. `tflint` is unavailable locally.
-An isolated migration fixture also used [shared test state](https://developer.hashicorp.com/terraform/language/tests#modules-state)
-to plan the previous account-module addresses into the included-role layout:
-both IAM moves were recognized and all 50 managed resources were unchanged.
-That extra fixture ran under Terraform 1.15.8 outside the checked-in suite; it
-does not raise the module's 1.9 floor or verify an actual deployed state. Live AFT
-execution assumes the existing remote backend and still requires the pilot below.
-
-## Dormant pilot using real values
-
-The provided member tfvars examples contain **dummy** accounts `222233334444`
-and `333344445555`; central `111122223333` is also dummy. They are not deployable
-credentials or verified resources. Replace sample values with real member/central
-identifiers before a live pilot. Existing ingestion is assumed available; verify
-that it includes the outcomes prefix and intended sourcetype.
-
-1. Complete the [central preflight](central-prerequisites/README.md), including
-   ownership, central encryption, explicit Denies, role path/boundary and any
-   organizational VPC requirements. This implementation uses no VPC attachment.
-2. Run one AFT member customization in two regions with `rules_enabled=false`.
-   Review the real-provider plan: one identity, regional package buckets, no
-   central resource ownership and the expected allowed account ID. Use the
-   existing AFT remote backend. In the configured deployment root, save a plan:
+1. Complete the [central preflight](central-prerequisites/README.md): ownership,
+   encryption, explicit Denies and role path/boundary. This writer uses no VPC.
+2. On the TFE workspace:
+   - Set the **Terraform working directory** to `patching-failure`. The CLI then
+     uploads the repository root, so `../Terrafrom-AWS-Prasanth` resolves.
+   - Add Terraform variables (not environment variables) with the real
+     `account_id`, `organization_id`, `archive_bucket_name` and, when needed,
+     `archive_kms_key_arn` and `region` (default `us-east-2`). Keep
+     `rules_enabled=false`. See `terraform.tfvars.example`.
+3. Queue a plan in TFE, review it, then confirm the apply for that run:
 
    ```bash
-   terraform plan -var-file=member-real.tfvars -out=patch-outcome.tfplan
-   terraform show -no-color patch-outcome.tfplan
+   export TF_CLOUD_ORGANIZATION=<org> TF_WORKSPACE=<workspace>
+   terraform init
+   terraform plan
+   terraform apply
    ```
 
-   Review the saved plan and obtain the normal deployment approval before applying
-   that artifact through AFT. `member-real.tfvars` must contain the actual values;
-   the dummy example files are for documentation and mocked tests only.
-3. Export `terraform output -json central_prerequisites`; central owners merge
-   the statements and retain their current policies, encryption and ingestion.
-4. Verify actual queue retention (1209600), SSE-SQS, function/log names, local
-   encryption and the async destination. Send the two `canary_commands`; check
-   PutEvents `FailedEntryCount=0` and find each EventId in S3 and Splunk.
-5. Validate the SSM patterns independently of the canary. For example, from a
-   real initialized example root (substitute profile/region as appropriate):
+   Check the plan for 23 creates, no `aws_sqs_*`, no central resources, and the
+   finops `default_tags` on each resource. TFE keeps the state; the
+   `allowed_account_ids` guard fails the run if the assumed role is in a
+   different account.
+4. Run `terraform output -json central_prerequisites`. The central owners merge
+   these statements into their existing bucket and KMS policies.
+5. Run `terraform output -raw canary_command` and execute the command. Confirm
+   `FailedEntryCount=0`, then find the EventId in S3 and Splunk.
+6. Validate the SSM patterns independently of the canary:
 
    ```bash
-   aws events describe-rule --name patch-outcome-invocation-success --region us-east-1 --query EventPattern --output text > /tmp/patch-outcome-pattern.json
-   aws events test-event-pattern --event-pattern file:///tmp/patch-outcome-pattern.json --event file://../../tests/fixtures/ssm-invocation.json --region us-east-1
+   aws events describe-rule --name patch-outcome-invocation-success --query EventPattern --output text > /tmp/pattern.json
+   aws events test-event-pattern --event-pattern file:///tmp/pattern.json --event file://tests/fixtures/ssm-invocation.json
    ```
 
-   Repeat failure/command fixtures and confirm unrelated documents/nonterminal
-   events do not match. AWS TestEventPattern checks matching, not SSM delivery.
-6. Exercise target delivery failure and Lambda write failure in an isolated
-   pilot test window. Restore permissions, inspect each queue envelope, and
-   replay using the central runbook. Account for configured delivery retry/event
-   age rather than assuming messages arrive in the queue immediately.
-7. Arm only the pilot member. Check actual Scan/Install outcomes, a multi-step
-   document, cancellation/non-delivery, and a two-instance stdout correlation.
-   Verify duplicate replay leaves Splunk counts unchanged. Then enable the
-   remaining accounts through reviewed AFT batches.
+7. Exercise the failure path. Temporarily remove the central bucket grant, send
+   the canary, and confirm the error in the log group and the Lambda `Errors`
+   metric (`AsyncEventsDropped` after retries). Restore the grant.
+8. Set `rules_enabled=true` and apply through a new reviewed plan. Let the
+   Quick Setup patch policy run a scan, or an install on a pilot node, then
+   check:
+   - a `scanned` or `patched` record appears for the node (not `unknown`); this
+     shows association-launched commands resolve through `ssm:ListCommands`;
+   - a failure or cancellation case produces the expected `failed`,
+     `not-attempted` or `unknown` record;
+   - stdout correlation works in Splunk for two instances.
 
-To pause new SSM collection, set `rules_enabled=false`; accepted asynchronous
-invocations may still finish/retry. Keep canary/queues available. Package and log
-storage, requests and KMS can cost money while rules are dormant. Monitoring and
-notifications stay in the existing Splunk/operator workflow; queue contents need
-attention before their fourteen-day retention expires.
+To pause collection, set `rules_enabled=false`. Asynchronous invocations already
+accepted may still finish or retry. Package and log storage, requests and KMS
+usage can cost money while rules are dormant.
 
-## Compatibility and IAM ownership migration
+## Enabling the DLQ enhancement later
 
-The code was reported undeployed. The example includes two `moved` blocks in
-`moved.tf` for a prior same-state layout using `module.patch_outcome_account`:
+Uncomment every block marked `ENHANCEMENT (DLQ)`:
 
-| Previous resource address | New address |
-|---|---|
-| `module.patch_outcome_account.aws_iam_role.writer` | `module.primary.aws_iam_role.writer[0]` |
-| `module.patch_outcome_account.aws_iam_role_policy.writer` | `module.primary.aws_iam_role_policy.archive[0]` |
+- in `main.tf`: the two queue modules, the queue policy, `dead_letter_config`,
+  the `depends_on` entries and `destination_config`;
+- in `iam.tf`: the SQS statement;
+- in `outputs.tf`: the queue URLs.
 
-Names, role path, trust and common permissions are preserved by this refactor;
-regional runtime-policy addresses are unchanged. These blocks do nothing for a
-new deployment. For an existing deployment, retain a protected state backup and
-review a saved real-provider plan showing IAM moves with no role replacement or
-permission loss before applying. Adjust addresses for a differently named caller;
-these moves cannot migrate resources between different state files. Keep the
-primary provider mapped to the same member account. Mock tests do not validate
-migration against an actual deployed state.
+Then update the assertions in `tests/basic.tftest.hcl` that currently require
+no DLQ. This needs the shared `../Terrafrom-AWS-Prasanth/terraform-aws-sqs`
+module. Review the plan: it should show 3 additional resources and in-place
+updates to the targets, the invoke config and the runtime policy.
 
-Before any apply, rollback is reverting this refactor. After a same-state move
-has been applied, restore the prior code with reverse `moved` blocks in the root,
-then review a saved plan before applying; reverting files alone can propose a
-role replacement. Preserve the original state backup and reviewed plans for recovery.
+## Rollback
 
-Earlier single-region versions also differ in regional Lambda/package names and
-emit schema 1. Their state and downstream consumers require a separate migration
-review. SSM remains best effort with no reconciliation; do not claim complete
-inventory coverage or compliance from delivered events alone.
+Before apply, rollback is reverting the commit. The previous wrapper-module and
+AFT layout is recoverable from git history. To remove the POC:
+
+1. Run `terraform plan -destroy -out=destroy.tfplan` and review every resource
+   listed.
+2. Run `terraform apply destroy.tfplan`.
+
+The package bucket has `force_destroy=true`, and the central archive, key and
+policies are never managed here. Remove the merged statements from the central
+policies separately if they are no longer needed.
+
+SSM remains best effort with no reconciliation; do not claim complete inventory
+coverage or compliance from delivered events alone.

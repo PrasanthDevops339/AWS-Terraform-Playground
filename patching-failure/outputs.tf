@@ -17,12 +17,12 @@ output "lambda_function_name" {
 }
 
 output "writer_lambda_config" {
-  description = "Core configuration this module hands the shared terraform-aws-lambda module (runtime, handler, sizing, package type, environment). Exposed so callers and tests can assert on the function contract without reaching into the shared module's internals."
+  description = "Core configuration handed to the shared terraform-aws-lambda module, exposed so tests can assert on the function contract."
   value       = local.writer_lambda_config
 }
 
 output "lambda_package_bucket" {
-  description = "Name of the regional member-account S3 bucket holding the Lambda deployment zip."
+  description = "Name of the S3 bucket holding the Lambda deployment zip."
   value       = aws_s3_bucket.lambda_package.id
 }
 
@@ -32,20 +32,21 @@ output "lambda_log_group_name" {
 }
 
 output "writer_role_arn" {
-  description = "ARN of the created or reused Lambda execution role, including its path. Waits for common permissions before additional regions use it."
+  description = "ARN of the Lambda execution role, including its path."
   value       = local.writer_role_arn
   depends_on  = [aws_iam_role_policy.archive]
 }
 
-output "target_dlq_url" {
-  description = "URL of the queue that catches EventBridge-could-not-invoke-Lambda failures."
-  value       = module.target_dlq.queue_url
-}
-
-output "lambda_dlq_url" {
-  description = "URL of the queue that catches Lambda asynchronous failure invocation records, including exhausted retries and expired events."
-  value       = module.lambda_dlq.queue_url
-}
+# ENHANCEMENT (DLQ): uncomment with the queues in main.tf.
+# output "target_dlq_url" {
+#   description = "URL of the queue that catches EventBridge-could-not-invoke-Lambda failures."
+#   value       = module.target_dlq.queue_url
+# }
+#
+# output "lambda_dlq_url" {
+#   description = "URL of the queue that catches Lambda asynchronous failure invocation records."
+#   value       = module.lambda_dlq.queue_url
+# }
 
 output "archive_s3_destination" {
   description = "s3:// URI prefix this Lambda writes outcome records to."
@@ -53,15 +54,15 @@ output "archive_s3_destination" {
 }
 
 output "canary_command" {
-  description = "AWS CLI command to fire the canary event and prove end-to-end plumbing (Lambda, role, bucket policy, KMS grant) without impersonating a real SSM event."
+  description = "AWS CLI command to fire the canary event and prove end-to-end plumbing without impersonating a real SSM event."
   value = var.enable_canary ? (
     "aws events put-events --entries '[{\"Source\":\"custom.patch-canary\",\"DetailType\":\"canary\",\"Detail\":\"{}\"}]' --region ${local.region}"
   ) : null
 }
 
 output "central_prerequisites" {
-  description = "Resolved statements for the central owners to merge. The KMS statement is null for SSE-S3. Null when reusing a role. No central resources are managed here."
-  value = var.create_writer_role ? {
+  description = "Resolved statements for the central bucket/KMS owners to merge. The KMS statement is null for SSE-S3. No central resources are managed here."
+  value = {
     bucket_policy_statement = {
       Sid       = "AllowPatchOutcomeWritersFromOrg"
       Effect    = "Allow"
@@ -82,10 +83,5 @@ output "central_prerequisites" {
       Resource  = "*"
       Condition = local.central_condition
     }
-  } : null
-}
-
-output "writer_role_created" {
-  description = "Whether this deployment owns the shared Lambda execution role and common permissions."
-  value       = var.create_writer_role
+  }
 }

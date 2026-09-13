@@ -1,17 +1,13 @@
-data "aws_iam_account_alias" "current" {}
-data "aws_caller_identity" "current" {}
-data "aws_partition" "current" {}
-data "aws_region" "current" {}
-
 locals {
-  partition        = data.aws_partition.current.partition
-  region           = data.aws_region.current.region
-  account_id       = data.aws_caller_identity.current.account_id
-  account_alias    = data.aws_iam_account_alias.current.account_alias
-  lambda_name      = "${var.name_prefix}-${local.region}-writer"
-  function_name    = "${local.account_alias}-${local.lambda_name}"
-  writer_role_arn  = var.create_writer_role ? local.created_writer_role_arn : coalesce(var.writer_role_arn, "invalid")
-  writer_role_name = var.create_writer_role ? aws_iam_role.writer[0].name : element(reverse(split("/", coalesce(var.writer_role_arn, "invalid"))), 0)
+  partition     = data.aws_partition.current.partition
+  region        = data.aws_region.current.region
+  account_id    = data.aws_caller_identity.current.account_id
+  account_alias = data.aws_iam_account_alias.current.account_alias
+
+  # The shared Lambda module prefixes the account alias to lambda_name.
+  lambda_name   = "${var.name_prefix}-${local.region}-writer"
+  function_name = "${local.account_alias}-${local.lambda_name}"
+
   lambda_package_bucket = coalesce(
     var.lambda_package_bucket_name,
     "${var.name_prefix}-pkg-${local.account_id}-${local.region}",
@@ -33,7 +29,7 @@ locals {
   }
 
   # Configuration contract passed to the unchanged shared Lambda module.
-  # It is also exposed for callers and offline tests.
+  # It is also exposed as an output for offline tests.
   writer_lambda_config = {
     runtime       = "python3.13"
     handler       = "handler.handler"
@@ -47,7 +43,7 @@ locals {
 
     ephemeral_storage = 512
 
-    # AWS uses -1 for unreserved concurrency; map the wrapper null explicitly.
+    # AWS uses -1 for unreserved concurrency; map the null input explicitly.
     reserved_concurrent_executions = var.reserved_concurrency == null ? -1 : var.reserved_concurrency
 
     environment = {
@@ -62,8 +58,7 @@ locals {
   }
 
   # One Lambda permission per EventBridge rule (SSM rules + the canary). The
-  # shared module creates these from allowed_triggers -- EventBridge -> Lambda
-  # is a resource policy, not an IAM role.
+  # shared module creates these from allowed_triggers.
   allowed_triggers = merge(
     {
       for key, rule in aws_cloudwatch_event_rule.ssm : key => {
@@ -83,9 +78,8 @@ locals {
 }
 
 # --------------------------------------------------------------------------
-# Lambda deployment-package bucket -- one per member account and region. The shared
-# terraform-aws-lambda module deploys only from S3 or a container image; it
-# cannot take a local zip. This bucket holds that zip.
+# Lambda deployment-package bucket. The shared terraform-aws-lambda module
+# deploys only from S3 or a container image; this bucket holds the zip.
 # --------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "lambda_package" {
@@ -95,25 +89,19 @@ resource "aws_s3_bucket" "lambda_package" {
 
   lifecycle {
     precondition {
-      condition = length(local.account_alias) > 0 && length(local.function_name) <= 64 && alltrue([
-        for suffix in ["target-dlq", "lambda-dlq"] : length("${local.account_alias}-${var.name_prefix}-${suffix}") <= 80
-      ])
-      error_message = "The shared modules require an account alias; alias-prefixed Lambda/SQS names must fit 64/80 characters. Shorten name_prefix or the account alias."
+      condition     = length(local.account_alias) > 0 && length(local.function_name) <= 64
+      error_message = "The shared Lambda module requires an account alias, and the alias-prefixed function name must fit 64 characters. Shorten name_prefix or the account alias."
     }
     precondition {
       condition     = length(local.lambda_package_bucket) <= 63
-      error_message = "The region-specific package bucket name must fit 63 characters; shorten name_prefix or set lambda_package_bucket_name."
-    }
-    precondition {
-      condition     = startswith(local.writer_role_arn, "arn:${local.partition}:iam::${local.account_id}:role/")
-      error_message = "writer_role_arn must belong to this member account and partition."
+      error_message = "The package bucket name must fit 63 characters; shorten name_prefix or set lambda_package_bucket_name."
     }
     precondition {
       condition = alltrue([
         for key in [var.local_kms_key_arn, var.lambda_package_kms_key_arn] :
         key == null ? true : startswith(key, "arn:${local.partition}:kms:${local.region}:${local.account_id}:key/")
       ])
-      error_message = "Log and package keys must belong to this member account and region."
+      error_message = "Log and package keys must belong to this account and region."
     }
   }
 }
@@ -160,36 +148,11 @@ resource "aws_cloudwatch_log_group" "this" {
 }
 
 # --------------------------------------------------------------------------
-# Regional runtime permissions for the Lambda execution role
-# --------------------------------------------------------------------------
-
-# Every regional deployment adds its own policy to the shared execution role.
-resource "aws_iam_role_policy" "writer" {
-  name = "${var.name_prefix}-${local.region}-runtime"
-  role = local.writer_role_name
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid      = "Logs", Effect = "Allow"
-        Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
-        Resource = ["${aws_cloudwatch_log_group.this.arn}:*"]
-      },
-      {
-        Sid      = "LambdaFailureDestination", Effect = "Allow"
-        Action   = ["sqs:SendMessage"]
-        Resource = [module.lambda_dlq.queue_arn]
-      }
-    ]
-  })
-}
-
-# --------------------------------------------------------------------------
 # Lambda function -- sourced from the shared terraform-aws-lambda module.
 # --------------------------------------------------------------------------
 
 module "writer_lambda" {
-  source = "../../../Terrafrom-AWS-Prasanth/terraform-aws-lambda"
+  source = "../Terrafrom-AWS-Prasanth/terraform-aws-lambda"
 
   lambda_name        = local.lambda_name
   lambda_description = "Writes one patch-outcome record per SSM RunPatchBaseline terminal event to the central bucket."
@@ -206,8 +169,7 @@ module "writer_lambda" {
 
   environment = local.writer_lambda_config.environment
 
-  # Region-specific names also make local zip files unique. The shared module
-  # derives source_code_hash from the archive so code changes redeploy.
+  # The shared module zips src/ and derives source_code_hash so code changes redeploy.
   upload_to_s3       = true
   lambda_script_dir  = "${path.module}/src"
   lambda_bucket_name = aws_s3_bucket.lambda_package.id
@@ -219,7 +181,7 @@ module "writer_lambda" {
 
   depends_on = [
     aws_cloudwatch_log_group.this,
-    aws_iam_role_policy.writer,
+    aws_iam_role_policy.runtime,
     aws_iam_role_policy.archive,
     aws_s3_bucket_public_access_block.lambda_package,
     aws_s3_bucket_ownership_controls.lambda_package,
@@ -227,21 +189,26 @@ module "writer_lambda" {
   ]
 }
 
+# Async retries for function errors (e.g. S3 PutObject denied). Without the DLQ
+# enhancement, events that exhaust these retries are visible only in the Lambda
+# logs and the AsyncEventsDropped metric.
 resource "aws_lambda_function_event_invoke_config" "this" {
   function_name                = module.writer_lambda.lambda_name
   maximum_retry_attempts       = 2
   maximum_event_age_in_seconds = 21600
 
-  destination_config {
-    on_failure {
-      destination = module.lambda_dlq.queue_arn
-    }
-  }
+  # ENHANCEMENT (DLQ): uncomment to send failed async invocations to SQS.
+  # destination_config {
+  #   on_failure {
+  #     destination = module.lambda_dlq.queue_arn
+  #   }
+  # }
 }
 
 # --------------------------------------------------------------------------
 # EventBridge rules -- three SSM rules plus an optional canary, all on the
-# default bus (AWS service events are delivered there only).
+# default bus (AWS service events are delivered there only). Quick Setup patch
+# policies run AWS-RunPatchBaseline, which these patterns match by prefix.
 # --------------------------------------------------------------------------
 
 resource "aws_cloudwatch_event_rule" "ssm" {
@@ -268,15 +235,20 @@ resource "aws_cloudwatch_event_target" "ssm" {
   rule = aws_cloudwatch_event_rule.ssm[each.key].name
   arn  = module.writer_lambda.lambda_arn
 
-  dead_letter_config {
-    arn = module.target_dlq.queue_arn
-  }
+  # ENHANCEMENT (DLQ): uncomment to capture EventBridge delivery failures.
+  # dead_letter_config {
+  #   arn = module.target_dlq.queue_arn
+  # }
 
-  depends_on = [module.writer_lambda, aws_sqs_queue_policy.target_dlq, aws_lambda_function_event_invoke_config.this]
+  depends_on = [
+    module.writer_lambda,
+    aws_lambda_function_event_invoke_config.this,
+    # aws_sqs_queue_policy.target_dlq, # ENHANCEMENT (DLQ)
+  ]
 }
 
-# Canary -- always enabled, proves the plumbing without impersonating a real
-# SSM event (PutEvents rejects any source beginning with "aws.").
+# Canary -- proves the plumbing without impersonating a real SSM event
+# (PutEvents rejects any source beginning with "aws.").
 resource "aws_cloudwatch_event_rule" "canary" {
   count = var.enable_canary ? 1 : 0
 
@@ -297,61 +269,73 @@ resource "aws_cloudwatch_event_target" "canary" {
   rule = aws_cloudwatch_event_rule.canary[0].name
   arn  = module.writer_lambda.lambda_arn
 
-  dead_letter_config {
-    arn = module.target_dlq.queue_arn
-  }
+  # ENHANCEMENT (DLQ): uncomment to capture EventBridge delivery failures.
+  # dead_letter_config {
+  #   arn = module.target_dlq.queue_arn
+  # }
 
-  depends_on = [module.writer_lambda, aws_sqs_queue_policy.target_dlq, aws_lambda_function_event_invoke_config.this]
+  depends_on = [
+    module.writer_lambda,
+    aws_lambda_function_event_invoke_config.this,
+    # aws_sqs_queue_policy.target_dlq, # ENHANCEMENT (DLQ)
+  ]
 }
 
-# --------------------------------------------------------------------------
-# EventBridge target DLQ and Lambda async failure destination. Both queues
-# are sourced unchanged; operators use the central runbook for recovery.
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# ENHANCEMENT (disabled for POC): SQS dead-letter queues.
+#
+# To restore, uncomment:
+#   1. the two modules and the queue policy below,
+#   2. dead_letter_config + depends_on lines in both event targets,
+#   3. destination_config in aws_lambda_function_event_invoke_config.this,
+#   4. the LambdaFailureDestination statement in iam.tf,
+#   5. the target_dlq_url / lambda_dlq_url outputs in outputs.tf.
+# The shared SQS module prefixes the account alias; names must fit 80 chars.
+# ---------------------------------------------------------------------------
 
-module "target_dlq" {
-  source = "../../../Terrafrom-AWS-Prasanth/terraform-aws-sqs"
-
-  queue_name                = "${var.name_prefix}-target-dlq"
-  message_retention_seconds = 1209600
-
-  # Standalone queue, not a redrive target of a "main" queue.
-  enable_dlq = false
-
-  # The shared module's only built-in policy is a deny-non-TLS statement; the
-  # EventBridge allow-policy this queue needs is attached separately below.
-  enable_secure_transport = false
-
-  tags = var.tags
-}
-
-module "lambda_dlq" {
-  source = "../../../Terrafrom-AWS-Prasanth/terraform-aws-sqs"
-
-  queue_name                = "${var.name_prefix}-lambda-dlq"
-  message_retention_seconds = 1209600
-  enable_dlq                = false
-  enable_secure_transport   = false
-
-  tags = var.tags
-}
-
-resource "aws_sqs_queue_policy" "target_dlq" {
-  queue_url = module.target_dlq.queue_url
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Sid       = "AllowEventBridgeSend", Effect = "Allow"
-      Principal = { Service = "events.amazonaws.com" }
-      Action    = "sqs:SendMessage"
-      Resource  = module.target_dlq.queue_arn
-      Condition = {
-        ArnEquals = { "aws:SourceArn" = concat(
-          [for rule in aws_cloudwatch_event_rule.ssm : rule.arn],
-          var.enable_canary ? [aws_cloudwatch_event_rule.canary[0].arn] : [],
-        ) }
-        StringEquals = { "aws:SourceAccount" = local.account_id }
-      }
-    }]
-  })
-}
+# module "target_dlq" {
+#   source = "../Terrafrom-AWS-Prasanth/terraform-aws-sqs"
+#
+#   queue_name                = "${var.name_prefix}-target-dlq"
+#   message_retention_seconds = 1209600
+#
+#   # Standalone queue, not a redrive target of a "main" queue.
+#   enable_dlq = false
+#
+#   # The shared module's only built-in policy is a deny-non-TLS statement; the
+#   # EventBridge allow-policy this queue needs is attached separately below.
+#   enable_secure_transport = false
+#
+#   tags = var.tags
+# }
+#
+# module "lambda_dlq" {
+#   source = "../Terrafrom-AWS-Prasanth/terraform-aws-sqs"
+#
+#   queue_name                = "${var.name_prefix}-lambda-dlq"
+#   message_retention_seconds = 1209600
+#   enable_dlq                = false
+#   enable_secure_transport   = false
+#
+#   tags = var.tags
+# }
+#
+# resource "aws_sqs_queue_policy" "target_dlq" {
+#   queue_url = module.target_dlq.queue_url
+#   policy = jsonencode({
+#     Version = "2012-10-17"
+#     Statement = [{
+#       Sid       = "AllowEventBridgeSend", Effect = "Allow"
+#       Principal = { Service = "events.amazonaws.com" }
+#       Action    = "sqs:SendMessage"
+#       Resource  = module.target_dlq.queue_arn
+#       Condition = {
+#         ArnEquals = { "aws:SourceArn" = concat(
+#           [for rule in aws_cloudwatch_event_rule.ssm : rule.arn],
+#           var.enable_canary ? [aws_cloudwatch_event_rule.canary[0].arn] : [],
+#         ) }
+#         StringEquals = { "aws:SourceAccount" = local.account_id }
+#       }
+#     }]
+#   })
+# }

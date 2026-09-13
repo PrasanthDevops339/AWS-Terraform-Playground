@@ -1,8 +1,0 @@
-# Dummy values only. Use a separate AFT execution/state for each member account.
-member_account_id = "222233334444"
-organization_id = "o-example1234"
-archive_bucket_name = "central-patching-logs-111122223333"
-archive_kms_key_arn = "arn:aws:kms:us-east-1:111122223333:key/00000000-0000-0000-0000-000000000000"
-primary_region = "us-east-1"
-secondary_region = "us-west-2"
-rules_enabled = false

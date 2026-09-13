@@ -1,0 +1,16 @@
+# In TFE, set these as Terraform variables on the workspace (not env vars).
+# For a local CLI-driven run you can instead copy this file to terraform.tfvars
+# (gitignored). Replace every dummy value.
+account_id          = "222233334444"
+region              = "us-east-2"
+organization_id     = "o-example1234"
+archive_bucket_name = "central-patching-logs-111122223333"
+
+# Central CMK for SSE-KMS archives; leave null for SSE-S3.
+# archive_kms_key_arn = "arn:aws:kms:us-east-2:111122223333:key/00000000-0000-0000-0000-000000000000"
+
+# Keep SSM rules dormant until the canary record is found in S3 and Splunk.
+rules_enabled = false
+
+# Extra resource tags; the #finops/admin tags come from provider default_tags.
+tags = {}
